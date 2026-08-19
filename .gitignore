@@ -1,2 +1,5 @@
 # Local backups may contain credentials.
 .local-backups/
+.vscode/
+.codex/
+.agents/
