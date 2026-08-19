@@ -1,0 +1,20 @@
+image_width: 1024
+image_height: 768
+camera_name: ov9281_1024x768
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [741.49123, 0.0, 470.42089, 0.0, 741.29600, 351.84193, 0.0, 0.0, 1.0]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.105792, -0.145820, -0.000080, -0.001694, 0.0]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [741.49123, 0.0, 470.42089, 0.0, 0.0, 741.29600, 351.84193, 0.0, 0.0, 0.0, 1.0, 0.0]

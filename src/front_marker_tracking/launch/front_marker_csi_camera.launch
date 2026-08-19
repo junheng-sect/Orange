@@ -1,0 +1,52 @@
+<launch>
+  <arg name="device" default="/dev/video-camera0" />
+  <arg name="width" default="720" />
+  <arg name="height" default="576" />
+  <arg name="framerate" default="15" />
+  <arg name="frame_id" default="cam1_optical_frame" />
+  <arg name="camera_name" default="ov13855_cam1" />
+  <arg name="camera_info_url" default="" />
+  <arg name="image_topic" default="/cam1/image_raw" />
+  <arg name="camera_info_topic" default="/cam1/camera_info" />
+  <arg name="start_tracking_stack" default="true" />
+  <arg name="target_marker_id" default="33" />
+  <arg name="target_marker_size_m" default="0.193" />
+  <arg name="publish_annotated" default="true" />
+  <arg name="enable_yaw_control" default="false" />
+  <arg name="enable_setpoint_output" default="false" />
+
+  <node pkg="front_marker_tracking"
+        type="front_marker_csi_camera_node"
+        name="front_marker_csi_camera_node"
+        output="screen"
+        required="true">
+    <param name="device" value="$(arg device)" />
+    <param name="width" value="$(arg width)" />
+    <param name="height" value="$(arg height)" />
+    <param name="framerate" value="$(arg framerate)" />
+    <param name="frame_id" value="$(arg frame_id)" />
+    <param name="camera_name" value="$(arg camera_name)" />
+    <param name="camera_info_url" value="$(arg camera_info_url)" />
+    <param name="image_topic" value="$(arg image_topic)" />
+    <param name="camera_info_topic" value="$(arg camera_info_topic)" />
+  </node>
+
+  <!-- Default CAM1 entry point: detector plus PREVIEW_ONLY tracking. The USB
+       camera node stays disabled and the MAVROS setpoint publisher is disabled
+       unless a caller makes an explicit, visible override. -->
+  <include file="$(find front_marker_tracking)/launch/front_marker_tracking.launch"
+           if="$(arg start_tracking_stack)">
+    <arg name="use_usb_cam" value="false" />
+    <arg name="camera_frame_id" value="$(arg frame_id)" />
+    <arg name="image_width" value="$(arg width)" />
+    <arg name="image_height" value="$(arg height)" />
+    <arg name="framerate" value="$(arg framerate)" />
+    <arg name="image_topic" value="$(arg image_topic)" />
+    <arg name="camera_info_topic" value="$(arg camera_info_topic)" />
+    <arg name="target_marker_id" value="$(arg target_marker_id)" />
+    <arg name="target_marker_size_m" value="$(arg target_marker_size_m)" />
+    <arg name="publish_annotated" value="$(arg publish_annotated)" />
+    <arg name="enable_yaw_control" value="$(arg enable_yaw_control)" />
+    <arg name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
+  </include>
+</launch>

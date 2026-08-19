@@ -1,0 +1,71 @@
+<launch>
+  <!-- LEGACY: calibrated 640x768 front/right algorithm A/B; not used by the
+       default USB-camera tracking launch. -->
+  <arg name="duration_sec" default="60.0" />
+  <arg name="publish_annotated" default="false" />
+  <arg name="annotated_rate_hz" default="2.0" />
+
+  <!-- Baseline reproduces the pre-change right-camera pipeline. -->
+  <node pkg="front_marker_tracking"
+        type="front_marker_detector_node"
+        name="front_marker_right_baseline"
+        clear_params="true"
+        output="screen">
+    <param name="image_topic" value="/front/right/image_raw" />
+    <param name="camera_info_topic" value="/front/right/camera_info" />
+    <param name="transform_topic" value="/front_marker_tracking/ab/right/baseline/transform" />
+    <param name="annotated_image_topic" value="/front_marker_tracking/ab/right/baseline/image_annotated" />
+    <param name="status_topic" value="/front_marker_tracking/ab/right/baseline/status" />
+    <param name="aruco_dictionary" value="DICT_5X5_1000" />
+    <param name="target_marker_id" value="33" />
+    <param name="target_marker_size_m" value="0.193" />
+    <param name="expected_image_width" value="640" />
+    <param name="expected_image_height" value="768" />
+    <param name="expected_camera_frame" value="cam1" />
+    <param name="enable_contour_gate" value="false" />
+    <param name="corner_refinement_method" value="NONE" />
+    <param name="pose_solver" value="LEGACY" />
+    <param name="publish_annotated" value="$(arg publish_annotated)" />
+    <param name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
+  </node>
+
+  <!-- Improved right-camera pipeline under test. -->
+  <node pkg="front_marker_tracking"
+        type="front_marker_detector_node"
+        name="front_marker_right_improved"
+        clear_params="true"
+        output="screen">
+    <param name="image_topic" value="/front/right/image_raw" />
+    <param name="camera_info_topic" value="/front/right/camera_info" />
+    <param name="transform_topic" value="/front_marker_tracking/ab/right/improved/transform" />
+    <param name="annotated_image_topic" value="/front_marker_tracking/ab/right/improved/image_annotated" />
+    <param name="status_topic" value="/front_marker_tracking/ab/right/improved/status" />
+    <param name="aruco_dictionary" value="DICT_5X5_1000" />
+    <param name="target_marker_id" value="33" />
+    <param name="target_marker_size_m" value="0.193" />
+    <param name="expected_image_width" value="640" />
+    <param name="expected_image_height" value="768" />
+    <param name="expected_camera_frame" value="cam1" />
+    <param name="enable_contour_gate" value="true" />
+    <param name="corner_refinement_method" value="SUBPIX" />
+    <param name="pose_solver" value="IPPE_SQUARE" />
+    <param name="publish_annotated" value="$(arg publish_annotated)" />
+    <param name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
+  </node>
+
+  <node pkg="front_marker_tracking"
+        type="front_marker_ab_report.py"
+        name="front_marker_right_ab_report"
+        output="screen">
+    <param name="duration_sec" value="$(arg duration_sec)" />
+    <param name="image_topic" value="/front/right/image_raw" />
+    <param name="baseline_transform_topic" value="/front_marker_tracking/ab/right/baseline/transform" />
+    <param name="improved_transform_topic" value="/front_marker_tracking/ab/right/improved/transform" />
+    <param name="baseline_status_topic" value="/front_marker_tracking/ab/right/baseline/status" />
+    <param name="improved_status_topic" value="/front_marker_tracking/ab/right/improved/status" />
+    <param name="baseline_diagnostic_topic" value="/front_marker_right_baseline/diagnostic" />
+    <param name="improved_diagnostic_topic" value="/front_marker_right_improved/diagnostic" />
+    <param name="baseline_processing_topic" value="/front_marker_right_baseline/processing_time_ms" />
+    <param name="improved_processing_topic" value="/front_marker_right_improved/processing_time_ms" />
+  </node>
+</launch>

@@ -1,0 +1,146 @@
+<launch>
+  <arg name="node_namespace" default="/" />
+  <arg name="use_usb_cam" default="true" />
+  <arg name="video_device" default="/dev/v4l/by-id/usb-DECXIN_CAMERA_DECXIN_CAMERA_01.00.00-video-index0" />
+  <arg name="camera_name" default="ov9281_640x480" />
+  <arg name="camera_info_url" default="file://$(find front_marker_tracking)/config/ov9281_640x480.yaml" />
+  <arg name="camera_frame_id" default="usb_camera_optical_frame" />
+  <arg name="image_width" default="640" />
+  <arg name="image_height" default="480" />
+  <arg name="pixel_format" default="mjpeg" />
+  <arg name="framerate" default="30.0" />
+  <arg name="usb_cam_output" default="log" />
+  <arg name="image_topic" default="/usb_cam/image_raw" />
+  <arg name="camera_info_topic" default="/usb_cam/camera_info" />
+  <arg name="transform_topic" default="/front_marker_tracking/transform" />
+  <arg name="annotated_image_topic" default="/front_marker_tracking/image_annotated" />
+  <arg name="detector_status_topic" default="/front_marker_tracking/detector_status" />
+  <arg name="setpoint_preview_topic" default="/front_marker_tracking/setpoint_preview" />
+  <arg name="aruco_dictionary" default="DICT_5X5_1000" />
+  <arg name="target_marker_id" default="33" />
+  <arg name="target_marker_size_m" default="0.070" />
+  <arg name="target_body_x" default="0.8" />
+  <arg name="target_body_y" default="0.0" />
+  <arg name="target_body_z" default="0.0" />
+  <arg name="kp_x" default="0.5" />
+  <arg name="ki_x" default="0.0" />
+  <arg name="kd_x" default="0.03" />
+  <arg name="kp_yz" default="0.6" />
+  <arg name="ki_yz" default="0.0" />
+  <arg name="kd_yz" default="0.08" />
+  <arg name="kp_yaw" default="0.4" />
+  <arg name="ki_yaw" default="0.0" />
+  <arg name="kd_yaw" default="0.0" />
+  <arg name="yaw_lpf_tau" default="0.10" />
+  <arg name="v_limit" default="0.8" />
+  <arg name="vx_limit" default="0.2" />
+  <arg name="yaw_rate_limit" default="0.8" />
+  <arg name="velocity_deadband" default="0.03" />
+  <arg name="z_error_deadband" default="0.04" />
+  <arg name="yaw_error_deadband" default="0.06" />
+  <arg name="enable_yaw_control" default="false" />
+  <arg name="setpoint_publish_rate_hz" default="20.0" />
+  <!-- Rejected compatibility traps: roslaunch otherwise silently accepts
+       unknown command-line arg assignments without forwarding them. -->
+  <arg name="kp_xy" default="__UNSET__" />
+  <arg name="ki_xy" default="__UNSET__" />
+  <arg name="kd_xy" default="__UNSET__" />
+  <arg name="kp_z" default="__UNSET__" />
+  <arg name="ki_z" default="__UNSET__" />
+  <arg name="kd_z" default="__UNSET__" />
+  <arg name="max_linear_speed" default="__UNSET__" />
+  <arg name="max_yaw_rate" default="__UNSET__" />
+  <arg name="yaw_rate_deadband" default="__UNSET__" />
+  <arg name="control_rate_hz" default="__UNSET__" />
+  <arg name="publish_annotated" default="false" />
+  <arg name="annotated_rate_hz" default="5.0" />
+  <arg name="enable_setpoint_output" default="false" />
+
+  <group ns="$(arg node_namespace)">
+  <node pkg="usb_cam"
+        type="usb_cam_node"
+        name="usb_cam"
+        output="$(arg usb_cam_output)"
+        if="$(arg use_usb_cam)">
+    <param name="video_device" value="$(arg video_device)" />
+    <param name="image_width" value="$(arg image_width)" />
+    <param name="image_height" value="$(arg image_height)" />
+    <param name="pixel_format" value="$(arg pixel_format)" />
+    <param name="framerate" value="$(arg framerate)" />
+    <param name="io_method" value="mmap" />
+    <param name="camera_frame_id" value="$(arg camera_frame_id)" />
+    <param name="camera_name" value="$(arg camera_name)" />
+    <param name="camera_info_url" value="$(arg camera_info_url)" />
+    <remap from="~image_raw" to="$(arg image_topic)" />
+    <remap from="~camera_info" to="$(arg camera_info_topic)" />
+  </node>
+
+  <node pkg="front_marker_tracking"
+        type="front_marker_detector_node"
+        name="front_marker_detector_node"
+        output="screen">
+    <param name="image_topic" value="$(arg image_topic)" />
+    <param name="camera_info_topic" value="$(arg camera_info_topic)" />
+    <param name="transform_topic" value="$(arg transform_topic)" />
+    <param name="annotated_image_topic" value="$(arg annotated_image_topic)" />
+    <param name="status_topic" value="$(arg detector_status_topic)" />
+    <param name="aruco_dictionary" value="$(arg aruco_dictionary)" />
+    <param name="target_marker_id" value="$(arg target_marker_id)" />
+    <param name="target_marker_size_m" value="$(arg target_marker_size_m)" />
+    <param name="expected_image_width" value="$(arg image_width)" />
+    <param name="expected_image_height" value="$(arg image_height)" />
+    <param name="expected_camera_frame" value="$(arg camera_frame_id)" />
+    <param name="enable_contour_gate" value="true" />
+    <param name="corner_refinement_method" value="NONE" />
+    <param name="pose_solver" value="LEGACY" />
+    <param name="publish_annotated" value="$(arg publish_annotated)" />
+    <param name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
+  </node>
+
+  <!-- No measured cam-IMU transform is started in the USB-camera default. -->
+  <node pkg="front_marker_tracking"
+        type="front_marker_tracking_node"
+        name="front_marker_tracking_node"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(find front_marker_tracking)/config/front_usb_camera_aligned.yaml" />
+    <rosparam param="target_xyz_body" subst_value="true">[$(arg target_body_x), $(arg target_body_y), $(arg target_body_z)]</rosparam>
+    <param name="transform_topic" value="$(arg transform_topic)" />
+    <param name="state_topic" value="/mavros/state" />
+    <param name="setpoint_raw_topic" value="/mavros/setpoint_raw/local" />
+    <param name="setpoint_preview_topic" value="$(arg setpoint_preview_topic)" />
+    <param name="base_frame" value="base_link" />
+    <param name="camera_optical_frame" value="$(arg camera_frame_id)" />
+    <param name="target_marker_id" value="$(arg target_marker_id)" />
+    <param name="kp_x" value="$(arg kp_x)" />
+    <param name="ki_x" value="$(arg ki_x)" />
+    <param name="kd_x" value="$(arg kd_x)" />
+    <param name="kp_yz" value="$(arg kp_yz)" />
+    <param name="ki_yz" value="$(arg ki_yz)" />
+    <param name="kd_yz" value="$(arg kd_yz)" />
+    <param name="kp_yaw" value="$(arg kp_yaw)" />
+    <param name="ki_yaw" value="$(arg ki_yaw)" />
+    <param name="kd_yaw" value="$(arg kd_yaw)" />
+    <param name="yaw_lpf_tau" value="$(arg yaw_lpf_tau)" />
+    <param name="v_limit" value="$(arg v_limit)" />
+    <param name="vx_limit" value="$(arg vx_limit)" />
+    <param name="yaw_rate_limit" value="$(arg yaw_rate_limit)" />
+    <param name="velocity_deadband" value="$(arg velocity_deadband)" />
+    <param name="z_error_deadband" value="$(arg z_error_deadband)" />
+    <param name="yaw_error_deadband" value="$(arg yaw_error_deadband)" />
+    <param name="enable_yaw_control" value="$(arg enable_yaw_control)" />
+    <param name="setpoint_publish_rate_hz" value="$(arg setpoint_publish_rate_hz)" />
+    <param name="kp_xy" value="$(arg kp_xy)" />
+    <param name="ki_xy" value="$(arg ki_xy)" />
+    <param name="kd_xy" value="$(arg kd_xy)" />
+    <param name="kp_z" value="$(arg kp_z)" />
+    <param name="ki_z" value="$(arg ki_z)" />
+    <param name="kd_z" value="$(arg kd_z)" />
+    <param name="max_linear_speed" value="$(arg max_linear_speed)" />
+    <param name="max_yaw_rate" value="$(arg max_yaw_rate)" />
+    <param name="yaw_rate_deadband" value="$(arg yaw_rate_deadband)" />
+    <param name="control_rate_hz" value="$(arg control_rate_hz)" />
+    <param name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
+  </node>
+  </group>
+</launch>

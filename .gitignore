@@ -1,0 +1,2 @@
+# Local backups may contain credentials.
+.local-backups/
