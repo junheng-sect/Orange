@@ -4,3 +4,5 @@
 .codex/
 .agents/
 OrangePi_5_Max_RK3588_用户手册_v1.3.pdf
+logs/
+.catkin_tools/

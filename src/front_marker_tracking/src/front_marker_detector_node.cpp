@@ -62,7 +62,7 @@ public:
     const ros::TransportHints transport_hints = ros::TransportHints().tcpNoDelay();
     image_sub_ = nh_.subscribe(image_topic_, 1, &FrontMarkerDetectorNode::imageCallback, this, transport_hints);
     camera_info_sub_ = nh_.subscribe(
-      camera_info_topic_, 1, &FrontMarkerDetectorNode::cameraInfoCallback, this, transport_hints);
+      camera_info_topic_, 1, &FrontMarkerDetectorNode::cameraInfoCallback, this);
 
     publishStatus("WAIT_CAMERA_INFO: waiting for " + camera_info_topic_, true);
     ROS_INFO_STREAM("front_marker_detector_node started | image=" << image_topic_
