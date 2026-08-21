@@ -1,3 +1,8 @@
+# 下一步修改计划
+
+## 图像处理减负。
+目前是灰度图像和彩色图像都30fps，有两个图像的通道。后续可以压缩成一个
+
 # front_marker_tracking（ROS Noetic USB/CSI 实机版）
 
 该包保留 SEEKER 上正装朝前的 DECXIN/OV9281 USB 相机链路，并为 Orange Pi 5 Max
