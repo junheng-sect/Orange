@@ -11,6 +11,7 @@
 #include <cv_bridge/cv_bridge.h>
 #include <front_marker_vision/HomogeneousTransform.h>
 #include <front_marker_vision/marker_pose_estimator.hpp>
+#include <front_marker_vision/roi_tracker.hpp>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <opencv2/aruco.hpp>
@@ -119,6 +120,7 @@ public:
     , pnh_("~")
   {
     loadParameters();
+    roi_tracker_.setEnabled(enable_roi_);
     configureDictionary();
 
     pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>(pose_topic_, 1);
@@ -144,6 +146,7 @@ public:
                     << " | target=ID" << target_marker_id_
                     << " size=" << target_marker_size_m_ << "m"
                     << " | contour_gate=" << (enable_contour_gate_ ? "true" : "false")
+                    << " | roi=" << (enable_roi_ ? "adaptive" : "full-frame")
                     << " | solver=" << pose_solver_
                     << " | marker_tf=" << (publish_marker_tf_ ? marker_frame_ : "disabled")
                     << " | annotated=" << (publish_annotated_ ? "true" : "false"));
@@ -173,6 +176,7 @@ private:
     pnh_.param("publish_annotated", publish_annotated_, true);
     pnh_.param("annotated_rate_hz", annotated_rate_hz_, 5.0);
     pnh_.param("enable_contour_gate", enable_contour_gate_, true);
+    pnh_.param("enable_roi", enable_roi_, true);
     pnh_.param<std::string>("pose_solver", pose_solver_, "IPPE_SQUARE");
     pnh_.param("min_edge_length_px", contour_options_.min_edge_length_px, 12.0);
     pnh_.param("edge_sample_offset_ratio", contour_options_.edge_sample_offset_ratio, 0.025);
@@ -378,28 +382,45 @@ private:
     }
     catch (const cv_bridge::Exception& exception)
     {
+      roi_tracker_.reset();
       publishStatus(std::string("IMAGE_CONVERSION_ERROR: ") + exception.what());
       publishProcessingTime(processing_start);
       return;
     }
 
+    const cv::Size image_size = gray_image.size();
+    const cv::Rect full_frame(0, 0, image_size.width, image_size.height);
     if (has_camera_info_ &&
         (static_cast<uint32_t>(gray_image.cols) != camera_info_width_ ||
          static_cast<uint32_t>(gray_image.rows) != camera_info_height_))
     {
+      roi_tracker_.reset();
       std::ostringstream status;
       status << "IMAGE_CAMERA_INFO_SIZE_MISMATCH: image=" << gray_image.cols << "x"
              << gray_image.rows << " camera_info=" << camera_info_width_ << "x"
              << camera_info_height_;
-      publishStatus(status.str());
-      publishAnnotatedImage(message, gray_image, {}, {}, -1, nullptr, nullptr, status.str());
+      const std::string status_text = appendRoiStatus(status.str(), full_frame, image_size);
+      publishStatus(status_text);
+      publishAnnotatedImage(
+        message, gray_image, {}, {}, -1, nullptr, nullptr, full_frame, status_text);
       publishProcessingTime(processing_start);
       return;
     }
 
+    cv::Rect search_rect = roi_tracker_.searchRect(image_size);
+    if (search_rect.width <= 0 || search_rect.height <= 0 ||
+        (search_rect & full_frame) != search_rect)
+    {
+      roi_tracker_.reset();
+      search_rect = full_frame;
+    }
+
     std::vector<int> ids;
     std::vector<std::vector<cv::Point2f>> corners;
-    cv::aruco::detectMarkers(gray_image, dictionary_, corners, ids, detector_parameters_);
+    cv::aruco::detectMarkers(
+      gray_image(search_rect), dictionary_, corners, ids, detector_parameters_);
+    front_marker_vision::offsetMarkerCorners(
+      corners, cv::Point2f(static_cast<float>(search_rect.x), static_cast<float>(search_rect.y)));
 
     int selected_index = -1;
     for (size_t index = 0; index < ids.size(); ++index)
@@ -411,12 +432,41 @@ private:
       }
     }
 
+    front_marker_vision::ContourMetrics contour_metrics;
+    std::string contour_rejection_reason;
+    bool contour_accepted = selected_index >= 0;
+    if (selected_index >= 0)
+    {
+      ++marker_count_;
+      if (enable_contour_gate_ && !front_marker_vision::evaluateMarkerContour(
+          gray_image,
+          corners[static_cast<size_t>(selected_index)],
+          contour_options_,
+          contour_metrics,
+          contour_rejection_reason))
+      {
+        contour_accepted = false;
+      }
+    }
+
+    if (contour_accepted)
+    {
+      if (!roi_tracker_.updateTarget(
+          corners[static_cast<size_t>(selected_index)], image_size))
+      {
+        roi_tracker_.updateMiss(image_size);
+      }
+    }
+    else
+    {
+      roi_tracker_.updateMiss(image_size);
+    }
+
     if (!has_camera_info_)
     {
       std::ostringstream stream;
       if (selected_index >= 0)
       {
-        ++marker_count_;
         stream << "DETECTED_2D: ID" << target_marker_id_;
       }
       else
@@ -425,28 +475,30 @@ private:
       }
       stream << " | POSE_DISABLED: "
              << (camera_info_error_.empty() ? "waiting for CameraInfo" : camera_info_error_);
-      const std::string status = stream.str();
+      const std::string status = appendRoiStatus(stream.str(), search_rect, image_size);
       publishStatus(status);
       publishAnnotatedImage(
-        message, gray_image, corners, ids, selected_index, nullptr, nullptr, status);
+        message, gray_image, corners, ids, selected_index, nullptr, nullptr, search_rect, status);
       publishProcessingTime(processing_start);
       return;
     }
     if (message->header.frame_id.empty())
     {
-      const std::string status = "INVALID_IMAGE_FRAME: frame_id must not be empty";
+      const std::string status = appendRoiStatus(
+        "INVALID_IMAGE_FRAME: frame_id must not be empty", search_rect, image_size);
       publishStatus(status);
       publishAnnotatedImage(
-        message, gray_image, corners, ids, selected_index, nullptr, nullptr, status);
+        message, gray_image, corners, ids, selected_index, nullptr, nullptr, search_rect, status);
       publishProcessingTime(processing_start);
       return;
     }
     if (camera_info_frame_ != message->header.frame_id)
     {
-      const std::string status = "FRAME_MISMATCH: image and CameraInfo frame_id differ";
+      const std::string status = appendRoiStatus(
+        "FRAME_MISMATCH: image and CameraInfo frame_id differ", search_rect, image_size);
       publishStatus(status);
       publishAnnotatedImage(
-        message, gray_image, corners, ids, selected_index, nullptr, nullptr, status);
+        message, gray_image, corners, ids, selected_index, nullptr, nullptr, search_rect, status);
       publishProcessingTime(processing_start);
       return;
     }
@@ -463,23 +515,17 @@ private:
     }
     else
     {
-      ++marker_count_;
       const std::vector<cv::Point2f>& working_corners =
         corners[static_cast<size_t>(selected_index)];
-      front_marker_vision::ContourMetrics contour_metrics;
       double reprojection_error_px = 0.0;
       int ippe_candidate_count = 0;
       std::string rejection_reason;
       std::string rejection_stage;
 
-      if (enable_contour_gate_ && !front_marker_vision::evaluateMarkerContour(
-          gray_image,
-          working_corners,
-          contour_options_,
-          contour_metrics,
-          rejection_reason))
+      if (!contour_accepted)
       {
         rejection_stage = "CONTOUR";
+        rejection_reason = contour_rejection_reason;
       }
 
       if (rejection_stage.empty() && pose_solver_ == "IPPE_SQUARE")
@@ -588,11 +634,39 @@ private:
       }
     }
 
+    status = appendRoiStatus(status, search_rect, image_size);
     publishStatus(status);
     publishAnnotatedImage(
       message, gray_image, corners, ids, selected_index,
-      pose_valid ? &rvec : nullptr, pose_valid ? &tvec : nullptr, status);
+      pose_valid ? &rvec : nullptr, pose_valid ? &tvec : nullptr, search_rect, status);
     publishProcessingTime(processing_start);
+  }
+
+  std::string appendRoiStatus(
+    const std::string& status, const cv::Rect& search_rect, const cv::Size& image_size) const
+  {
+    std::ostringstream stream;
+    stream << status << " | roi=";
+    const cv::Rect full_frame(0, 0, image_size.width, image_size.height);
+    if (search_rect == full_frame)
+    {
+      stream << "FULL";
+      if (!enable_roi_)
+      {
+        stream << " disabled";
+      }
+    }
+    else
+    {
+      stream << search_rect.x << "," << search_rect.y << ","
+             << search_rect.width << "x" << search_rect.height;
+    }
+    stream << " miss=" << roi_tracker_.missCount();
+    if (enable_roi_ && search_rect != full_frame && !roi_tracker_.active())
+    {
+      stream << " next=FULL";
+    }
+    return stream.str();
   }
 
   void publishProcessingTime(const ros::WallTime& start)
@@ -683,6 +757,7 @@ private:
     int selected_index,
     const cv::Vec3d* rvec,
     const cv::Vec3d* tvec,
+    const cv::Rect& search_rect,
     const std::string& status)
   {
     if (annotated_pub_.getNumSubscribers() == 0)
@@ -727,6 +802,18 @@ private:
     {
       cv::aruco::drawAxis(
         annotated, camera_matrix_, dist_coeffs_, *rvec, *tvec, target_marker_size_m_ * 0.5);
+    }
+    const cv::Rect full_frame(0, 0, annotated.cols, annotated.rows);
+    if (enable_roi_ && search_rect != full_frame)
+    {
+      cv::rectangle(annotated, search_rect, cv::Scalar(0, 255, 255), 2);
+      std::ostringstream roi_label;
+      roi_label << "ROI " << search_rect.width << "x" << search_rect.height
+                << " miss=" << roi_tracker_.missCount();
+      cv::putText(
+        annotated, roi_label.str(),
+        cv::Point(search_rect.x + 4, std::max(18, search_rect.y + 18)),
+        cv::FONT_HERSHEY_SIMPLEX, 0.48, cv::Scalar(0, 255, 255), 1);
     }
 
     std::ostringstream summary;
@@ -792,6 +879,7 @@ private:
   bool publish_annotated_ = true;
   double annotated_rate_hz_ = 5.0;
   bool enable_contour_gate_ = true;
+  bool enable_roi_ = true;
   std::string pose_solver_ = "IPPE_SQUARE";
   front_marker_vision::ContourGateOptions contour_options_;
   double ippe_ambiguity_gap_px_ = 0.2;
@@ -806,6 +894,7 @@ private:
   bool has_previous_pose_ = false;
   front_marker_vision::PoseSolution previous_pose_;
   ros::Time previous_pose_stamp_;
+  front_marker_vision::RoiTracker roi_tracker_;
 
   ros::Time last_annotated_time_;
   ros::Time last_status_time_;

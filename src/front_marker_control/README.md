@@ -19,13 +19,17 @@ roslaunch front_marker_control front_marker_tracking.launch
 ```
 
 完整入口默认令 OV9281 保持 MJPEG 采集，同时将解码后的 raw 图像发布为 `mono8`，避免
-Marker 检测前的 RGB 中间图；位姿求解默认使用 `IPPE_SQUARE`，角点亚像素优化仍关闭。
-可用 `camera_output_encoding:=rgb8` 或 `pose_solver:=LEGACY` 分别恢复对应兼容模式：
+Marker 检测前的 RGB 中间图；位姿求解默认使用 `IPPE_SQUARE`，角点亚像素优化仍关闭，
+并默认启用 ID33 自适应 ROI。可用 `camera_output_encoding:=rgb8`、
+`pose_solver:=LEGACY` 或 `enable_roi:=false` 分别恢复对应兼容模式：
 
 ```bash
 roslaunch front_marker_control front_marker_tracking.launch \
-  camera_output_encoding:=rgb8 pose_solver:=LEGACY
+  camera_output_encoding:=rgb8 pose_solver:=LEGACY enable_roi:=false
 ```
+
+ROI 只缩小 ArUco 检测输入，不裁剪相机 raw/compressed 或标注图；连续 3 帧丢失目标后
+会自动回到全图搜索。
 
 相机静态外参也可单独启动，供只运行检测与可视化的场景复用：
 

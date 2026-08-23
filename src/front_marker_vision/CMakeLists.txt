@@ -28,7 +28,7 @@ generate_messages(DEPENDENCIES std_msgs)
 
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES front_marker_vision_pose_estimator
+  LIBRARIES front_marker_vision_pose_estimator front_marker_vision_roi_tracker
   CATKIN_DEPENDS
     cv_bridge
     geometry_msgs
@@ -57,6 +57,18 @@ target_link_libraries(front_marker_vision_pose_estimator
   ${OpenCV_LIBRARIES}
 )
 
+add_library(front_marker_vision_roi_tracker
+  src/roi_tracker.cpp
+)
+add_dependencies(front_marker_vision_roi_tracker
+  ${${PROJECT_NAME}_EXPORTED_TARGETS}
+  ${catkin_EXPORTED_TARGETS}
+)
+target_link_libraries(front_marker_vision_roi_tracker
+  ${catkin_LIBRARIES}
+  ${OpenCV_LIBRARIES}
+)
+
 add_executable(front_marker_vision_node
   src/front_marker_vision_node.cpp
 )
@@ -66,12 +78,13 @@ add_dependencies(front_marker_vision_node
 )
 target_link_libraries(front_marker_vision_node
   front_marker_vision_pose_estimator
+  front_marker_vision_roi_tracker
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
 )
 
 install(
-  TARGETS front_marker_vision_node front_marker_vision_pose_estimator
+  TARGETS front_marker_vision_node front_marker_vision_pose_estimator front_marker_vision_roi_tracker
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
@@ -99,6 +112,15 @@ if(CATKIN_ENABLE_TESTING)
       ${OpenCV_LIBRARIES}
     )
   endif()
+  catkin_add_gtest(test_roi_tracker test/test_roi_tracker.cpp)
+  if(TARGET test_roi_tracker)
+    target_link_libraries(test_roi_tracker
+      front_marker_vision_roi_tracker
+      ${catkin_LIBRARIES}
+      ${OpenCV_LIBRARIES}
+    )
+  endif()
   add_rostest(test/test_rejected_frame_no_publish.test)
   add_rostest(test/test_marker_tf_publication.test)
+  add_rostest(test/test_roi_tracking.test)
 endif()

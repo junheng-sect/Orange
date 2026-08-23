@@ -1,0 +1,51 @@
+<launch>
+  <node pkg="front_marker_vision"
+        type="front_marker_vision_node"
+        name="front_marker_roi_enabled_test_vision"
+        clear_params="true"
+        output="screen">
+    <param name="image_topic" value="/test_roi/image" />
+    <param name="camera_info_topic" value="/test_roi/camera_info" />
+    <param name="pose_topic" value="/test_roi/enabled/pose" />
+    <param name="transform_debug_topic" value="/test_roi/enabled/transform" />
+    <param name="processing_time_topic" value="/test_roi/enabled/processing" />
+    <param name="annotated_image_topic" value="/test_roi/enabled/annotated" />
+    <param name="status_topic" value="/test_roi/enabled/status" />
+    <param name="aruco_dictionary" value="DICT_5X5_1000" />
+    <param name="target_marker_id" value="33" />
+    <param name="target_marker_size_m" value="0.070" />
+    <param name="publish_marker_tf" value="false" />
+    <param name="enable_contour_gate" value="true" />
+    <param name="enable_roi" value="true" />
+    <param name="pose_solver" value="LEGACY" />
+    <param name="publish_annotated" value="true" />
+    <param name="annotated_rate_hz" value="0.0" />
+  </node>
+
+  <node pkg="front_marker_vision"
+        type="front_marker_vision_node"
+        name="front_marker_roi_disabled_test_vision"
+        clear_params="true"
+        output="log">
+    <param name="image_topic" value="/test_roi/image" />
+    <param name="camera_info_topic" value="/test_roi/camera_info" />
+    <param name="pose_topic" value="/test_roi/disabled/pose" />
+    <param name="transform_debug_topic" value="/test_roi/disabled/transform" />
+    <param name="processing_time_topic" value="/test_roi/disabled/processing" />
+    <param name="annotated_image_topic" value="/test_roi/disabled/annotated" />
+    <param name="status_topic" value="/test_roi/disabled/status" />
+    <param name="aruco_dictionary" value="DICT_5X5_1000" />
+    <param name="target_marker_id" value="33" />
+    <param name="target_marker_size_m" value="0.070" />
+    <param name="publish_marker_tf" value="false" />
+    <param name="enable_contour_gate" value="true" />
+    <param name="enable_roi" value="false" />
+    <param name="pose_solver" value="LEGACY" />
+    <param name="publish_annotated" value="false" />
+  </node>
+
+  <test test-name="roi_tracking"
+        pkg="front_marker_vision"
+        type="test_roi_tracking.py"
+        time-limit="25.0" />
+</launch>
