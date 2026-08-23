@@ -90,7 +90,7 @@ private:
     pnh_.param<std::string>(
       "expected_camera_frame", expected_camera_frame_, "usb_camera_optical_frame");
     pnh_.param("target_marker_id", target_marker_id_, 33);
-    pnh_.param("target_marker_size_m", target_marker_size_m_, 0.193);
+    pnh_.param("target_marker_size_m", target_marker_size_m_, 0.070);
     pnh_.param("expected_image_width", expected_image_width_, 640);
     pnh_.param("expected_image_height", expected_image_height_, 480);
     pnh_.param("publish_annotated", publish_annotated_, false);
@@ -697,7 +697,7 @@ private:
   std::string camera_info_frame_;
   std::string camera_info_error_;
   int target_marker_id_ = 33;
-  double target_marker_size_m_ = 0.193;
+  double target_marker_size_m_ = 0.070;
   int expected_image_width_ = 640;
   int expected_image_height_ = 480;
   bool publish_annotated_ = false;

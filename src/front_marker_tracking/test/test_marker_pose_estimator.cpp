@@ -106,7 +106,7 @@ TEST(MarkerSubpixel, RefinesCornersAndHonorsMaximumShift)
 
 TEST(MarkerIppe, RecoversKnownFrontFacingPose)
 {
-  constexpr double marker_size = 0.193;
+  constexpr double marker_size = 0.070;
   const cv::Vec3d expected_rvec(M_PI, 0.0, 0.0);
   const cv::Vec3d expected_tvec(0.02, 0.03, 0.70);
   std::vector<cv::Point2f> corners;
@@ -135,7 +135,7 @@ TEST(MarkerIppe, RecoversKnownFrontFacingPose)
 
 TEST(MarkerIppe, RejectsReprojectionErrorAboveThreshold)
 {
-  constexpr double marker_size = 0.193;
+  constexpr double marker_size = 0.070;
   std::vector<cv::Point2f> corners;
   cv::projectPoints(
     objectPoints(marker_size), cv::Vec3d(M_PI, 0.1, -0.05), cv::Vec3d(0.02, 0.01, 0.7),
@@ -160,7 +160,7 @@ TEST(MarkerIppe, RejectsReprojectionErrorAboveThreshold)
 
 TEST(MarkerIppe, UsesRecentPoseWhenTwoSolutionsAreWithinAmbiguityGap)
 {
-  constexpr double marker_size = 0.193;
+  constexpr double marker_size = 0.070;
   const cv::Mat distortion = cv::Mat::zeros(1, 5, CV_64F);
   std::vector<cv::Point2f> corners;
   cv::projectPoints(

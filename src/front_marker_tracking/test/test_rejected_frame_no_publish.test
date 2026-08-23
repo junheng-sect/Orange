@@ -11,7 +11,7 @@
     <param name="status_topic" value="/test_front_marker/status" />
     <param name="aruco_dictionary" value="DICT_5X5_1000" />
     <param name="target_marker_id" value="33" />
-    <param name="target_marker_size_m" value="0.193" />
+    <param name="target_marker_size_m" value="0.070" />
     <param name="expected_image_width" value="640" />
     <param name="expected_image_height" value="480" />
     <param name="expected_camera_frame" value="usb_camera_optical_frame" />

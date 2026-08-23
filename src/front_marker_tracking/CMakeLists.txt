@@ -8,7 +8,6 @@ if(EXISTS "/usr/lib/aarch64-linux-gnu/cmake/opencv4/OpenCVConfig.cmake")
 endif()
 
 find_package(catkin REQUIRED COMPONENTS
-  camera_info_manager
   cv_bridge
   geometry_msgs
   mavros_msgs
@@ -24,7 +23,6 @@ find_package(OpenCV REQUIRED COMPONENTS
   calib3d
   core
   imgproc
-  videoio
 )
 
 add_message_files(
@@ -43,7 +41,6 @@ catkin_package(
   INCLUDE_DIRS include
   LIBRARIES front_marker_pose_estimator
   CATKIN_DEPENDS
-    camera_info_manager
     cv_bridge
     geometry_msgs
     mavros_msgs
@@ -62,10 +59,6 @@ include_directories(
 
 add_executable(front_marker_detector_node
   src/front_marker_detector_node.cpp
-)
-
-add_executable(front_marker_csi_camera_node
-  src/front_marker_csi_camera_node.cpp
 )
 
 add_library(front_marker_pose_estimator
@@ -87,32 +80,20 @@ add_dependencies(front_marker_detector_node
   ${catkin_EXPORTED_TARGETS}
 )
 
-add_dependencies(front_marker_csi_camera_node
-  ${${PROJECT_NAME}_EXPORTED_TARGETS}
-  ${catkin_EXPORTED_TARGETS}
-)
-
 target_link_libraries(front_marker_detector_node
   front_marker_pose_estimator
   ${catkin_LIBRARIES}
   ${OpenCV_LIBRARIES}
 )
 
-target_link_libraries(front_marker_csi_camera_node
-  ${catkin_LIBRARIES}
-  ${OpenCV_LIBRARIES}
-)
-
 catkin_install_python(
   PROGRAMS
-    scripts/front_marker_ab_report.py
-    scripts/front_marker_base_transform_node
     scripts/front_marker_tracking_node
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
 install(
-  TARGETS front_marker_detector_node front_marker_csi_camera_node front_marker_pose_estimator
+  TARGETS front_marker_detector_node front_marker_pose_estimator
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
