@@ -29,14 +29,6 @@ struct ContourMetrics
   double mean_edge_contrast = 0.0;
 };
 
-struct SubpixelOptions
-{
-  int window_size = 5;
-  int max_iterations = 50;
-  double epsilon = 0.001;
-  double max_shift_px = 2.0;
-};
-
 struct PoseSolution
 {
   cv::Vec3d rvec = cv::Vec3d(0.0, 0.0, 0.0);
@@ -51,14 +43,6 @@ bool evaluateMarkerContour(
   const std::vector<cv::Point2f>& corners,
   const ContourGateOptions& options,
   ContourMetrics& metrics,
-  std::string& reason);
-
-bool refineMarkerCorners(
-  const cv::Mat& gray,
-  const std::vector<cv::Point2f>& input,
-  const SubpixelOptions& options,
-  std::vector<cv::Point2f>& refined,
-  double& max_shift_px,
   std::string& reason);
 
 bool estimatePoseIppeSquare(

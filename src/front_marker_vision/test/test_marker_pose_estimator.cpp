@@ -82,28 +82,6 @@ TEST(MarkerContourGate, RejectsShortNonConvexAndBorderContours)
     options, metrics, reason));
 }
 
-TEST(MarkerSubpixel, RefinesCornersAndHonorsMaximumShift)
-{
-  cv::Mat image(220, 220, CV_8UC1, cv::Scalar(220));
-  cv::rectangle(image, cv::Point(40, 40), cv::Point(180, 180), cv::Scalar(10), cv::FILLED);
-  cv::GaussianBlur(image, image, cv::Size(5, 5), 0.8);
-  const std::vector<cv::Point2f> input = {
-    {40.7F, 40.5F}, {179.4F, 40.6F}, {179.5F, 179.3F}, {40.6F, 179.5F}};
-
-  front_marker_vision::SubpixelOptions options;
-  std::vector<cv::Point2f> refined;
-  double max_shift = 0.0;
-  std::string reason;
-  ASSERT_TRUE(front_marker_vision::refineMarkerCorners(
-    image, input, options, refined, max_shift, reason)) << reason;
-  EXPECT_GT(max_shift, 0.05);
-  EXPECT_LT(max_shift, options.max_shift_px);
-
-  options.max_shift_px = 0.01;
-  EXPECT_FALSE(front_marker_vision::refineMarkerCorners(
-    image, input, options, refined, max_shift, reason));
-}
-
 TEST(MarkerIppe, RecoversKnownFrontFacingPose)
 {
   constexpr double marker_size = 0.070;

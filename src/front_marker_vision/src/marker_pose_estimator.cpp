@@ -234,65 +234,6 @@ bool evaluateMarkerContour(
   return true;
 }
 
-bool refineMarkerCorners(
-  const cv::Mat& gray,
-  const std::vector<cv::Point2f>& input,
-  const SubpixelOptions& options,
-  std::vector<cv::Point2f>& refined,
-  double& max_shift_px,
-  std::string& reason)
-{
-  refined = input;
-  max_shift_px = 0.0;
-  reason.clear();
-  if (gray.empty() || gray.type() != CV_8UC1 || input.size() != 4)
-  {
-    reason = "subpixel refinement requires a grayscale image and four corners";
-    return false;
-  }
-  try
-  {
-    cv::cornerSubPix(
-      gray,
-      refined,
-      cv::Size(options.window_size, options.window_size),
-      cv::Size(-1, -1),
-      cv::TermCriteria(
-        cv::TermCriteria::COUNT | cv::TermCriteria::EPS,
-        options.max_iterations,
-        options.epsilon));
-  }
-  catch (const cv::Exception& exception)
-  {
-    reason = exception.what();
-    return false;
-  }
-
-  for (size_t index = 0; index < refined.size(); ++index)
-  {
-    if (!finitePoint(refined[index]))
-    {
-      reason = "subpixel refinement produced a non-finite corner";
-      return false;
-    }
-    max_shift_px = std::max(max_shift_px, cv::norm(refined[index] - input[index]));
-  }
-  if (max_shift_px > options.max_shift_px)
-  {
-    std::ostringstream stream;
-    stream << "maximum corner shift " << max_shift_px << "px exceeds "
-           << options.max_shift_px << "px";
-    reason = stream.str();
-    return false;
-  }
-  if (!cv::isContourConvex(refined))
-  {
-    reason = "refined contour is not convex";
-    return false;
-  }
-  return true;
-}
-
 double rotationDistanceRad(const cv::Vec3d& first_rvec, const cv::Vec3d& second_rvec)
 {
   cv::Mat first_rotation;

@@ -17,7 +17,6 @@
     <param name="publish_marker_tf" value="true" />
     <param name="marker_frame" value="rejected_front_marker" />
     <param name="enable_contour_gate" value="true" />
-    <param name="corner_refinement_method" value="SUBPIX" />
     <param name="pose_solver" value="IPPE_SQUARE" />
     <!-- 8-bit outside-inside contrast cannot reach 300, so a detected marker must be rejected. -->
     <param name="min_edge_contrast" value="300.0" />

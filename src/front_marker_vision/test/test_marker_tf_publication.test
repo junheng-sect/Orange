@@ -17,7 +17,6 @@
     <param name="publish_marker_tf" value="true" />
     <param name="marker_frame" value="test_front_marker" />
     <param name="enable_contour_gate" value="false" />
-    <param name="corner_refinement_method" value="NONE" />
     <param name="pose_solver" value="LEGACY" />
     <param name="publish_annotated" value="false" />
   </node>

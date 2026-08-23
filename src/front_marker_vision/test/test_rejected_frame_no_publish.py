@@ -249,7 +249,7 @@ class RejectedFrameNoPublishTest(unittest.TestCase):
         while not rospy.is_shutdown() and rospy.Time.now() < deadline:
             with self.lock:
                 rejected = any(
-                    text.startswith('REJECTED_CONTOUR_RAW')
+                    text.startswith('REJECTED_CONTOUR')
                     for text in self.statuses
                 )
             if rejected:

@@ -144,7 +144,6 @@ public:
                     << " | target=ID" << target_marker_id_
                     << " size=" << target_marker_size_m_ << "m"
                     << " | contour_gate=" << (enable_contour_gate_ ? "true" : "false")
-                    << " | corners=" << corner_refinement_method_
                     << " | solver=" << pose_solver_
                     << " | marker_tf=" << (publish_marker_tf_ ? marker_frame_ : "disabled")
                     << " | annotated=" << (publish_annotated_ ? "true" : "false"));
@@ -174,7 +173,6 @@ private:
     pnh_.param("publish_annotated", publish_annotated_, true);
     pnh_.param("annotated_rate_hz", annotated_rate_hz_, 5.0);
     pnh_.param("enable_contour_gate", enable_contour_gate_, true);
-    pnh_.param<std::string>("corner_refinement_method", corner_refinement_method_, "NONE");
     pnh_.param<std::string>("pose_solver", pose_solver_, "LEGACY");
     pnh_.param("min_edge_length_px", contour_options_.min_edge_length_px, 12.0);
     pnh_.param("edge_sample_offset_ratio", contour_options_.edge_sample_offset_ratio, 0.025);
@@ -184,15 +182,10 @@ private:
     pnh_.param("min_edge_contrast", contour_options_.min_edge_contrast, 25.0);
     pnh_.param("min_mean_edge_contrast", contour_options_.min_mean_edge_contrast, 40.0);
     pnh_.param("edge_samples_per_side", contour_options_.samples_per_edge, 32);
-    pnh_.param("subpix_window_size", subpixel_options_.window_size, 5);
-    pnh_.param("subpix_max_iterations", subpixel_options_.max_iterations, 50);
-    pnh_.param("subpix_epsilon", subpixel_options_.epsilon, 0.001);
-    pnh_.param("subpix_max_shift_px", subpixel_options_.max_shift_px, 2.0);
     pnh_.param("ippe_ambiguity_gap_px", ippe_ambiguity_gap_px_, 0.2);
     pnh_.param("max_reprojection_error_px", max_reprojection_error_px_, 1.0);
     pnh_.param("pose_continuity_timeout_sec", pose_continuity_timeout_sec_, 0.5);
 
-    corner_refinement_method_ = uppercase(corner_refinement_method_);
     pose_solver_ = uppercase(pose_solver_);
 
     if (target_marker_id_ < 0)
@@ -207,10 +200,6 @@ private:
     {
       throw std::runtime_error("marker_frame must not be empty when publish_marker_tf is true");
     }
-    if (!(corner_refinement_method_ == "NONE" || corner_refinement_method_ == "SUBPIX"))
-    {
-      throw std::runtime_error("corner_refinement_method must be NONE or SUBPIX");
-    }
     if (!(pose_solver_ == "LEGACY" || pose_solver_ == "IPPE_SQUARE"))
     {
       throw std::runtime_error("pose_solver must be LEGACY or IPPE_SQUARE");
@@ -224,11 +213,6 @@ private:
         contour_options_.samples_per_edge < 4)
     {
       throw std::runtime_error("invalid contour gate parameters");
-    }
-    if (subpixel_options_.window_size <= 0 || subpixel_options_.max_iterations <= 0 ||
-        subpixel_options_.epsilon <= 0.0 || subpixel_options_.max_shift_px <= 0.0)
-    {
-      throw std::runtime_error("invalid subpixel parameters");
     }
     if (ippe_ambiguity_gap_px_ < 0.0 || max_reprojection_error_px_ <= 0.0 ||
         pose_continuity_timeout_sec_ <= 0.0)
@@ -480,9 +464,9 @@ private:
     else
     {
       ++marker_count_;
-      std::vector<cv::Point2f> working_corners = corners[static_cast<size_t>(selected_index)];
+      const std::vector<cv::Point2f>& working_corners =
+        corners[static_cast<size_t>(selected_index)];
       front_marker_vision::ContourMetrics contour_metrics;
-      double max_subpixel_shift_px = 0.0;
       double reprojection_error_px = 0.0;
       int ippe_candidate_count = 0;
       std::string rejection_reason;
@@ -495,37 +479,7 @@ private:
           contour_metrics,
           rejection_reason))
       {
-        rejection_stage = "CONTOUR_RAW";
-      }
-
-      if (rejection_stage.empty() && corner_refinement_method_ == "SUBPIX")
-      {
-        std::vector<cv::Point2f> refined;
-        if (!front_marker_vision::refineMarkerCorners(
-              gray_image,
-              working_corners,
-              subpixel_options_,
-              refined,
-              max_subpixel_shift_px,
-              rejection_reason))
-        {
-          rejection_stage = "SUBPIX";
-        }
-        else
-        {
-          working_corners = refined;
-        }
-      }
-
-      if (rejection_stage.empty() && enable_contour_gate_ &&
-          !front_marker_vision::evaluateMarkerContour(
-            gray_image,
-            working_corners,
-            contour_options_,
-            contour_metrics,
-            rejection_reason))
-      {
-        rejection_stage = "CONTOUR_REFINED";
+        rejection_stage = "CONTOUR";
       }
 
       if (rejection_stage.empty() && pose_solver_ == "IPPE_SQUARE")
@@ -582,7 +536,6 @@ private:
         }
       }
 
-      corners[static_cast<size_t>(selected_index)] = working_corners;
       if (rejection_stage.empty())
       {
         pose_valid = publishPoseAndDebug(message, rvec, tvec);
@@ -607,10 +560,6 @@ private:
                << "DETECTED: ID" << target_marker_id_
                << " xyz_camera=(" << tvec[0] << "," << tvec[1] << "," << tvec[2] << ")m"
                << " pipeline=" << pose_solver_;
-        if (corner_refinement_method_ == "SUBPIX")
-        {
-          stream << " subpix_shift=" << max_subpixel_shift_px << "px";
-        }
         if (pose_solver_ == "IPPE_SQUARE")
         {
           stream << " reproj=" << reprojection_error_px << "px"
@@ -623,10 +572,6 @@ private:
         if (rejection_stage.rfind("CONTOUR", 0) == 0)
         {
           ++contour_reject_count_;
-        }
-        else if (rejection_stage == "SUBPIX")
-        {
-          ++subpixel_reject_count_;
         }
         else if (rejection_stage == "REPROJECTION")
         {
@@ -786,8 +731,8 @@ private:
 
     std::ostringstream summary;
     summary << "F=" << frame_count_ << " Seen=" << marker_count_ << " OK=" << detect_count_
-            << " Reject=" << contour_reject_count_ << "/" << subpixel_reject_count_
-            << "/" << pose_reject_count_ << "/" << reprojection_reject_count_;
+            << " Reject=" << contour_reject_count_ << "/" << pose_reject_count_
+            << "/" << reprojection_reject_count_;
     cv::putText(
       annotated, summary.str(), cv::Point(10, 24), cv::FONT_HERSHEY_SIMPLEX, 0.55,
       cv::Scalar(255, 255, 255), 1);
@@ -847,10 +792,8 @@ private:
   bool publish_annotated_ = true;
   double annotated_rate_hz_ = 5.0;
   bool enable_contour_gate_ = true;
-  std::string corner_refinement_method_ = "NONE";
   std::string pose_solver_ = "LEGACY";
   front_marker_vision::ContourGateOptions contour_options_;
-  front_marker_vision::SubpixelOptions subpixel_options_;
   double ippe_ambiguity_gap_px_ = 0.2;
   double max_reprojection_error_px_ = 1.0;
   double pose_continuity_timeout_sec_ = 0.5;
@@ -871,7 +814,6 @@ private:
   uint64_t marker_count_ = 0;
   uint64_t detect_count_ = 0;
   uint64_t contour_reject_count_ = 0;
-  uint64_t subpixel_reject_count_ = 0;
   uint64_t pose_reject_count_ = 0;
   uint64_t reprojection_reject_count_ = 0;
 };
