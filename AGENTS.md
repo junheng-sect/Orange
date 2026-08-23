@@ -2,22 +2,23 @@
 
 ## 项目环境
 
-- 工作空间：`/home/zjh/project/orange`
-- 当前模块：香橙派5MAX 16G
+- 工作空间：`/home/zjh/project/rk_ws`
+- 当前模块：`SEEKER_OMNI`
 - 本机系统：Ubuntu 22.04
 - 本机sudo密码[REDACTED]
-- 板端：RK3588，Ubuntu 20.04，ROS Noetic
+- SEEKER 板端：RK3588，Ubuntu 20.04，ROS Noetic
+- 板端 seeker 工作空间：`/home/vslam/seeker`
+- 模块教程：`/home/zjh/project/rk_ws/SEEKER_OMNI模块教程 (3).pdf`
 
-## 香橙派 连接与凭据
+## SEEKER 连接与凭据
 
-- 局域网wifi：Xiaomi 密码：[REDACTED]
-- 用户：`orangepi`
+- 用户：`vslam`
 - SSH 密码：`[REDACTED]`
 - `su`/root 密码：`[REDACTED]`
 
-## 香橙派调试手册
+当前已验证的网络信息：
 
-- /home/zjh/project/orange/OrangePi_5_Max_RK3588_用户手册_v1.3.pdf
+- USB RNDIS：PC 通常为 `10.42.0.1`，SEEKER 为 `10.42.0.2`，作为默认调试链路
 
 ## 协作与日志
 
@@ -27,3 +28,9 @@
 - 若当天目录或 `LOG.md` 不存在，先创建再记录。
 - 每轮对话如果修改了文件，写入“修改记录”；如果只是排查或回答问题，写入“问题记录”。
 - 不再默认向工作空间根目录追加 `LOG.md` 或 `PI_LOG.md`。
+
+## 开发约定
+
+- 优先按教程和板端现有 ROS Noetic/catkin 环境调试。
+- 涉及 launch 或 ROS 节点启动时，优先给出可直接复制执行的完整命令。
+- 板端相机相关功能通常需要 root 权限，普通调试优先使用 `vslam` 用户。
