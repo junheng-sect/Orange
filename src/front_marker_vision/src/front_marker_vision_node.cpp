@@ -173,7 +173,7 @@ private:
     pnh_.param("publish_annotated", publish_annotated_, true);
     pnh_.param("annotated_rate_hz", annotated_rate_hz_, 5.0);
     pnh_.param("enable_contour_gate", enable_contour_gate_, true);
-    pnh_.param<std::string>("pose_solver", pose_solver_, "LEGACY");
+    pnh_.param<std::string>("pose_solver", pose_solver_, "IPPE_SQUARE");
     pnh_.param("min_edge_length_px", contour_options_.min_edge_length_px, 12.0);
     pnh_.param("edge_sample_offset_ratio", contour_options_.edge_sample_offset_ratio, 0.025);
     pnh_.param("edge_sample_offset_min_px", contour_options_.edge_sample_offset_min_px, 1.0);
@@ -792,7 +792,7 @@ private:
   bool publish_annotated_ = true;
   double annotated_rate_hz_ = 5.0;
   bool enable_contour_gate_ = true;
-  std::string pose_solver_ = "LEGACY";
+  std::string pose_solver_ = "IPPE_SQUARE";
   front_marker_vision::ContourGateOptions contour_options_;
   double ippe_ambiguity_gap_px_ = 0.2;
   double max_reprojection_error_px_ = 1.0;

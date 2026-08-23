@@ -7,6 +7,9 @@ PID 或 MAVROS。
 表示 `^header.frame_id T_marker`。默认检测 `DICT_5X5_1000` 的 ID 33，黑色码边长
 为 `0.070m`。
 
+位姿默认使用 `IPPE_SQUARE`，对平面 Marker 的两个候选解按重投影误差和近期位姿连续性
+选择；需要回退旧路径时可传入 `pose_solver:=LEGACY`。角点亚像素优化仍默认关闭。
+
 每次有效 Pose 还会用相同时间戳广播 `pose.header.frame_id -> front_marker` 动态 TF。
 可通过 `publish_marker_tf:=false` 关闭，或用 `marker_frame` 修改子坐标系名称。无有效
 检测时不会广播或伪造 Marker TF。
@@ -22,6 +25,12 @@ PID 或 MAVROS。
 
 ```bash
 roslaunch front_marker_vision front_marker_vision.launch
+```
+
+回退 LEGACY：
+
+```bash
+roslaunch front_marker_vision front_marker_vision.launch pose_solver:=LEGACY
 ```
 
 无有效标定、图像与 CameraInfo 尺寸或 frame 不一致、未检测到目标、或位姿门禁拒绝时，

@@ -11,6 +11,7 @@
   <arg name="target_marker_size_m" default="0.070" />
   <arg name="publish_marker_tf" default="true" />
   <arg name="marker_frame" default="front_marker" />
+  <arg name="pose_solver" default="IPPE_SQUARE" />
   <arg name="publish_annotated" default="true" />
   <arg name="annotated_rate_hz" default="5.0" />
 
@@ -31,7 +32,7 @@
     <param name="publish_marker_tf" value="$(arg publish_marker_tf)" />
     <param name="marker_frame" value="$(arg marker_frame)" />
     <param name="enable_contour_gate" value="true" />
-    <param name="pose_solver" value="LEGACY" />
+    <param name="pose_solver" value="$(arg pose_solver)" />
     <param name="publish_annotated" value="$(arg publish_annotated)" />
     <param name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
   </node>

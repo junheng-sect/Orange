@@ -11,6 +11,7 @@
   <arg name="target_marker_size_m" default="0.070" />
   <arg name="publish_marker_tf" default="true" />
   <arg name="marker_frame" default="front_marker" />
+  <arg name="pose_solver" default="IPPE_SQUARE" />
   <arg name="target_body_x" default="0.8" />
   <arg name="target_body_y" default="0.0" />
   <arg name="target_body_z" default="0.0" />
@@ -39,6 +40,7 @@
     <arg name="target_marker_size_m" value="$(arg target_marker_size_m)" />
     <arg name="publish_marker_tf" value="$(arg publish_marker_tf)" />
     <arg name="marker_frame" value="$(arg marker_frame)" />
+    <arg name="pose_solver" value="$(arg pose_solver)" />
     <arg name="publish_annotated" value="$(arg publish_annotated)" />
     <arg name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
   </include>
