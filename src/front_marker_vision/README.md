@@ -26,3 +26,7 @@ roslaunch front_marker_vision front_marker_vision.launch
 
 无有效标定、图像与 CameraInfo 尺寸或 frame 不一致、未检测到目标、或位姿门禁拒绝时，
 不会发布 Pose 和齐次矩阵。
+
+节点直接接受 `mono8`、`rgb8` 和 `bgr8`。mono8 输入直接用于检测，不做每帧颜色
+扩展；rgb8/bgr8 仅转换一次得到灰度图。标注图只有在达到 `annotated_rate_hz` 且存在
+订阅者时才生成 BGR8，因此关闭或不订阅标注图不会触发额外的整帧颜色转换。

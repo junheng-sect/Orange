@@ -53,6 +53,7 @@
 #include <sensor_msgs/fill_image.h>
 #include <opencv2/opencv.hpp>
 
+#include <usb_cam/mono8_utils.h>
 #include <usb_cam/usb_cam.h>
 
 #define CLEAR(x) memset (&(x), 0, sizeof (x))
@@ -377,9 +378,11 @@ std::string fcc2s(unsigned int val)
 }
 
 UsbCam::UsbCam()
-  : io_(IO_METHOD_MMAP), fd_(-1), buffers_(NULL), n_buffers_(0), avframe_camera_(NULL),
+  : pixelformat_(0), monochrome_(false), output_encoding_(OUTPUT_ENCODING_RGB8),
+    io_(IO_METHOD_MMAP), fd_(-1), buffers_(NULL), n_buffers_(0), avframe_camera_(NULL),
     avframe_rgb_(NULL), avcodec_(NULL), avoptions_(NULL), avcodec_context_(NULL),
-    avframe_camera_size_(0), avframe_rgb_size_(0), video_sws_(NULL), image_(NULL), is_capturing_(false) {
+    avparser_context_(NULL), avframe_camera_size_(0), avframe_rgb_size_(0),
+    video_sws_(NULL), image_(NULL), is_capturing_(false) {
 }
 UsbCam::~UsbCam()
 {
@@ -430,18 +433,22 @@ int UsbCam::init_decoder(int image_width, int image_height,
 
 #if LIBAVCODEC_VERSION_MAJOR < 55
   avframe_camera_ = avcodec_alloc_frame();
-  avframe_rgb_ = avcodec_alloc_frame();
 #else
   avframe_camera_ = av_frame_alloc();
-  avframe_rgb_ = av_frame_alloc();
 #endif
 
-  avframe_rgb_ = av_frame_alloc();
-  avframe_rgb_->format = AV_PIX_FMT_RGB24;
-  avframe_rgb_->width = image_width;
-  avframe_rgb_->height = image_height;
-  av_frame_get_buffer(avframe_rgb_, 32);
-  //avpicture_alloc(avframe_rgb_, AV_PIX_FMT_RGB24, image_width, image_height);
+  if (output_encoding_ == OUTPUT_ENCODING_RGB8)
+  {
+    avframe_rgb_ = av_frame_alloc();
+    avframe_rgb_->format = AV_PIX_FMT_RGB24;
+    avframe_rgb_->width = image_width;
+    avframe_rgb_->height = image_height;
+    if (av_frame_get_buffer(avframe_rgb_, 32) < 0)
+    {
+      ROS_ERROR("Could not allocate RGB decoder output frame");
+      return 0;
+    }
+  }
 
   avcodec_context_->codec_id = codec_id;
   avcodec_context_->width = image_width;
@@ -465,7 +472,8 @@ int UsbCam::init_decoder(int image_width, int image_height,
     // av_log_set_level(AV_LOG_ERROR);
   }
 
-  avframe_rgb_size_ = av_image_get_buffer_size(AV_PIX_FMT_RGB24, image_width, image_height, 32);
+  avframe_rgb_size_ = output_encoding_ == OUTPUT_ENCODING_RGB8 ?
+    av_image_get_buffer_size(AV_PIX_FMT_RGB24, image_width, image_height, 32) : 0;
 
   /* open it */
   if (avcodec_open2(avcodec_context_, avcodec_, &avoptions_) < 0)
@@ -490,11 +498,9 @@ int UsbCam::init_h264_decoder(int image_width, int image_height, color_format co
   return init_decoder(image_width, image_height, color_format, AV_CODEC_ID_H264, "H264");
 }
 
-void UsbCam::mjpeg2rgb(char *MJPEG, int len, char *RGB, int NumPixels)
+bool UsbCam::decode_compressed_frame(char *data, int len)
 {
   int got_picture;
-
-  memset(RGB, 0, avframe_rgb_size_);
 
 #if LIBAVCODEC_VERSION_MAJOR > 52
   int decoded_len;
@@ -502,29 +508,29 @@ void UsbCam::mjpeg2rgb(char *MJPEG, int len, char *RGB, int NumPixels)
   //av_init_packet(&avpkt);
 
   //avpkt.size = len;
-  //avpkt.data = (unsigned char*)MJPEG;
+  //avpkt.data = (unsigned char*)data;
   av_init_packet(&avpkt);
-  av_packet_from_data (&avpkt, (unsigned char*)MJPEG, len);
+  av_packet_from_data (&avpkt, (unsigned char*)data, len);
   decoded_len = avcodec_send_packet(avcodec_context_, &avpkt);
   //decoded_len = avcodec_decode_video2(avcodec_context_, avframe_camera_, &got_picture, &avpkt);
   if (decoded_len < 0)
   {
     ROS_ERROR("Error while decoding frame.");
-    return;
+    return false;
   }
 #else
-  avcodec_decode_video(avcodec_context_, avframe_camera_, &got_picture, (uint8_t *) MJPEG, len);
+  avcodec_decode_video(avcodec_context_, avframe_camera_, &got_picture, (uint8_t *) data, len);
   if (!got_picture)
   {
     ROS_ERROR("Webcam: expected picture but didn't get it...");
-    return;
+    return false;
   }
 #endif
   int error_code = avcodec_receive_frame(avcodec_context_, avframe_camera_);
   if (error_code < 0)
   {
     ROS_ERROR("Error while returning frame.");
-    return;
+    return false;
   }
 
 
@@ -549,13 +555,33 @@ void UsbCam::mjpeg2rgb(char *MJPEG, int len, char *RGB, int NumPixels)
     }
   }
 
+  return true;
+}
+
+bool UsbCam::decoded_frame_to_rgb(char *output, int width, int height)
+{
+  if (output == NULL || avframe_camera_ == NULL || avframe_rgb_ == NULL ||
+      width <= 0 || height <= 0)
+  {
+    ROS_ERROR("Invalid RGB decoder output state");
+    return false;
+  }
+
+  memset(output, 0, static_cast<size_t>(width) * static_cast<size_t>(height) * 3U);
+
   int xsize = avcodec_context_->width;
   int ysize = avcodec_context_->height;
+  if (xsize != width || ysize != height)
+  {
+    ROS_ERROR("decoded image size mismatch: got %dx%d expected %dx%d",
+        xsize, ysize, width, height);
+    return false;
+  }
   int pic_size = av_image_get_buffer_size(avcodec_context_->pix_fmt, xsize, ysize, 32);
   if (pic_size != avframe_camera_size_)
   {
     ROS_ERROR("outbuf size mismatch.  pic_size: %d bufsize: %d", pic_size, avframe_camera_size_);
-    return;
+    return false;
   }
   //avframe_rgb_size_ = av_image_get_buffer_size(AV_PIX_FMT_RGB24, avcodec_context_->width, avcodec_context_->height, 32);
   //unsigned char* frame_buffer = (uint8_t*)av_malloc(avframe_rgb_size_);
@@ -567,17 +593,73 @@ void UsbCam::mjpeg2rgb(char *MJPEG, int len, char *RGB, int NumPixels)
   if (video_sws_ == NULL)
   {
     ROS_ERROR("Failed to create FFmpeg colorspace conversion context.");
-    return;
+    return false;
   }
   sws_scale(video_sws_, avframe_camera_->data, avframe_camera_->linesize, 0, ysize, avframe_rgb_->data, avframe_rgb_->linesize);
 
   //int size = avpicture_layout((AVPicture *)avframe_rgb_, AV_PIX_FMT_RGB24, xsize, ysize, (uint8_t *)RGB, avframe_rgb_size_);
-  int size = av_image_copy_to_buffer((uint8_t *)RGB, avframe_rgb_size_, avframe_rgb_->data, avframe_rgb_->linesize, AV_PIX_FMT_RGB24, xsize, ysize, 32);
+  int size = av_image_copy_to_buffer((uint8_t *)output, avframe_rgb_size_, avframe_rgb_->data, avframe_rgb_->linesize, AV_PIX_FMT_RGB24, xsize, ysize, 32);
   if (size != avframe_rgb_size_)
   {
     ROS_ERROR("webcam: avpicture_layout error: %d", size);
-    return;
+    return false;
   }
+  return true;
+}
+
+bool UsbCam::decoded_frame_to_mono8(char *output, int width, int height)
+{
+  if (output == NULL || avframe_camera_ == NULL || width <= 0 || height <= 0 ||
+      avframe_camera_->width != width || avframe_camera_->height != height)
+  {
+    ROS_ERROR("Invalid mono8 decoder output state");
+    return false;
+  }
+
+  const AVPixelFormat decoded_format =
+    static_cast<AVPixelFormat>(avframe_camera_->format);
+  const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(decoded_format);
+  const char* format_name = av_get_pix_fmt_name(decoded_format);
+  if (format_name == NULL)
+    format_name = "unknown";
+  const bool direct_luma = descriptor != NULL && descriptor->nb_components >= 1 &&
+    (descriptor->flags & AV_PIX_FMT_FLAG_RGB) == 0 &&
+    descriptor->comp[0].plane == 0 && descriptor->comp[0].step == 1 &&
+    descriptor->comp[0].offset == 0 && descriptor->comp[0].depth == 8;
+  const size_t output_size =
+    static_cast<size_t>(width) * static_cast<size_t>(height);
+
+  if (direct_luma && copyLumaPlane(
+      avframe_camera_->data[0], avframe_camera_->linesize[0], width, height,
+      reinterpret_cast<uint8_t*>(output), output_size))
+  {
+    ROS_INFO_ONCE("MJPEG mono8 uses direct luma copy: format=%s stride=%d",
+        format_name, avframe_camera_->linesize[0]);
+    return true;
+  }
+
+  ROS_WARN_ONCE("MJPEG mono8 falls back to swscale: format=%s", format_name);
+  uint8_t* destination_data[4] = {
+    reinterpret_cast<uint8_t*>(output), NULL, NULL, NULL};
+  int destination_linesize[4] = {width, 0, 0, 0};
+  video_sws_ = sws_getCachedContext(
+    video_sws_, width, height, decoded_format, width, height, AV_PIX_FMT_GRAY8,
+    SWS_FAST_BILINEAR, NULL, NULL, NULL);
+  if (video_sws_ == NULL)
+  {
+    ROS_ERROR("Failed to create FFmpeg grayscale conversion context.");
+    return false;
+  }
+  const int converted_rows = sws_scale(
+    video_sws_, avframe_camera_->data, avframe_camera_->linesize, 0, height,
+    destination_data, destination_linesize);
+  if (converted_rows != height)
+  {
+    ROS_ERROR("FFmpeg grayscale conversion returned %d rows, expected %d",
+        converted_rows, height);
+    return false;
+  }
+  return true;
 }
 
 
@@ -611,10 +693,19 @@ void UsbCam::process_image(
       const unsigned char* begin = static_cast<const unsigned char*>(src);
       compressed_image->data.assign(begin, begin + len);
     }
-    mjpeg2rgb((char*)src, len, dest->image, dest->width * dest->height);
+    if (decode_compressed_frame((char*)src, len))
+    {
+      if (output_encoding_ == OUTPUT_ENCODING_MONO8)
+        decoded_frame_to_mono8(dest->image, dest->width, dest->height);
+      else
+        decoded_frame_to_rgb(dest->image, dest->width, dest->height);
+    }
   }
-  else if (pixelformat_ == V4L2_PIX_FMT_H264) // libav handles the decoding, so reusing the same function is fine
-    mjpeg2rgb((char*)src, len, dest->image, dest->width * dest->height);
+  else if (pixelformat_ == V4L2_PIX_FMT_H264)
+  {
+    if (decode_compressed_frame((char*)src, len))
+      decoded_frame_to_rgb(dest->image, dest->width, dest->height);
+  }
   else if (pixelformat_ == V4L2_PIX_FMT_RGB24)
     rgb242rgb((char*)src, dest->image, dest->width * dest->height);
   else if (pixelformat_ == V4L2_PIX_FMT_YUV420)
@@ -1135,6 +1226,9 @@ void UsbCam::init_device(int image_width, int image_height, int framerate)
 
 void UsbCam::close_device(void)
 {
+  if (fd_ == -1)
+    return;
+
   if (-1 == close(fd_))
     errno_exit("close");
 
@@ -1169,11 +1263,12 @@ void UsbCam::open_device(void)
 void UsbCam::start(const std::string& dev, io_method io_method,
 		   pixel_format pixel_format, color_format color_format,
        int image_width, int image_height,
-		   int framerate)
+		   int framerate, output_encoding output)
 {
   camera_dev_ = dev;
 
   io_ = io_method;
+  output_encoding_ = output;
   monochrome_ = false;
   if (pixel_format == PIXEL_FORMAT_YUYV)
     pixelformat_ = V4L2_PIX_FMT_YUYV;
@@ -1226,7 +1321,8 @@ void UsbCam::start(const std::string& dev, io_method io_method,
 
   image_->width = image_width;
   image_->height = image_height;
-  image_->bytes_per_pixel = 3;      //corrected 11/10/15 (BYTES not BITS per pixel)
+  image_->bytes_per_pixel =
+    (output_encoding_ == OUTPUT_ENCODING_MONO8 || monochrome_) ? 1 : 3;
 
   image_->image_size = image_->width * image_->height * image_->bytes_per_pixel;
   image_->is_new = 0;
@@ -1271,7 +1367,7 @@ void UsbCam::grab_image(
     compressed_image->format = "jpeg";
   }
   // fill the info
-  if (monochrome_)
+  if (output_encoding_ == OUTPUT_ENCODING_MONO8 || monochrome_)
   {
     fillImage(*msg, "mono8", image_->height, image_->width, image_->width,
         image_->image);
@@ -1448,6 +1544,16 @@ UsbCam::color_format UsbCam::color_format_from_string(const std::string& str)
       return COLOR_FORMAT_YUV422P;
     else
       return COLOR_FORMAT_UNKNOWN;
+}
+
+UsbCam::output_encoding UsbCam::output_encoding_from_string(const std::string& str)
+{
+  if (str == "rgb8")
+    return OUTPUT_ENCODING_RGB8;
+  else if (str == "mono8")
+    return OUTPUT_ENCODING_MONO8;
+  else
+    return OUTPUT_ENCODING_UNKNOWN;
 }
 
 }

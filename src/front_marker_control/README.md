@@ -18,6 +18,14 @@ roslaunch front_marker_control front_marker_control.launch
 roslaunch front_marker_control front_marker_tracking.launch
 ```
 
+完整入口默认令 OV9281 保持 MJPEG 采集，同时将解码后的 raw 图像发布为 `mono8`，避免
+Marker 检测前的 RGB 中间图。可用 `camera_output_encoding:=rgb8` 临时恢复兼容模式：
+
+```bash
+roslaunch front_marker_control front_marker_tracking.launch \
+  camera_output_encoding:=rgb8
+```
+
 相机静态外参也可单独启动，供只运行检测与可视化的场景复用：
 
 ```bash

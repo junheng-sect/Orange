@@ -45,6 +45,7 @@ extern "C"
 #include <libswscale/swscale.h>
 #include <libavutil/mem.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/pixdesc.h>
 }
 
 // legacy reasons
@@ -77,12 +78,17 @@ class UsbCam {
     COLOR_FORMAT_YUV420P, COLOR_FORMAT_YUV422P, COLOR_FORMAT_UNKNOWN,
   } color_format;
 
+  typedef enum
+  {
+    OUTPUT_ENCODING_RGB8, OUTPUT_ENCODING_MONO8, OUTPUT_ENCODING_UNKNOWN,
+  } output_encoding;
+
   UsbCam();
   ~UsbCam();
 
   // start camera
   void start(const std::string& dev, io_method io, pixel_format pf, color_format cf,
-		    int image_width, int image_height, int framerate);
+		    int image_width, int image_height, int framerate, output_encoding output);
   // shutdown camera
   void shutdown(void);
 
@@ -101,6 +107,7 @@ class UsbCam {
   static io_method io_method_from_string(const std::string& str);
   static pixel_format pixel_format_from_string(const std::string& str);
   static color_format color_format_from_string(const std::string& str);
+  static output_encoding output_encoding_from_string(const std::string& str);
 
   void stop_capturing(void);
   void start_capturing(void);
@@ -128,7 +135,9 @@ class UsbCam {
       color_format color_format, AVCodecID codec_id, const char *codec_name);
   int init_mjpeg_decoder(int image_width, int image_height, color_format color_format);
   int init_h264_decoder(int image_width, int image_height, color_format color_format);
-  void mjpeg2rgb(char *MJPEG, int len, char *RGB, int NumPixels);
+  bool decode_compressed_frame(char *data, int len);
+  bool decoded_frame_to_rgb(char *output, int width, int height);
+  bool decoded_frame_to_mono8(char *output, int width, int height);
   void process_image(
       const void * src,
       int len,
@@ -143,12 +152,10 @@ class UsbCam {
   void close_device(void);
   void open_device(void);
   void grab_image(sensor_msgs::CompressedImage* compressed_image);
-  bool is_capturing_;
-
-
   std::string camera_dev_;
   unsigned int pixelformat_;
   bool monochrome_;
+  output_encoding output_encoding_;
   io_method io_;
   int fd_;
   buffer * buffers_;
@@ -163,6 +170,7 @@ class UsbCam {
   int avframe_rgb_size_;
   struct SwsContext *video_sws_;
   camera_image_t *image_;
+  bool is_capturing_;
 
 };
 

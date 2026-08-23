@@ -57,7 +57,8 @@ public:
   ros::Publisher compressed_pub_;
 
   // parameters
-  std::string video_device_name_, io_method_name_, pixel_format_name_, camera_name_, camera_info_url_, color_format_name_ ;
+  std::string video_device_name_, io_method_name_, pixel_format_name_, camera_name_, camera_info_url_,
+      color_format_name_, output_encoding_name_;
   //std::string start_service_name_, start_service_name_;
   bool streaming_status_;
   int image_width_, image_height_, framerate_, exposure_, brightness_, contrast_, saturation_, sharpness_, focus_,
@@ -110,6 +111,8 @@ public:
     node_.param("pixel_format", pixel_format_name_, std::string("mjpeg"));
     // possible values: yuv420p, yuv422p
     node_.param("color_format", color_format_name_, std::string("yuv422p"));
+    // decoded ROS raw image encoding: rgb8 or mono8
+    node_.param("output_encoding", output_encoding_name_, std::string("rgb8"));
     // enable/disable autofocus
     node_.param("autofocus", autofocus_, false);
     node_.param("focus", focus_, -1); //0-255, -1 "leave alone"
@@ -143,8 +146,10 @@ public:
     }
 
 
-    ROS_INFO("Starting '%s' (%s) at %dx%d via %s (%s) at %i FPS", camera_name_.c_str(), video_device_name_.c_str(),
-        image_width_, image_height_, io_method_name_.c_str(), pixel_format_name_.c_str(), framerate_);
+    ROS_INFO("Starting '%s' (%s) at %dx%d via %s (%s) at %i FPS, raw output=%s",
+        camera_name_.c_str(), video_device_name_.c_str(), image_width_, image_height_,
+        io_method_name_.c_str(), pixel_format_name_.c_str(), framerate_,
+        output_encoding_name_.c_str());
 
     // set the IO method
     UsbCam::io_method io_method = UsbCam::io_method_from_string(io_method_name_);
@@ -173,9 +178,28 @@ public:
       return;
     }
 
+    UsbCam::output_encoding output_encoding =
+        UsbCam::output_encoding_from_string(output_encoding_name_);
+    if (output_encoding == UsbCam::OUTPUT_ENCODING_UNKNOWN)
+    {
+      ROS_FATAL("Unknown output encoding '%s'; expected rgb8 or mono8",
+          output_encoding_name_.c_str());
+      node_.shutdown();
+      return;
+    }
+    if (output_encoding == UsbCam::OUTPUT_ENCODING_MONO8 &&
+        pixel_format != UsbCam::PIXEL_FORMAT_MJPEG &&
+        pixel_format != UsbCam::PIXEL_FORMAT_GREY &&
+        pixel_format != UsbCam::PIXEL_FORMAT_YUVMONO10)
+    {
+      ROS_FATAL("mono8 output is only supported for mjpeg, grey, or yuvmono10 input");
+      node_.shutdown();
+      return;
+    }
+
     // start the camera
     cam_.start(video_device_name_.c_str(), io_method, pixel_format, color_format, image_width_,
-		     image_height_, framerate_);
+		     image_height_, framerate_, output_encoding);
 
     // set camera parameters
     if (brightness_ >= 0)

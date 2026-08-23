@@ -373,7 +373,6 @@ private:
     const ros::WallTime processing_start = ros::WallTime::now();
     ++frame_count_;
     cv_bridge::CvImageConstPtr source_image;
-    cv::Mat color_image;
     cv::Mat gray_image;
     try
     {
@@ -381,13 +380,16 @@ private:
       {
         source_image = cv_bridge::toCvShare(message, sensor_msgs::image_encodings::MONO8);
         gray_image = source_image->image;
-        cv::cvtColor(gray_image, color_image, cv::COLOR_GRAY2BGR);
+      }
+      else if (message->encoding == sensor_msgs::image_encodings::RGB8)
+      {
+        source_image = cv_bridge::toCvShare(message, sensor_msgs::image_encodings::RGB8);
+        cv::cvtColor(source_image->image, gray_image, cv::COLOR_RGB2GRAY);
       }
       else
       {
         source_image = cv_bridge::toCvShare(message, sensor_msgs::image_encodings::BGR8);
-        color_image = source_image->image;
-        cv::cvtColor(color_image, gray_image, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(source_image->image, gray_image, cv::COLOR_BGR2GRAY);
       }
     }
     catch (const cv_bridge::Exception& exception)
@@ -406,7 +408,7 @@ private:
              << gray_image.rows << " camera_info=" << camera_info_width_ << "x"
              << camera_info_height_;
       publishStatus(status.str());
-      publishAnnotatedImage(message, color_image, {}, {}, -1, nullptr, nullptr, status.str());
+      publishAnnotatedImage(message, gray_image, {}, {}, -1, nullptr, nullptr, status.str());
       publishProcessingTime(processing_start);
       return;
     }
@@ -442,7 +444,7 @@ private:
       const std::string status = stream.str();
       publishStatus(status);
       publishAnnotatedImage(
-        message, color_image, corners, ids, selected_index, nullptr, nullptr, status);
+        message, gray_image, corners, ids, selected_index, nullptr, nullptr, status);
       publishProcessingTime(processing_start);
       return;
     }
@@ -451,7 +453,7 @@ private:
       const std::string status = "INVALID_IMAGE_FRAME: frame_id must not be empty";
       publishStatus(status);
       publishAnnotatedImage(
-        message, color_image, corners, ids, selected_index, nullptr, nullptr, status);
+        message, gray_image, corners, ids, selected_index, nullptr, nullptr, status);
       publishProcessingTime(processing_start);
       return;
     }
@@ -460,7 +462,7 @@ private:
       const std::string status = "FRAME_MISMATCH: image and CameraInfo frame_id differ";
       publishStatus(status);
       publishAnnotatedImage(
-        message, color_image, corners, ids, selected_index, nullptr, nullptr, status);
+        message, gray_image, corners, ids, selected_index, nullptr, nullptr, status);
       publishProcessingTime(processing_start);
       return;
     }
@@ -643,7 +645,7 @@ private:
 
     publishStatus(status);
     publishAnnotatedImage(
-      message, color_image, corners, ids, selected_index,
+      message, gray_image, corners, ids, selected_index,
       pose_valid ? &rvec : nullptr, pose_valid ? &tvec : nullptr, status);
     publishProcessingTime(processing_start);
   }
@@ -730,7 +732,7 @@ private:
 
   void publishAnnotatedImage(
     const sensor_msgs::ImageConstPtr& source,
-    const cv::Mat& color,
+    const cv::Mat& gray,
     const std::vector<std::vector<cv::Point2f>>& corners,
     const std::vector<int>& ids,
     int selected_index,
@@ -738,12 +740,40 @@ private:
     const cv::Vec3d* tvec,
     const std::string& status)
   {
+    if (annotated_pub_.getNumSubscribers() == 0)
+    {
+      return;
+    }
     if (!shouldPublishAnnotated(ros::Time::now()))
     {
       return;
     }
 
-    cv::Mat annotated = color.clone();
+    cv::Mat annotated;
+    try
+    {
+      if (source->encoding == sensor_msgs::image_encodings::MONO8)
+      {
+        cv::cvtColor(gray, annotated, cv::COLOR_GRAY2BGR);
+      }
+      else if (source->encoding == sensor_msgs::image_encodings::RGB8)
+      {
+        const cv_bridge::CvImageConstPtr rgb =
+          cv_bridge::toCvShare(source, sensor_msgs::image_encodings::RGB8);
+        cv::cvtColor(rgb->image, annotated, cv::COLOR_RGB2BGR);
+      }
+      else
+      {
+        const cv_bridge::CvImageConstPtr bgr =
+          cv_bridge::toCvShare(source, sensor_msgs::image_encodings::BGR8);
+        annotated = bgr->image.clone();
+      }
+    }
+    catch (const cv_bridge::Exception& exception)
+    {
+      ROS_ERROR_THROTTLE(1.0, "Annotated image conversion failed: %s", exception.what());
+      return;
+    }
     if (!ids.empty())
     {
       cv::aruco::drawDetectedMarkers(annotated, corners, ids);

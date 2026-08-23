@@ -44,3 +44,10 @@ install(TARGETS ov9281_usb_cam_node
 install(DIRECTORY config launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(test_mono8_output test/test_mono8_output.cpp)
+  if(TARGET test_mono8_output)
+    target_link_libraries(test_mono8_output ${catkin_LIBRARIES})
+  endif()
+endif()

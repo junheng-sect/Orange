@@ -198,6 +198,35 @@ class RejectedFrameNoPublishTest(unittest.TestCase):
         annotated_array = annotated_array.reshape(annotated.height, annotated.width, 3)
         sample = annotated_array[430:470, 540:620].mean(axis=(0, 1))
         self.assertTrue(np.allclose(sample, [20.0, 80.0, 180.0], atol=2.0), sample)
+
+        # A mono8 source must stay grayscale through detection and only be
+        # expanded to BGR when the throttled annotated output is requested.
+        with self.lock:
+            self.annotated_images = []
+        image = marker_image()
+        for _ in range(10):
+            stamp = rospy.Time.now()
+            self.camera_info_pub.publish(self.camera_info(stamp, calibrated=False))
+            self.image_pub.publish(self.image_message(image, stamp))
+            rospy.sleep(0.05)
+        deadline = rospy.Time.now() + rospy.Duration(3.0)
+        mono_annotated = None
+        while not rospy.is_shutdown() and rospy.Time.now() < deadline:
+            with self.lock:
+                if self.annotated_images:
+                    mono_annotated = self.annotated_images[-1]
+            if mono_annotated is not None:
+                break
+            rospy.sleep(0.05)
+        self.assertIsNotNone(mono_annotated, 'no mono8 annotated image was published')
+        self.assertEqual(mono_annotated.encoding, 'bgr8')
+        mono_array = np.frombuffer(mono_annotated.data, dtype=np.uint8)
+        mono_array = mono_array.reshape(mono_annotated.height, mono_annotated.step)
+        mono_array = mono_array[:, :mono_annotated.width * 3]
+        mono_array = mono_array.reshape(mono_annotated.height, mono_annotated.width, 3)
+        mono_sample = mono_array[430:470, 540:620].mean(axis=(0, 1))
+        self.assertTrue(np.allclose(mono_sample, [255.0, 255.0, 255.0], atol=1.0),
+                        mono_sample)
         with self.lock:
             self.assertEqual(self.pose_count, 0)
             self.assertEqual(self.transform_count, 0)

@@ -4,6 +4,7 @@
   <arg name="image_width" default="640" />
   <arg name="image_height" default="480" />
   <arg name="framerate" default="30" />
+  <arg name="camera_output_encoding" default="mono8" />
   <arg name="base_frame" default="base_link" />
   <arg name="camera_frame" default="usb_camera_optical_frame" />
   <arg name="target_marker_id" default="33" />
@@ -25,6 +26,7 @@
     <arg name="image_height" value="$(arg image_height)" />
     <arg name="framerate" value="$(arg framerate)" />
     <arg name="camera_frame" value="$(arg camera_frame)" />
+    <arg name="output_encoding" value="$(arg camera_output_encoding)" />
   </include>
 
   <include file="$(find front_marker_control)/launch/front_camera_tf.launch">
