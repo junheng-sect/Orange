@@ -32,5 +32,6 @@
 ## 开发约定
 
 - 优先按教程和板端现有 ROS Noetic/catkin 环境调试。
+- 本机和 SEEKER 板端构建 catkin 工作空间时，统一使用 `catkin build`，不使用 `catkin_make`。
 - 涉及 launch 或 ROS 节点启动时，优先给出可直接复制执行的完整命令。
 - 板端相机相关功能通常需要 root 权限，普通调试优先使用 `vslam` 用户。
