@@ -49,8 +49,8 @@
   <arg name="enable_setpoint_output" default="false" />
 
   <group ns="$(arg node_namespace)">
-  <node pkg="usb_cam"
-        type="usb_cam_node"
+  <node pkg="ov9281_usb_cam"
+        type="ov9281_usb_cam_node"
         name="usb_cam"
         output="log">
     <param name="video_device" value="/dev/v4l/by-id/usb-DECXIN_CAMERA_DECXIN_CAMERA_01.00.00-video-index0" />

@@ -33,12 +33,12 @@
   <exec_depend>libopencv-dev</exec_depend>
   <exec_depend>mavros_msgs</exec_depend>
   <exec_depend>message_runtime</exec_depend>
+  <exec_depend>ov9281_usb_cam</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
   <exec_depend>roscpp</exec_depend>
   <exec_depend>rospy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
-  <exec_depend>usb_cam</exec_depend>
 
   <test_depend>python3-nose</test_depend>
   <test_depend>rostest</test_depend>

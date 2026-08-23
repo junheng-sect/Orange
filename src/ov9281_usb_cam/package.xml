@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>ov9281_usb_cam</name>
+  <version>0.1.0</version>
+  <description>Minimal ROS Noetic UVC camera node for the SEEKER OV9281 MJPEG input.</description>
+
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
+  <license>BSD</license>
+
+  <url type="repository">https://github.com/ros-drivers/usb_cam</url>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>camera_info_manager</depend>
+  <depend>image_transport</depend>
+  <depend>roscpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
+
+  <build_depend>ffmpeg</build_depend>
+  <build_depend>libopencv-dev</build_depend>
+  <exec_depend>ffmpeg</exec_depend>
+  <exec_depend>libopencv-dev</exec_depend>
+  <exec_depend>v4l-utils</exec_depend>
+
+  <export/>
+</package>

@@ -13,7 +13,7 @@ ROS Noetic 下的 OV9281 USB 单相机 ArUco 检测与跟踪包。相机、检�
 
 输入链固定使用：
 
-- `usb_cam`、MJPEG、`mmap`
+- `ov9281_usb_cam`、MJPEG、`mmap`
 - frame_id：`usb_camera_optical_frame`
 - 图像：`/usb_cam/image_raw`
 - 标定：`/usb_cam/camera_info`
@@ -26,6 +26,9 @@ camera_info_url: config/ov9281_640x480.yaml
 ```
 
 相机节点始终由 launch 启动，不提供关闭相机或接入其他图像源的开关。
+`ov9281_usb_cam` 基于官方 `usb_cam` 0.3.7，但使用独立包名，不覆盖系统 apt 包。
+其 FFmpeg `SwsContext` 会跨帧复用，所以 `yuv422p -> rgb24` 无硬件加速提示最多在
+上下文首次创建时出现一次；实际颜色转换仍由 CPU 完成。
 
 ## 标定 profile
 
