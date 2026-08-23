@@ -1,0 +1,43 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(front_marker_control)
+
+find_package(catkin REQUIRED COMPONENTS
+  geometry_msgs
+  mavros_msgs
+  rospy
+  std_msgs
+  tf2_geometry_msgs
+  tf2_ros
+)
+
+catkin_python_setup()
+
+catkin_package(
+  CATKIN_DEPENDS
+    geometry_msgs
+    mavros_msgs
+    rospy
+    std_msgs
+    tf2_geometry_msgs
+    tf2_ros
+)
+
+catkin_install_python(
+  PROGRAMS scripts/front_marker_control_node
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+install(
+  DIRECTORY config launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+install(
+  FILES README.md
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+if(CATKIN_ENABLE_TESTING)
+  find_package(rostest REQUIRED)
+  catkin_add_nosetests(test/test_math_and_control.py)
+  add_rostest(test/test_sample_driven_control.test)
+  add_rostest(test/test_yaw_control_switch.test)
+endif()

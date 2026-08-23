@@ -1,0 +1,35 @@
+<launch>
+  <arg name="image_topic" default="/usb_cam/image_raw" />
+  <arg name="camera_info_topic" default="/usb_cam/camera_info" />
+  <arg name="pose_topic" default="/front_marker/pose" />
+  <arg name="transform_debug_topic" default="/front_marker_vision/debug/homogeneous_transform" />
+  <arg name="processing_time_topic" default="/front_marker_vision/debug/processing_time_ms" />
+  <arg name="annotated_image_topic" default="/front_marker_vision/image_annotated" />
+  <arg name="status_topic" default="/front_marker_vision/status" />
+  <arg name="aruco_dictionary" default="DICT_5X5_1000" />
+  <arg name="target_marker_id" default="33" />
+  <arg name="target_marker_size_m" default="0.070" />
+  <arg name="publish_annotated" default="true" />
+  <arg name="annotated_rate_hz" default="5.0" />
+
+  <node pkg="front_marker_vision"
+        type="front_marker_vision_node"
+        name="front_marker_vision_node"
+        output="screen">
+    <param name="image_topic" value="$(arg image_topic)" />
+    <param name="camera_info_topic" value="$(arg camera_info_topic)" />
+    <param name="pose_topic" value="$(arg pose_topic)" />
+    <param name="transform_debug_topic" value="$(arg transform_debug_topic)" />
+    <param name="processing_time_topic" value="$(arg processing_time_topic)" />
+    <param name="annotated_image_topic" value="$(arg annotated_image_topic)" />
+    <param name="status_topic" value="$(arg status_topic)" />
+    <param name="aruco_dictionary" value="$(arg aruco_dictionary)" />
+    <param name="target_marker_id" value="$(arg target_marker_id)" />
+    <param name="target_marker_size_m" value="$(arg target_marker_size_m)" />
+    <param name="enable_contour_gate" value="true" />
+    <param name="corner_refinement_method" value="NONE" />
+    <param name="pose_solver" value="LEGACY" />
+    <param name="publish_annotated" value="$(arg publish_annotated)" />
+    <param name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
+  </node>
+</launch>

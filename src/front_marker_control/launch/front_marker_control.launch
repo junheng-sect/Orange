@@ -1,0 +1,37 @@
+<launch>
+  <arg name="config_file" default="$(find front_marker_control)/config/front_marker_control.yaml" />
+  <arg name="pose_topic" default="/front_marker/pose" />
+  <arg name="state_topic" default="/mavros/state" />
+  <arg name="setpoint_raw_topic" default="/mavros/setpoint_raw/local" />
+  <arg name="position_error_topic" default="/front_marker_control/position_error" />
+  <arg name="yaw_error_topic" default="/front_marker_control/yaw_error" />
+  <arg name="command_topic" default="/front_marker_control/cmd_vel" />
+  <arg name="setpoint_preview_topic" default="/front_marker_control/setpoint_preview" />
+  <arg name="status_topic" default="/front_marker_control/status" />
+  <arg name="base_frame" default="base_link" />
+  <arg name="target_body_x" default="0.8" />
+  <arg name="target_body_y" default="0.0" />
+  <arg name="target_body_z" default="0.0" />
+  <arg name="enable_yaw_control" default="false" />
+  <arg name="enable_setpoint_output" default="false" />
+
+  <node pkg="front_marker_control"
+        type="front_marker_control_node"
+        name="front_marker_control_node"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(arg config_file)" />
+    <rosparam param="target_xyz_body" subst_value="true">[$(arg target_body_x), $(arg target_body_y), $(arg target_body_z)]</rosparam>
+    <param name="pose_topic" value="$(arg pose_topic)" />
+    <param name="state_topic" value="$(arg state_topic)" />
+    <param name="setpoint_raw_topic" value="$(arg setpoint_raw_topic)" />
+    <param name="position_error_topic" value="$(arg position_error_topic)" />
+    <param name="yaw_error_topic" value="$(arg yaw_error_topic)" />
+    <param name="command_topic" value="$(arg command_topic)" />
+    <param name="setpoint_preview_topic" value="$(arg setpoint_preview_topic)" />
+    <param name="status_topic" value="$(arg status_topic)" />
+    <param name="base_frame" value="$(arg base_frame)" />
+    <param name="enable_yaw_control" value="$(arg enable_yaw_control)" />
+    <param name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
+  </node>
+</launch>

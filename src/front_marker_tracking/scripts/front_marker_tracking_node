@@ -1,7 +1,0 @@
-#!/usr/bin/env python3
-
-from front_marker_tracking.tracking_node import main
-
-
-if __name__ == '__main__':
-    main()

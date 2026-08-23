@@ -1,0 +1,31 @@
+target_xyz_body: [0.8, 0.0, 0.0]
+
+kp_x: 0.50
+ki_x: 0.0
+kd_x: 0.03
+kp_yz: 0.60
+ki_yz: 0.0
+kd_yz: 0.08
+kp_yaw: 0.40
+ki_yaw: 0.0
+kd_yaw: 0.0
+yaw_lpf_tau: 0.10
+
+v_limit: 0.80
+vx_limit: 0.20
+yaw_rate_limit: 0.80
+velocity_deadband: 0.03
+z_error_deadband: 0.04
+yaw_error_deadband: 0.06
+enable_yaw_control: false
+setpoint_publish_rate_hz: 20.0
+pose_timeout_sec: 0.5
+state_timeout_sec: 1.0
+future_stamp_tolerance_sec: 0.1
+tf_lookup_timeout_sec: 0.05
+
+lateral_tolerance_m: 0.08
+vertical_tolerance_m: 0.08
+distance_tolerance_m: 0.12
+yaw_tolerance_deg: 6.0
+aligned_hold_sec: 1.0

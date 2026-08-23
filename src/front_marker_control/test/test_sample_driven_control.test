@@ -1,0 +1,29 @@
+<launch>
+  <node pkg="tf2_ros"
+        type="static_transform_publisher"
+        name="sample_control_camera_tf"
+        args="0 0 0 -0.5 0.5 -0.5 0.5 base_link usb_camera_optical_frame" />
+
+  <node pkg="front_marker_control"
+        type="front_marker_control_node"
+        name="sample_front_marker_control"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(find front_marker_control)/config/front_marker_control.yaml" />
+    <param name="pose_topic" value="/test_front_marker_control/pose" />
+    <param name="state_topic" value="/test_front_marker_control/state" />
+    <param name="setpoint_raw_topic" value="/test_front_marker_control/actual" />
+    <param name="position_error_topic" value="/test_front_marker_control/error" />
+    <param name="yaw_error_topic" value="/test_front_marker_control/yaw_error" />
+    <param name="command_topic" value="/test_front_marker_control/cmd_vel" />
+    <param name="setpoint_preview_topic" value="/test_front_marker_control/preview" />
+    <param name="status_topic" value="/test_front_marker_control/status" />
+    <param name="base_frame" value="base_link" />
+    <param name="enable_setpoint_output" value="true" />
+  </node>
+
+  <test test-name="sample_driven_control"
+        pkg="front_marker_control"
+        type="test_sample_driven_control.py"
+        time-limit="25.0" />
+</launch>

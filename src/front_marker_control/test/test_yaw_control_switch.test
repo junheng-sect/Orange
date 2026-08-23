@@ -1,0 +1,45 @@
+<launch>
+  <node pkg="tf2_ros"
+        type="static_transform_publisher"
+        name="yaw_switch_camera_tf"
+        args="0 0 0 -0.5 0.5 -0.5 0.5 base_link usb_camera_optical_frame" />
+
+  <node pkg="front_marker_control"
+        type="front_marker_control_node"
+        name="yaw_control_off"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(find front_marker_control)/config/front_marker_control.yaml" />
+    <param name="pose_topic" value="/test_yaw_control/off/pose" />
+    <param name="state_topic" value="/test_yaw_control/off/state" />
+    <param name="setpoint_raw_topic" value="/test_yaw_control/off/actual" />
+    <param name="command_topic" value="/test_yaw_control/off/cmd_vel" />
+    <param name="setpoint_preview_topic" value="/test_yaw_control/off/preview" />
+    <param name="status_topic" value="/test_yaw_control/off/status" />
+    <param name="enable_setpoint_output" value="false" />
+    <param name="enable_yaw_control" value="false" />
+    <param name="aligned_hold_sec" value="0.25" />
+  </node>
+
+  <node pkg="front_marker_control"
+        type="front_marker_control_node"
+        name="yaw_control_on"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(find front_marker_control)/config/front_marker_control.yaml" />
+    <param name="pose_topic" value="/test_yaw_control/on/pose" />
+    <param name="state_topic" value="/test_yaw_control/on/state" />
+    <param name="setpoint_raw_topic" value="/test_yaw_control/on/actual" />
+    <param name="command_topic" value="/test_yaw_control/on/cmd_vel" />
+    <param name="setpoint_preview_topic" value="/test_yaw_control/on/preview" />
+    <param name="status_topic" value="/test_yaw_control/on/status" />
+    <param name="enable_setpoint_output" value="false" />
+    <param name="enable_yaw_control" value="true" />
+    <param name="aligned_hold_sec" value="0.25" />
+  </node>
+
+  <test test-name="yaw_control_switch"
+        pkg="front_marker_control"
+        type="test_yaw_control_switch.py"
+        time-limit="20.0" />
+</launch>

@@ -40,3 +40,7 @@ target_link_libraries(ov9281_usb_cam_node
 install(TARGETS ov9281_usb_cam_node
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+install(DIRECTORY config launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
