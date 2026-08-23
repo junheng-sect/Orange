@@ -36,8 +36,8 @@
 
 #include <ros/ros.h>
 #include <usb_cam/usb_cam.h>
-#include <image_transport/image_transport.h>
 #include <camera_info_manager/camera_info_manager.h>
+#include <sensor_msgs/CompressedImage.h>
 #include <sstream>
 #include <std_srvs/Empty.h>
 
@@ -51,7 +51,10 @@ public:
 
   // shared image message
   sensor_msgs::Image img_;
-  image_transport::CameraPublisher image_pub_;
+  sensor_msgs::CompressedImage compressed_img_;
+  ros::Publisher image_pub_;
+  ros::Publisher camera_info_pub_;
+  ros::Publisher compressed_pub_;
 
   // parameters
   std::string video_device_name_, io_method_name_, pixel_format_name_, camera_name_, camera_info_url_, color_format_name_ ;
@@ -84,9 +87,13 @@ public:
   UsbCamNode() :
       node_("~")
   {
-    // advertise the main image topic
-    image_transport::ImageTransport it(node_);
-    image_pub_ = it.advertiseCamera("image_raw", 1);
+    // Publish the camera's MJPEG payload directly instead of asking an
+    // image_transport plugin to decode and re-encode each frame.
+    image_pub_ = node_.advertise<sensor_msgs::Image>("image_raw", 1);
+    camera_info_pub_ = node_.advertise<sensor_msgs::CameraInfo>("camera_info", 1);
+    ros::NodeHandle public_node;
+    compressed_pub_ = public_node.advertise<sensor_msgs::CompressedImage>(
+        node_.resolveName("image_raw") + "/compressed", 1);
 
     // grab the parameters
     node_.param("video_device", video_device_name_, std::string("/dev/video0"));
@@ -240,7 +247,9 @@ public:
   bool take_and_send_image()
   {
     // grab the image
-    cam_.grab_image(&img_);
+    sensor_msgs::CompressedImage* compressed =
+        compressed_pub_.getNumSubscribers() > 0 ? &compressed_img_ : NULL;
+    cam_.grab_image(&img_, compressed);
 
     // grab the camera info
     sensor_msgs::CameraInfoPtr ci(new sensor_msgs::CameraInfo(cinfo_->getCameraInfo()));
@@ -248,7 +257,10 @@ public:
     ci->header.stamp = img_.header.stamp;
 
     // publish the image
-    image_pub_.publish(img_, *ci);
+    image_pub_.publish(img_);
+    camera_info_pub_.publish(*ci);
+    if (compressed != NULL && !compressed_img_.data.empty())
+      compressed_pub_.publish(compressed_img_);
 
     return true;
   }

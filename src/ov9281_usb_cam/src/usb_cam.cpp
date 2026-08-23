@@ -582,8 +582,15 @@ void UsbCam::mjpeg2rgb(char *MJPEG, int len, char *RGB, int NumPixels)
 
 
 
-void UsbCam::process_image(const void * src, int len, camera_image_t *dest)
+void UsbCam::process_image(
+    const void * src,
+    int len,
+    camera_image_t *dest,
+    sensor_msgs::CompressedImage* compressed_image)
 {
+  if (compressed_image != NULL)
+    compressed_image->data.clear();
+
   if (pixelformat_ == V4L2_PIX_FMT_YUYV)
   {
     if (monochrome_)
@@ -598,7 +605,14 @@ void UsbCam::process_image(const void * src, int len, camera_image_t *dest)
   else if (pixelformat_ == V4L2_PIX_FMT_UYVY)
     uyvy2rgb((char*)src, dest->image, dest->width * dest->height);
   else if (pixelformat_ == V4L2_PIX_FMT_MJPEG)
+  {
+    if (compressed_image != NULL && len > 0)
+    {
+      const unsigned char* begin = static_cast<const unsigned char*>(src);
+      compressed_image->data.assign(begin, begin + len);
+    }
     mjpeg2rgb((char*)src, len, dest->image, dest->width * dest->height);
+  }
   else if (pixelformat_ == V4L2_PIX_FMT_H264) // libav handles the decoding, so reusing the same function is fine
     mjpeg2rgb((char*)src, len, dest->image, dest->width * dest->height);
   else if (pixelformat_ == V4L2_PIX_FMT_RGB24)
@@ -611,7 +625,7 @@ void UsbCam::process_image(const void * src, int len, camera_image_t *dest)
     dest->image = (char*)src;
 }
 
-int UsbCam::read_frame()
+int UsbCam::read_frame(sensor_msgs::CompressedImage* compressed_image)
 {
   struct v4l2_buffer buf;
   unsigned int i;
@@ -638,7 +652,7 @@ int UsbCam::read_frame()
         }
       }
 
-      process_image(buffers_[0].start, len, image_);
+      process_image(buffers_[0].start, len, image_, compressed_image);
 
       break;
 
@@ -667,7 +681,7 @@ int UsbCam::read_frame()
 
       assert(buf.index < n_buffers_);
       len = buf.bytesused;
-      process_image(buffers_[buf.index].start, len, image_);
+      process_image(buffers_[buf.index].start, len, image_, compressed_image);
 
       if (-1 == xioctl(fd_, VIDIOC_QBUF, &buf))
         errno_exit("VIDIOC_QBUF");
@@ -703,7 +717,7 @@ int UsbCam::read_frame()
 
       assert(i < n_buffers_);
       len = buf.bytesused;
-      process_image((void *)buf.m.userptr, len, image_);
+      process_image((void *)buf.m.userptr, len, image_, compressed_image);
 
       if (-1 == xioctl(fd_, VIDIOC_QBUF, &buf))
         errno_exit("VIDIOC_QBUF");
@@ -1243,12 +1257,19 @@ void UsbCam::shutdown(void)
   image_ = NULL;
 }
 
-void UsbCam::grab_image(sensor_msgs::Image* msg)
+void UsbCam::grab_image(
+    sensor_msgs::Image* msg,
+    sensor_msgs::CompressedImage* compressed_image)
 {
   // grab the image
-  grab_image();
+  grab_image(compressed_image);
   // stamp the image
   msg->header.stamp = ros::Time::now();
+  if (compressed_image != NULL && !compressed_image->data.empty())
+  {
+    compressed_image->header = msg->header;
+    compressed_image->format = "jpeg";
+  }
   // fill the info
   if (monochrome_)
   {
@@ -1267,7 +1288,7 @@ void UsbCam::grab_image(sensor_msgs::Image* msg)
   }
 }
 
-void UsbCam::grab_image()
+void UsbCam::grab_image(sensor_msgs::CompressedImage* compressed_image)
 {
   fd_set fds;
   struct timeval tv;
@@ -1296,7 +1317,7 @@ void UsbCam::grab_image()
     exit(EXIT_FAILURE);
   }
 
-  read_frame();
+  read_frame(compressed_image);
   image_->is_new = 1;
 }
 
