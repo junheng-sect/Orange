@@ -9,6 +9,8 @@
   <arg name="aruco_dictionary" default="DICT_5X5_1000" />
   <arg name="target_marker_id" default="33" />
   <arg name="target_marker_size_m" default="0.070" />
+  <arg name="publish_marker_tf" default="true" />
+  <arg name="marker_frame" default="front_marker" />
   <arg name="publish_annotated" default="true" />
   <arg name="annotated_rate_hz" default="5.0" />
 
@@ -26,6 +28,8 @@
     <param name="aruco_dictionary" value="$(arg aruco_dictionary)" />
     <param name="target_marker_id" value="$(arg target_marker_id)" />
     <param name="target_marker_size_m" value="$(arg target_marker_size_m)" />
+    <param name="publish_marker_tf" value="$(arg publish_marker_tf)" />
+    <param name="marker_frame" value="$(arg marker_frame)" />
     <param name="enable_contour_gate" value="true" />
     <param name="corner_refinement_method" value="NONE" />
     <param name="pose_solver" value="LEGACY" />

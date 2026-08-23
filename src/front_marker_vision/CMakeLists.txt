@@ -14,6 +14,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   sensor_msgs
   std_msgs
+  tf2_ros
 )
 find_package(OpenCV REQUIRED COMPONENTS
   aruco
@@ -35,6 +36,7 @@ catkin_package(
     roscpp
     sensor_msgs
     std_msgs
+    tf2_ros
 )
 
 include_directories(
@@ -98,4 +100,5 @@ if(CATKIN_ENABLE_TESTING)
     )
   endif()
   add_rostest(test/test_rejected_frame_no_publish.test)
+  add_rostest(test/test_marker_tf_publication.test)
 endif()

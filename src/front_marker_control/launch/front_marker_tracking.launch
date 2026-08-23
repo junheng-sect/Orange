@@ -8,6 +8,8 @@
   <arg name="camera_frame" default="usb_camera_optical_frame" />
   <arg name="target_marker_id" default="33" />
   <arg name="target_marker_size_m" default="0.070" />
+  <arg name="publish_marker_tf" default="true" />
+  <arg name="marker_frame" default="front_marker" />
   <arg name="target_body_x" default="0.8" />
   <arg name="target_body_y" default="0.0" />
   <arg name="target_body_z" default="0.0" />
@@ -25,14 +27,16 @@
     <arg name="camera_frame" value="$(arg camera_frame)" />
   </include>
 
-  <node pkg="tf2_ros"
-        type="static_transform_publisher"
-        name="front_camera_static_transform"
-        args="0 0 0 -0.5 0.5 -0.5 0.5 $(arg base_frame) $(arg camera_frame)" />
+  <include file="$(find front_marker_control)/launch/front_camera_tf.launch">
+    <arg name="base_frame" value="$(arg base_frame)" />
+    <arg name="camera_frame" value="$(arg camera_frame)" />
+  </include>
 
   <include file="$(find front_marker_vision)/launch/front_marker_vision.launch">
     <arg name="target_marker_id" value="$(arg target_marker_id)" />
     <arg name="target_marker_size_m" value="$(arg target_marker_size_m)" />
+    <arg name="publish_marker_tf" value="$(arg publish_marker_tf)" />
+    <arg name="marker_frame" value="$(arg marker_frame)" />
     <arg name="publish_annotated" value="$(arg publish_annotated)" />
     <arg name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
   </include>

@@ -7,6 +7,10 @@ PID 或 MAVROS。
 表示 `^header.frame_id T_marker`。默认检测 `DICT_5X5_1000` 的 ID 33，黑色码边长
 为 `0.070m`。
 
+每次有效 Pose 还会用相同时间戳广播 `pose.header.frame_id -> front_marker` 动态 TF。
+可通过 `publish_marker_tf:=false` 关闭，或用 `marker_frame` 修改子坐标系名称。无有效
+检测时不会广播或伪造 Marker TF。
+
 调试输出：
 
 - `/front_marker_vision/debug/homogeneous_transform`：同一位姿的 4x4 行主序矩阵；

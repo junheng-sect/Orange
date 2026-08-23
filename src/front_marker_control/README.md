@@ -18,6 +18,12 @@ roslaunch front_marker_control front_marker_control.launch
 roslaunch front_marker_control front_marker_tracking.launch
 ```
 
+相机静态外参也可单独启动，供只运行检测与可视化的场景复用：
+
+```bash
+roslaunch front_marker_control front_camera_tf.launch
+```
+
 默认 `enable_setpoint_output=false`、`enable_yaw_control=false`。真实输出启用后仍要求
 MAVROS connected、armed、OFFBOARD、状态新鲜且 Pose/TF 新鲜；任一条件不满足时只发布
 零 setpoint。本包不会自动解锁、切换模式或起飞。

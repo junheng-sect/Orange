@@ -1,0 +1,42 @@
+<launch>
+  <arg name="start_tracking" default="true" />
+  <arg name="rviz_config" default="$(find seeker_visualization)/rviz/front_marker_tf.rviz" />
+  <arg name="odom_topic" default="/mavros/local_position/odom" />
+  <arg name="map_frame" default="map" />
+  <arg name="base_frame" default="base_link" />
+  <arg name="camera_frame" default="usb_camera_optical_frame" />
+  <arg name="marker_frame" default="front_marker" />
+
+  <!-- The full pipeline owns the camera driver and base-to-camera static TF. -->
+  <include file="$(find front_marker_control)/launch/front_marker_tracking.launch"
+           if="$(arg start_tracking)">
+    <arg name="base_frame" value="$(arg base_frame)" />
+    <arg name="camera_frame" value="$(arg camera_frame)" />
+    <arg name="publish_marker_tf" value="true" />
+    <arg name="marker_frame" value="$(arg marker_frame)" />
+    <arg name="enable_yaw_control" value="false" />
+    <arg name="enable_setpoint_output" value="false" />
+  </include>
+
+  <!-- When only camera/vision are already running, supply their missing static edge. -->
+  <include file="$(find front_marker_control)/launch/front_camera_tf.launch"
+           unless="$(arg start_tracking)">
+    <arg name="base_frame" value="$(arg base_frame)" />
+    <arg name="camera_frame" value="$(arg camera_frame)" />
+  </include>
+
+  <node pkg="seeker_visualization"
+        type="mavros_odom_tf_node.py"
+        name="mavros_odom_tf_node"
+        output="screen">
+    <param name="odom_topic" value="$(arg odom_topic)" />
+    <param name="map_frame" value="$(arg map_frame)" />
+    <param name="base_frame" value="$(arg base_frame)" />
+  </node>
+
+  <node pkg="rviz"
+        type="rviz"
+        name="front_marker_rviz"
+        args="-d $(arg rviz_config)"
+        output="screen" />
+</launch>

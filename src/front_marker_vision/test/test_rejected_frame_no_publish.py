@@ -10,6 +10,7 @@ import rostest
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Float64, String
+from tf2_msgs.msg import TFMessage
 
 from front_marker_vision.msg import HomogeneousTransform
 
@@ -53,6 +54,7 @@ class RejectedFrameNoPublishTest(unittest.TestCase):
         self.statuses = []
         self.processing_times = []
         self.annotated_images = []
+        self.marker_tf_count = 0
         self.image_pub = rospy.Publisher(
             '/test_front_marker/image', Image, queue_size=1
         )
@@ -86,6 +88,16 @@ class RejectedFrameNoPublishTest(unittest.TestCase):
             self.annotated_callback,
             queue_size=10,
         )
+        self.tf_sub = rospy.Subscriber(
+            '/tf', TFMessage, self.tf_callback, queue_size=20
+        )
+
+    def tf_callback(self, message):
+        with self.lock:
+            self.marker_tf_count += sum(
+                transform.child_frame_id == 'rejected_front_marker'
+                for transform in message.transforms
+            )
 
     def transform_callback(self, _message):
         with self.lock:
@@ -189,6 +201,7 @@ class RejectedFrameNoPublishTest(unittest.TestCase):
         with self.lock:
             self.assertEqual(self.pose_count, 0)
             self.assertEqual(self.transform_count, 0)
+            self.assertEqual(self.marker_tf_count, 0)
             self.assertTrue(self.processing_times)
             self.assertTrue(all(np.isfinite(value) and value >= 0.0
                                 for value in self.processing_times))
@@ -219,6 +232,7 @@ class RejectedFrameNoPublishTest(unittest.TestCase):
         with self.lock:
             self.assertEqual(self.pose_count, 0)
             self.assertEqual(self.transform_count, 0)
+            self.assertEqual(self.marker_tf_count, 0)
 
 
 if __name__ == '__main__':

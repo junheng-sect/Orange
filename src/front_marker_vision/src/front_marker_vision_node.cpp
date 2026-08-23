@@ -12,6 +12,7 @@
 #include <front_marker_vision/HomogeneousTransform.h>
 #include <front_marker_vision/marker_pose_estimator.hpp>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/TransformStamped.h>
 #include <opencv2/aruco.hpp>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
@@ -22,6 +23,7 @@
 #include <sensor_msgs/image_encodings.h>
 #include <std_msgs/String.h>
 #include <std_msgs/Float64.h>
+#include <tf2_ros/transform_broadcaster.h>
 
 namespace
 {
@@ -144,6 +146,7 @@ public:
                     << " | contour_gate=" << (enable_contour_gate_ ? "true" : "false")
                     << " | corners=" << corner_refinement_method_
                     << " | solver=" << pose_solver_
+                    << " | marker_tf=" << (publish_marker_tf_ ? marker_frame_ : "disabled")
                     << " | annotated=" << (publish_annotated_ ? "true" : "false"));
   }
 
@@ -166,6 +169,8 @@ private:
     pnh_.param<std::string>("aruco_dictionary", dictionary_name_, "DICT_5X5_1000");
     pnh_.param("target_marker_id", target_marker_id_, 33);
     pnh_.param("target_marker_size_m", target_marker_size_m_, 0.070);
+    pnh_.param("publish_marker_tf", publish_marker_tf_, true);
+    pnh_.param<std::string>("marker_frame", marker_frame_, "front_marker");
     pnh_.param("publish_annotated", publish_annotated_, true);
     pnh_.param("annotated_rate_hz", annotated_rate_hz_, 5.0);
     pnh_.param("enable_contour_gate", enable_contour_gate_, true);
@@ -197,6 +202,10 @@ private:
     if (!std::isfinite(target_marker_size_m_) || target_marker_size_m_ <= 0.0)
     {
       throw std::runtime_error("target_marker_size_m must be finite and greater than zero");
+    }
+    if (publish_marker_tf_ && marker_frame_.empty())
+    {
+      throw std::runtime_error("marker_frame must not be empty when publish_marker_tf is true");
     }
     if (!(corner_refinement_method_ == "NONE" || corner_refinement_method_ == "SUBPIX"))
     {
@@ -697,6 +706,25 @@ private:
 
     pose_pub_.publish(pose);
     transform_debug_pub_.publish(transform);
+    if (publish_marker_tf_)
+    {
+      if (pose.header.frame_id == marker_frame_)
+      {
+        ROS_ERROR_THROTTLE(
+          1.0, "Refusing marker TF with identical parent and child frame '%s'",
+          marker_frame_.c_str());
+        return true;
+      }
+
+      geometry_msgs::TransformStamped marker_transform;
+      marker_transform.header = pose.header;
+      marker_transform.child_frame_id = marker_frame_;
+      marker_transform.transform.translation.x = pose.pose.position.x;
+      marker_transform.transform.translation.y = pose.pose.position.y;
+      marker_transform.transform.translation.z = pose.pose.position.z;
+      marker_transform.transform.rotation = pose.pose.orientation;
+      marker_tf_broadcaster_.sendTransform(marker_transform);
+    }
     return true;
   }
 
@@ -768,6 +796,7 @@ private:
   ros::Publisher annotated_pub_;
   ros::Publisher status_pub_;
   ros::Publisher processing_time_pub_;
+  tf2_ros::TransformBroadcaster marker_tf_broadcaster_;
 
   std::string image_topic_;
   std::string camera_info_topic_;
@@ -781,6 +810,8 @@ private:
   std::string camera_info_error_;
   int target_marker_id_ = 33;
   double target_marker_size_m_ = 0.070;
+  bool publish_marker_tf_ = true;
+  std::string marker_frame_ = "front_marker";
   uint32_t camera_info_width_ = 0;
   uint32_t camera_info_height_ = 0;
   bool publish_annotated_ = true;
