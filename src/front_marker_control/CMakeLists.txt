@@ -38,6 +38,7 @@ install(
 if(CATKIN_ENABLE_TESTING)
   find_package(rostest REQUIRED)
   catkin_add_nosetests(test/test_math_and_control.py)
+  catkin_add_nosetests(test/test_lock_scope.py)
   add_rostest(test/test_sample_driven_control.test)
   add_rostest(test/test_yaw_control_switch.test)
 endif()

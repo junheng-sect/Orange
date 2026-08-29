@@ -296,50 +296,69 @@ class FrontMarkerControlNode(object):
         normalized.pose.orientation.w = w
         return normalized
 
+    def observation_stamp_issue(self, stamp, now):
+        """Return a rejection reason for a source stamp.
+
+        The caller must hold ``self.lock`` because the accepted source stamp is
+        shared with other Pose callback threads.
+        """
+        if stamp == rospy.Time():
+            return '拒绝零时间戳 Pose'
+        if self.last_accepted_source_stamp is not None:
+            if stamp == self.last_accepted_source_stamp:
+                return '拒绝重复时间戳 Pose'
+            if stamp < self.last_accepted_source_stamp:
+                return '拒绝倒退时间戳 Pose'
+
+        source_age = (now - stamp).to_sec()
+        if source_age > self.max_pose_latency_sec:
+            return '收到时已过期的 Pose，source_age=%.3fs' % source_age
+        if source_age < -self.future_stamp_tolerance_sec:
+            return '拒绝未来时间戳 Pose，source_age=%.3fs' % source_age
+        return None
+
     def pose_callback(self, message):
         now = rospy.Time.now()
+
+        # Reject obviously unusable samples before doing a potentially blocking
+        # TF lookup. This first check is repeated at commit time because another
+        # subscriber thread may accept a newer sample while TF is running.
         with self.lock:
-            if message.header.stamp == rospy.Time():
-                self.invalidate_observation('拒绝零时间戳 Pose')
-                return
-            if self.last_accepted_source_stamp is not None:
-                if message.header.stamp == self.last_accepted_source_stamp:
-                    self.invalidate_observation('拒绝重复时间戳 Pose')
-                    return
-                if message.header.stamp < self.last_accepted_source_stamp:
-                    self.invalidate_observation('拒绝倒退时间戳 Pose')
-                    return
-
-            source_age = (now - message.header.stamp).to_sec()
-            if source_age > self.max_pose_latency_sec:
-                self.invalidate_observation(
-                    '收到时已过期的 Pose，source_age=%.3fs' % source_age
-                )
-                return
-            if source_age < -self.future_stamp_tolerance_sec:
-                self.invalidate_observation(
-                    '拒绝未来时间戳 Pose，source_age=%.3fs' % source_age
-                )
+            stamp_issue = self.observation_stamp_issue(message.header.stamp, now)
+            if stamp_issue is not None:
+                self.invalidate_observation(stamp_issue)
                 return
 
-            try:
-                normalized = self.normalized_pose(message)
-                pose_body = self.tf_buffer.transform(
-                    normalized,
-                    self.base_frame,
-                    rospy.Duration(self.tf_lookup_timeout_sec),
-                )
-                error = position_error_body(pose_body.pose, self.target_xyz_body)
-                yaw_error = wrap_angle(marker_heading_body(pose_body.pose.orientation))
-            except ValueError as exception:
-                self.invalidate_observation('拒绝非法 Pose: %s' % exception)
+        try:
+            normalized = self.normalized_pose(message)
+            pose_body = self.tf_buffer.transform(
+                normalized,
+                self.base_frame,
+                rospy.Duration(self.tf_lookup_timeout_sec),
+            )
+            error = position_error_body(pose_body.pose, self.target_xyz_body)
+            yaw_error = wrap_angle(marker_heading_body(pose_body.pose.orientation))
+        except ValueError as exception:
+            rejection_reason = '拒绝非法 Pose: %s' % exception
+        except (
+            tf2_ros.LookupException,
+            tf2_ros.ConnectivityException,
+            tf2_ros.ExtrapolationException,
+        ) as exception:
+            rejection_reason = 'WAIT_TF: %s' % exception
+        else:
+            rejection_reason = None
+
+        publish_snapshot = None
+        with self.lock:
+            # Preserve timestamp rejection precedence and ensure an older Pose
+            # cannot overwrite state committed while its TF lookup was running.
+            stamp_issue = self.observation_stamp_issue(message.header.stamp, now)
+            if stamp_issue is not None:
+                self.invalidate_observation(stamp_issue)
                 return
-            except (
-                tf2_ros.LookupException,
-                tf2_ros.ConnectivityException,
-                tf2_ros.ExtrapolationException,
-            ) as exception:
-                self.invalidate_observation('WAIT_TF: %s' % exception)
+            if rejection_reason is not None:
+                self.invalidate_observation(rejection_reason)
                 return
 
             if self.last_pid_source_stamp is None:
@@ -363,7 +382,13 @@ class FrontMarkerControlNode(object):
             self.last_pid_source_stamp = message.header.stamp
             self.last_accepted_source_stamp = message.header.stamp
             self.last_observation_issue = ''
-            self.publish_errors(message.header.stamp, error, yaw_error)
+            publish_snapshot = (
+                message.header.stamp,
+                tuple(float(value) for value in error),
+                float(yaw_error),
+            )
+
+        self.publish_errors(*publish_snapshot)
 
     def publish_errors(self, stamp, error, yaw_error):
         message = Vector3Stamped()
@@ -446,6 +471,7 @@ class FrontMarkerControlNode(object):
         return math.sqrt(sum(float(value) ** 2 for value in body_velocity))
 
     def control_loop(self, _event):
+        status_to_publish = None
         with self.lock:
             now = rospy.Time.now()
             dt = self.command_dt(now)
@@ -481,8 +507,6 @@ class FrontMarkerControlNode(object):
                 else:
                     motion_state = 'WAIT_POSE'
                 actual_allowed = self.enable_setpoint_output
-
-            self.publish_commands(now, body_velocity, yaw_rate, actual_allowed)
 
             if pose_fresh:
                 preview_text = (
@@ -531,7 +555,18 @@ class FrontMarkerControlNode(object):
                 status_text = 'SETPOINT_ACTIVE | ' + preview_text
             else:
                 status_text = 'WAIT_POSE | actual=zero | ' + preview_text
-            self.set_status(status_text, motion_state)
+            if self.set_status(status_text, motion_state):
+                status_to_publish = status_text
+            command_snapshot = (
+                now,
+                tuple(float(value) for value in body_velocity),
+                float(yaw_rate),
+                bool(actual_allowed),
+            )
+
+        self.publish_commands(*command_snapshot)
+        if status_to_publish is not None:
+            self.status_pub.publish(String(data=status_to_publish))
 
     def make_setpoint(self, stamp, body_velocity, yaw_rate):
         vx, vy, vz, wz = body_flu_setpoint_components(
@@ -572,8 +607,7 @@ class FrontMarkerControlNode(object):
         state_changed = motion_state != self.last_motion_state
         self.last_status = text
         self.last_motion_state = motion_state
-        if state_changed:
-            self.status_pub.publish(String(data=text))
+        return state_changed
 
     def status_loop(self, _event):
         with self.lock:
