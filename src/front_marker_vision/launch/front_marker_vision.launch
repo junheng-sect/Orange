@@ -15,6 +15,9 @@
   <arg name="enable_roi" default="true" />
   <arg name="publish_annotated" default="true" />
   <arg name="annotated_rate_hz" default="5.0" />
+  <arg name="ippe_reference_confirm_frames" default="3" />
+  <arg name="ippe_reference_max_rotation_step_rad" default="0.35" />
+  <arg name="ippe_reference_max_translation_step_m" default="0.10" />
 
   <node pkg="front_marker_vision"
         type="front_marker_vision_node"
@@ -35,6 +38,9 @@
     <param name="enable_contour_gate" value="true" />
     <param name="enable_roi" value="$(arg enable_roi)" />
     <param name="pose_solver" value="$(arg pose_solver)" />
+    <param name="ippe_reference_confirm_frames" value="$(arg ippe_reference_confirm_frames)" />
+    <param name="ippe_reference_max_rotation_step_rad" value="$(arg ippe_reference_max_rotation_step_rad)" />
+    <param name="ippe_reference_max_translation_step_m" value="$(arg ippe_reference_max_translation_step_m)" />
     <param name="publish_annotated" value="$(arg publish_annotated)" />
     <param name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
   </node>

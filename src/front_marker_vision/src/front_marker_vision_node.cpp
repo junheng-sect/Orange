@@ -42,6 +42,22 @@ bool finiteVec3(const cv::Vec3d& value)
   return std::isfinite(value[0]) && std::isfinite(value[1]) && std::isfinite(value[2]);
 }
 
+const char* poseReferenceStateName(front_marker_vision::PoseReferenceState state)
+{
+  switch (state)
+  {
+    case front_marker_vision::PoseReferenceState::UNINITIALIZED:
+      return "UNINITIALIZED";
+    case front_marker_vision::PoseReferenceState::BOOTSTRAP:
+      return "BOOTSTRAP";
+    case front_marker_vision::PoseReferenceState::TRACKING:
+      return "TRACKING";
+    case front_marker_vision::PoseReferenceState::SWITCH_PENDING:
+      return "SWITCH_PENDING";
+  }
+  return "UNKNOWN";
+}
+
 bool rotationToQuaternion(const cv::Mat& rotation, geometry_msgs::Quaternion& quaternion)
 {
   if (rotation.rows != 3 || rotation.cols != 3 || rotation.type() != CV_64F)
@@ -148,6 +164,8 @@ public:
                     << " | contour_gate=" << (enable_contour_gate_ ? "true" : "false")
                     << " | roi=" << (enable_roi_ ? "adaptive" : "full-frame")
                     << " | solver=" << pose_solver_
+                    << " | reference_confirm_frames="
+                    << pose_reference_options_.confirmation_frames
                     << " | marker_tf=" << (publish_marker_tf_ ? marker_frame_ : "disabled")
                     << " | annotated=" << (publish_annotated_ ? "true" : "false"));
   }
@@ -189,6 +207,17 @@ private:
     pnh_.param("ippe_ambiguity_gap_px", ippe_ambiguity_gap_px_, 0.2);
     pnh_.param("max_reprojection_error_px", max_reprojection_error_px_, 1.0);
     pnh_.param("pose_continuity_timeout_sec", pose_continuity_timeout_sec_, 0.5);
+    pnh_.param(
+      "ippe_reference_confirm_frames", pose_reference_options_.confirmation_frames, 3);
+    pnh_.param(
+      "ippe_reference_max_rotation_step_rad",
+      pose_reference_options_.max_rotation_step_rad,
+      0.35);
+    pnh_.param(
+      "ippe_reference_max_translation_step_m",
+      pose_reference_options_.max_translation_step_m,
+      0.10);
+    pose_reference_options_.timeout_sec = pose_continuity_timeout_sec_;
 
     pose_solver_ = uppercase(pose_solver_);
 
@@ -218,11 +247,19 @@ private:
     {
       throw std::runtime_error("invalid contour gate parameters");
     }
-    if (ippe_ambiguity_gap_px_ < 0.0 || max_reprojection_error_px_ <= 0.0 ||
-        pose_continuity_timeout_sec_ <= 0.0)
+    if (!std::isfinite(ippe_ambiguity_gap_px_) || ippe_ambiguity_gap_px_ < 0.0 ||
+        !std::isfinite(max_reprojection_error_px_) || max_reprojection_error_px_ <= 0.0 ||
+        !std::isfinite(pose_continuity_timeout_sec_) || pose_continuity_timeout_sec_ <= 0.0 ||
+        pose_reference_options_.confirmation_frames < 1 ||
+        !std::isfinite(pose_reference_options_.max_rotation_step_rad) ||
+        pose_reference_options_.max_rotation_step_rad <= 0.0 ||
+        !std::isfinite(pose_reference_options_.max_translation_step_m) ||
+        pose_reference_options_.max_translation_step_m <= 0.0)
     {
       throw std::runtime_error("invalid IPPE parameters");
     }
+    pose_reference_tracker_ =
+      front_marker_vision::PoseReferenceTracker(pose_reference_options_);
   }
 
   void configureDictionary()
@@ -360,6 +397,12 @@ private:
   {
     const ros::WallTime processing_start = ros::WallTime::now();
     ++frame_count_;
+    const double frame_stamp_sec = message->header.stamp.toSec();
+    const front_marker_vision::PoseSolution* committed_reference = nullptr;
+    if (pose_solver_ == "IPPE_SQUARE")
+    {
+      committed_reference = pose_reference_tracker_.referenceForFrame(frame_stamp_sec);
+    }
     cv_bridge::CvImageConstPtr source_image;
     cv::Mat gray_image;
     try
@@ -383,7 +426,9 @@ private:
     catch (const cv_bridge::Exception& exception)
     {
       roi_tracker_.reset();
-      publishStatus(std::string("IMAGE_CONVERSION_ERROR: ") + exception.what());
+      publishStatus(appendReferenceStatus(
+        std::string("IMAGE_CONVERSION_ERROR: ") + exception.what()));
+      pose_reference_tracker_.breakSequence();
       publishProcessingTime(processing_start);
       return;
     }
@@ -399,10 +444,12 @@ private:
       status << "IMAGE_CAMERA_INFO_SIZE_MISMATCH: image=" << gray_image.cols << "x"
              << gray_image.rows << " camera_info=" << camera_info_width_ << "x"
              << camera_info_height_;
-      const std::string status_text = appendRoiStatus(status.str(), full_frame, image_size);
+      const std::string status_text = appendRoiStatus(
+        appendReferenceStatus(status.str()), full_frame, image_size);
       publishStatus(status_text);
       publishAnnotatedImage(
         message, gray_image, {}, {}, -1, nullptr, nullptr, full_frame, status_text);
+      pose_reference_tracker_.breakSequence();
       publishProcessingTime(processing_start);
       return;
     }
@@ -475,30 +522,38 @@ private:
       }
       stream << " | POSE_DISABLED: "
              << (camera_info_error_.empty() ? "waiting for CameraInfo" : camera_info_error_);
-      const std::string status = appendRoiStatus(stream.str(), search_rect, image_size);
+      const std::string status = appendRoiStatus(
+        appendReferenceStatus(stream.str()), search_rect, image_size);
       publishStatus(status);
       publishAnnotatedImage(
         message, gray_image, corners, ids, selected_index, nullptr, nullptr, search_rect, status);
+      pose_reference_tracker_.breakSequence();
       publishProcessingTime(processing_start);
       return;
     }
     if (message->header.frame_id.empty())
     {
       const std::string status = appendRoiStatus(
-        "INVALID_IMAGE_FRAME: frame_id must not be empty", search_rect, image_size);
+        appendReferenceStatus("INVALID_IMAGE_FRAME: frame_id must not be empty"),
+        search_rect,
+        image_size);
       publishStatus(status);
       publishAnnotatedImage(
         message, gray_image, corners, ids, selected_index, nullptr, nullptr, search_rect, status);
+      pose_reference_tracker_.breakSequence();
       publishProcessingTime(processing_start);
       return;
     }
     if (camera_info_frame_ != message->header.frame_id)
     {
       const std::string status = appendRoiStatus(
-        "FRAME_MISMATCH: image and CameraInfo frame_id differ", search_rect, image_size);
+        appendReferenceStatus("FRAME_MISMATCH: image and CameraInfo frame_id differ"),
+        search_rect,
+        image_size);
       publishStatus(status);
       publishAnnotatedImage(
         message, gray_image, corners, ids, selected_index, nullptr, nullptr, search_rect, status);
+      pose_reference_tracker_.breakSequence();
       publishProcessingTime(processing_start);
       return;
     }
@@ -506,6 +561,12 @@ private:
     cv::Vec3d rvec;
     cv::Vec3d tvec;
     bool pose_valid = false;
+    bool has_ippe_solution = false;
+    bool reference_observed = false;
+    front_marker_vision::PoseSolution ippe_solution;
+    int selected_candidate_rank = -1;
+    int reference_candidate_rank = -1;
+    bool ambiguous_pose = false;
     std::string status;
     if (selected_index < 0)
     {
@@ -530,22 +591,15 @@ private:
 
       if (rejection_stage.empty() && pose_solver_ == "IPPE_SQUARE")
       {
-        const front_marker_vision::PoseSolution* previous = nullptr;
-        if (has_previous_pose_ && !message->header.stamp.isZero() && !previous_pose_stamp_.isZero())
-        {
-          const double age = (message->header.stamp - previous_pose_stamp_).toSec();
-          if (age >= 0.0 && age <= pose_continuity_timeout_sec_)
-          {
-            previous = &previous_pose_;
-          }
-        }
         front_marker_vision::PoseSolution solution;
         if (!front_marker_vision::estimatePoseIppeSquare(
               working_corners,
               target_marker_size_m_,
               camera_matrix_,
               dist_coeffs_,
-              previous,
+              committed_reference,
+              pose_reference_options_.max_rotation_step_rad,
+              pose_reference_options_.max_translation_step_m,
               ippe_ambiguity_gap_px_,
               max_reprojection_error_px_,
               solution,
@@ -556,10 +610,15 @@ private:
         }
         else
         {
+          ippe_solution = solution;
+          has_ippe_solution = true;
           rvec = solution.rvec;
           tvec = solution.tvec;
           reprojection_error_px = solution.reprojection_error_px;
           ippe_candidate_count = solution.candidate_count;
+          selected_candidate_rank = solution.selected_candidate_rank;
+          reference_candidate_rank = solution.reference_candidate_rank;
+          ambiguous_pose = solution.ambiguous;
         }
       }
       else if (rejection_stage.empty())
@@ -582,6 +641,27 @@ private:
         }
       }
 
+      if (rejection_stage.empty() && !poseOutputIsValid(rvec, tvec))
+      {
+        rejection_stage = "POSE";
+        rejection_reason = "transform contains a non-finite rotation or translation";
+      }
+
+      if (rejection_stage.empty() && pose_solver_ == "IPPE_SQUARE" && has_ippe_solution)
+      {
+        pose_reference_tracker_.observe(ippe_solution, frame_stamp_sec);
+        reference_observed = true;
+        if (!pose_reference_tracker_.posePublishAllowed())
+        {
+          rejection_stage = "AMBIGUITY_PENDING";
+          std::ostringstream stream;
+          stream << "candidate branch differs from committed reference; confirmation "
+                 << pose_reference_tracker_.streak() << "/"
+                 << pose_reference_tracker_.confirmationFrames();
+          rejection_reason = stream.str();
+        }
+      }
+
       if (rejection_stage.empty())
       {
         pose_valid = publishPoseAndDebug(message, rvec, tvec);
@@ -595,12 +675,6 @@ private:
       if (pose_valid)
       {
         ++detect_count_;
-        previous_pose_.rvec = rvec;
-        previous_pose_.tvec = tvec;
-        previous_pose_.reprojection_error_px = reprojection_error_px;
-        previous_pose_.candidate_count = ippe_candidate_count;
-        previous_pose_stamp_ = message->header.stamp;
-        has_previous_pose_ = true;
         std::ostringstream stream;
         stream << std::fixed << std::setprecision(3)
                << "DETECTED: ID" << target_marker_id_
@@ -634,12 +708,18 @@ private:
       }
     }
 
+    status = appendReferenceStatus(
+      status, selected_candidate_rank, reference_candidate_rank, ambiguous_pose);
     status = appendRoiStatus(status, search_rect, image_size);
     publishStatus(status);
     publishAnnotatedImage(
       message, gray_image, corners, ids, selected_index,
       pose_valid ? &rvec : nullptr, pose_valid ? &tvec : nullptr, search_rect, status);
     publishProcessingTime(processing_start);
+    if (pose_solver_ == "IPPE_SQUARE" && !reference_observed)
+    {
+      pose_reference_tracker_.breakSequence();
+    }
   }
 
   std::string appendRoiStatus(
@@ -669,12 +749,60 @@ private:
     return stream.str();
   }
 
+  std::string appendReferenceStatus(
+    const std::string& status,
+    int selected_candidate_rank = -1,
+    int reference_candidate_rank = -1,
+    bool ambiguous_pose = false) const
+  {
+    std::ostringstream stream;
+    stream << status;
+    if (pose_solver_ == "IPPE_SQUARE")
+    {
+      stream << " | ref_state=" << poseReferenceStateName(pose_reference_tracker_.state())
+             << " ref_streak=" << pose_reference_tracker_.streak() << "/"
+             << pose_reference_tracker_.confirmationFrames()
+             << " switch_pending=" << (pose_reference_tracker_.switchPending() ? 1 : 0)
+             << " selected_rank=" << selected_candidate_rank
+             << " reference_rank=" << reference_candidate_rank
+             << " ambiguous=" << (ambiguous_pose ? 1 : 0)
+             << " branch_flips=" << pose_reference_tracker_.branchFlipCount();
+    }
+    else
+    {
+      stream << " | ref_state=DISABLED ref_streak=0/"
+             << pose_reference_tracker_.confirmationFrames()
+             << " switch_pending=0 selected_rank=-1 reference_rank=-1"
+             << " ambiguous=0 branch_flips=0";
+    }
+    return stream.str();
+  }
+
   void publishProcessingTime(const ros::WallTime& start)
   {
     std_msgs::Float64 message;
     const double elapsed_ms = (ros::WallTime::now() - start).toSec() * 1000.0;
     message.data = std::isfinite(elapsed_ms) && elapsed_ms >= 0.0 ? elapsed_ms : 0.0;
     processing_time_pub_.publish(message);
+  }
+
+  bool poseOutputIsValid(const cv::Vec3d& rvec, const cv::Vec3d& tvec) const
+  {
+    if (!finiteVec3(rvec) || !finiteVec3(tvec))
+    {
+      return false;
+    }
+    cv::Mat rotation;
+    try
+    {
+      cv::Rodrigues(rvec, rotation);
+    }
+    catch (const cv::Exception&)
+    {
+      return false;
+    }
+    geometry_msgs::Quaternion quaternion;
+    return rotationToQuaternion(rotation, quaternion);
   }
 
   bool publishPoseAndDebug(
@@ -885,15 +1013,14 @@ private:
   double ippe_ambiguity_gap_px_ = 0.2;
   double max_reprojection_error_px_ = 1.0;
   double pose_continuity_timeout_sec_ = 0.5;
+  front_marker_vision::PoseReferenceOptions pose_reference_options_;
+  front_marker_vision::PoseReferenceTracker pose_reference_tracker_;
 
   cv::Ptr<cv::aruco::Dictionary> dictionary_;
   cv::Ptr<cv::aruco::DetectorParameters> detector_parameters_;
   cv::Mat camera_matrix_;
   cv::Mat dist_coeffs_;
   bool has_camera_info_ = false;
-  bool has_previous_pose_ = false;
-  front_marker_vision::PoseSolution previous_pose_;
-  ros::Time previous_pose_stamp_;
   front_marker_vision::RoiTracker roi_tracker_;
 
   ros::Time last_annotated_time_;

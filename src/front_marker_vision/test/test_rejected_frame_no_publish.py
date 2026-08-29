@@ -262,6 +262,15 @@ class RejectedFrameNoPublishTest(unittest.TestCase):
             self.assertEqual(self.pose_count, 0)
             self.assertEqual(self.transform_count, 0)
             self.assertEqual(self.marker_tf_count, 0)
+            rejected_statuses = [
+                text for text in self.statuses
+                if text.startswith('REJECTED_CONTOUR')
+            ]
+            self.assertTrue(rejected_statuses)
+            self.assertTrue(
+                all('branch_flips=0' in text for text in rejected_statuses),
+                'IPPE status did not expose a zero confirmed flip count',
+            )
 
 
 if __name__ == '__main__':

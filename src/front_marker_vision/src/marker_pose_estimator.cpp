@@ -5,6 +5,7 @@
 #include <limits>
 #include <numeric>
 #include <sstream>
+#include <stdexcept>
 #include <utility>
 
 #include <opencv2/calib3d.hpp>
@@ -246,12 +247,199 @@ double rotationDistanceRad(const cv::Vec3d& first_rvec, const cv::Vec3d& second_
   return std::acos(cosine);
 }
 
+PoseReferenceTracker::PoseReferenceTracker(const PoseReferenceOptions& options)
+  : options_(options)
+{
+  if (options_.confirmation_frames < 1 ||
+      !std::isfinite(options_.max_rotation_step_rad) ||
+      options_.max_rotation_step_rad <= 0.0 ||
+      !std::isfinite(options_.max_translation_step_m) ||
+      options_.max_translation_step_m <= 0.0 ||
+      !std::isfinite(options_.timeout_sec) || options_.timeout_sec <= 0.0)
+  {
+    throw std::invalid_argument("invalid pose reference tracker options");
+  }
+}
+
+const PoseSolution* PoseReferenceTracker::referenceForFrame(double stamp_sec)
+{
+  if (!std::isfinite(stamp_sec) || stamp_sec <= 0.0)
+  {
+    clearReference();
+    last_frame_stamp_sec_ = std::numeric_limits<double>::quiet_NaN();
+    return nullptr;
+  }
+
+  if (std::isfinite(last_frame_stamp_sec_))
+  {
+    const double frame_delta = stamp_sec - last_frame_stamp_sec_;
+    if (frame_delta < 0.0)
+    {
+      clearReference();
+    }
+    else if (frame_delta > options_.timeout_sec)
+    {
+      breakSequence();
+    }
+  }
+  last_frame_stamp_sec_ = stamp_sec;
+
+  if (has_reference_ && stamp_sec - reference_stamp_sec_ > options_.timeout_sec)
+  {
+    clearReference();
+  }
+  return has_reference_ ? &reference_ : nullptr;
+}
+
+PoseReferenceUpdate PoseReferenceTracker::observe(
+  const PoseSolution& solution, double stamp_sec)
+{
+  PoseReferenceUpdate update;
+  referenceForFrame(stamp_sec);
+  if (!std::isfinite(stamp_sec) || stamp_sec <= 0.0)
+  {
+    return update;
+  }
+
+  if (!has_reference_)
+  {
+    if (!has_pending_pose_ || !geometricallyConsistent(pending_pose_, solution))
+    {
+      streak_ = 1;
+    }
+    else
+    {
+      streak_ = std::min(options_.confirmation_frames, streak_ + 1);
+    }
+    pending_pose_ = solution;
+    has_pending_pose_ = true;
+    pending_matches_reference_ = true;
+
+    if (streak_ >= options_.confirmation_frames)
+    {
+      reference_ = solution;
+      reference_stamp_sec_ = stamp_sec;
+      has_reference_ = true;
+      streak_ = options_.confirmation_frames;
+      update.reference_committed = true;
+    }
+    return update;
+  }
+
+  const bool matches_reference = solution.candidate_count < 2 ?
+    geometricallyConsistent(reference_, solution) :
+    solution.reference_candidate_rank >= 0 &&
+      solution.selected_candidate_rank == solution.reference_candidate_rank &&
+      geometricallyConsistent(reference_, solution);
+  if (!has_pending_pose_ || matches_reference != pending_matches_reference_ ||
+      !geometricallyConsistent(pending_pose_, solution))
+  {
+    streak_ = 1;
+  }
+  else
+  {
+    streak_ = std::min(options_.confirmation_frames, streak_ + 1);
+  }
+  pending_pose_ = solution;
+  has_pending_pose_ = true;
+  pending_matches_reference_ = matches_reference;
+
+  if (streak_ >= options_.confirmation_frames)
+  {
+    reference_ = solution;
+    reference_stamp_sec_ = stamp_sec;
+    update.reference_committed = true;
+    if (!matches_reference)
+    {
+      ++branch_flip_count_;
+      update.branch_flip_confirmed = true;
+    }
+    pending_matches_reference_ = true;
+    streak_ = options_.confirmation_frames;
+  }
+  return update;
+}
+
+void PoseReferenceTracker::breakSequence()
+{
+  has_pending_pose_ = false;
+  pending_matches_reference_ = true;
+  streak_ = 0;
+}
+
+bool PoseReferenceTracker::hasReference() const
+{
+  return has_reference_;
+}
+
+const PoseSolution& PoseReferenceTracker::reference() const
+{
+  return reference_;
+}
+
+PoseReferenceState PoseReferenceTracker::state() const
+{
+  if (!has_reference_)
+  {
+    return has_pending_pose_ ? PoseReferenceState::BOOTSTRAP :
+      PoseReferenceState::UNINITIALIZED;
+  }
+  if (has_pending_pose_ && !pending_matches_reference_)
+  {
+    return PoseReferenceState::SWITCH_PENDING;
+  }
+  return PoseReferenceState::TRACKING;
+}
+
+int PoseReferenceTracker::streak() const
+{
+  return streak_;
+}
+
+int PoseReferenceTracker::confirmationFrames() const
+{
+  return options_.confirmation_frames;
+}
+
+bool PoseReferenceTracker::switchPending() const
+{
+  return state() == PoseReferenceState::SWITCH_PENDING;
+}
+
+bool PoseReferenceTracker::posePublishAllowed() const
+{
+  return !switchPending();
+}
+
+uint64_t PoseReferenceTracker::branchFlipCount() const
+{
+  return branch_flip_count_;
+}
+
+void PoseReferenceTracker::clearReference()
+{
+  has_reference_ = false;
+  reference_ = PoseSolution();
+  reference_stamp_sec_ = std::numeric_limits<double>::quiet_NaN();
+  breakSequence();
+}
+
+bool PoseReferenceTracker::geometricallyConsistent(
+  const PoseSolution& first, const PoseSolution& second) const
+{
+  return rotationDistanceRad(first.rvec, second.rvec) <=
+      options_.max_rotation_step_rad &&
+    cv::norm(first.tvec - second.tvec) <= options_.max_translation_step_m;
+}
+
 bool estimatePoseIppeSquare(
   const std::vector<cv::Point2f>& corners,
   double marker_size_m,
   const cv::Mat& camera_matrix,
   const cv::Mat& dist_coeffs,
   const PoseSolution* previous,
+  double max_reference_rotation_distance_rad,
+  double max_reference_translation_distance_m,
   double ambiguity_gap_px,
   double max_reprojection_error_px,
   PoseSolution& output,
@@ -259,9 +447,13 @@ bool estimatePoseIppeSquare(
 {
   output = PoseSolution();
   reason.clear();
-  if (corners.size() != 4 || marker_size_m <= 0.0 || !std::isfinite(marker_size_m))
+  if (corners.size() != 4 || marker_size_m <= 0.0 || !std::isfinite(marker_size_m) ||
+      !std::isfinite(max_reference_rotation_distance_rad) ||
+      max_reference_rotation_distance_rad <= 0.0 ||
+      !std::isfinite(max_reference_translation_distance_m) ||
+      max_reference_translation_distance_m <= 0.0)
   {
-    reason = "IPPE requires four corners and a positive finite marker size";
+    reason = "IPPE requires four corners, a positive finite marker size, and positive reference gates";
     return false;
   }
 
@@ -318,24 +510,48 @@ bool estimatePoseIppeSquare(
     candidates.begin(), candidates.end(), [](const PoseSolution& first, const PoseSolution& second) {
       return first.reprojection_error_px < second.reprojection_error_px;
     });
-  size_t selected = 0;
-  if (previous != nullptr && candidates.size() > 1 &&
-      candidates[1].reprojection_error_px - candidates[0].reprojection_error_px <= ambiguity_gap_px)
+  const double reprojection_error_gap_px = candidates.size() > 1 ?
+    candidates[1].reprojection_error_px - candidates[0].reprojection_error_px :
+    std::numeric_limits<double>::infinity();
+  const bool ambiguous = candidates.size() > 1 &&
+    reprojection_error_gap_px <= ambiguity_gap_px;
+
+  int reference_candidate_rank = -1;
+  if (previous != nullptr)
   {
-    const double first_rotation = rotationDistanceRad(previous->rvec, candidates[0].rvec);
-    const double second_rotation = rotationDistanceRad(previous->rvec, candidates[1].rvec);
-    if (second_rotation < first_rotation ||
-        (std::abs(second_rotation - first_rotation) < 1e-12 &&
-         cv::norm(candidates[1].tvec - previous->tvec) <
-           cv::norm(candidates[0].tvec - previous->tvec)))
+    double best_rotation_distance = std::numeric_limits<double>::infinity();
+    double best_translation_distance = std::numeric_limits<double>::infinity();
+    for (size_t index = 0; index < candidates.size(); ++index)
     {
-      selected = 1;
+      const double rotation_distance = rotationDistanceRad(previous->rvec, candidates[index].rvec);
+      const double translation_distance = cv::norm(candidates[index].tvec - previous->tvec);
+      const bool within_reference_gate =
+        rotation_distance <= max_reference_rotation_distance_rad &&
+        translation_distance <= max_reference_translation_distance_m;
+      if (within_reference_gate &&
+          (rotation_distance < best_rotation_distance ||
+          (std::abs(rotation_distance - best_rotation_distance) < 1e-12 &&
+           translation_distance < best_translation_distance)))
+      {
+        reference_candidate_rank = static_cast<int>(index);
+        best_rotation_distance = rotation_distance;
+        best_translation_distance = translation_distance;
+      }
     }
   }
 
+  size_t selected = 0;
+  if (ambiguous && reference_candidate_rank >= 0)
+  {
+    selected = static_cast<size_t>(reference_candidate_rank);
+  }
+
   output = candidates[selected];
+  output.reprojection_error_gap_px = reprojection_error_gap_px;
   output.candidate_count = static_cast<int>(candidates.size());
   output.selected_candidate_rank = static_cast<int>(selected);
+  output.reference_candidate_rank = reference_candidate_rank;
+  output.ambiguous = ambiguous;
   cv::Mat rvec = (cv::Mat_<double>(3, 1) << output.rvec[0], output.rvec[1], output.rvec[2]);
   cv::Mat tvec = (cv::Mat_<double>(3, 1) << output.tvec[0], output.tvec[1], output.tvec[2]);
   try

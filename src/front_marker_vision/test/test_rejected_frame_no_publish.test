@@ -18,6 +18,9 @@
     <param name="marker_frame" value="rejected_front_marker" />
     <param name="enable_contour_gate" value="true" />
     <param name="pose_solver" value="IPPE_SQUARE" />
+    <param name="ippe_reference_confirm_frames" value="3" />
+    <param name="ippe_reference_max_rotation_step_rad" value="0.35" />
+    <param name="ippe_reference_max_translation_step_m" value="0.10" />
     <!-- 8-bit outside-inside contrast cannot reach 300, so a detected marker must be rejected. -->
     <param name="min_edge_contrast" value="300.0" />
     <!-- publish_annotated is intentionally omitted to test the true default. -->

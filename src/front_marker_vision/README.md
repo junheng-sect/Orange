@@ -9,6 +9,10 @@ PID 或 MAVROS。
 
 位姿默认使用 `IPPE_SQUARE`，对平面 Marker 的两个候选解按重投影误差和近期位姿连续性
 选择；需要回退旧路径时可传入 `pose_solver:=LEGACY`。角点亚像素优化仍默认关闭。
+连续性参考默认需要连续 3 帧属于同一物理分支才提交。启动阶段的参考初始化帧仍发布
+Pose/TF；已有参考后，若候选与已提交分支不符，节点进入 `SWITCH_PENDING` 并停止发布
+Pose/TF，使控制端按视觉丢失执行受控刹车。另一分支持续 3 帧后才切换、恢复发布并累计
+一次确认翻转，单帧误选不会污染下一帧参考或进入控制链。
 
 ArUco 检测默认启用自适应 ROI。首次检测使用全图；ID33 通过轮廓门禁后，下一帧使用
 Marker 外接框最大边 3 倍、且不小于 128px 的搜索区域。连续丢失时 ROI 依次扩大到
@@ -25,6 +29,19 @@ Pose、TF 和完整分辨率标注图仍使用原始图像坐标。
 - `/front_marker_vision/debug/processing_time_ms`：每帧处理耗时；
 - `/front_marker_vision/image_annotated`：默认开启，默认限频 5Hz；
 - `/front_marker_vision/status`：检测和拒绝原因。
+
+IPPE 参考状态参数：
+
+- `~ippe_reference_confirm_frames`：确认帧数，默认 `3`；设为 `1` 可恢复即时更新；
+- `~ippe_reference_max_rotation_step_rad`：确认序列相邻帧最大旋转步长，默认 `0.35rad`；
+- `~ippe_reference_max_translation_step_m`：确认序列相邻帧最大平移步长，默认 `0.10m`；
+- `~pose_continuity_timeout_sec`：已提交参考超时，默认 `0.5s`。
+
+`/front_marker_vision/status` 保留原有 `DETECTED/REJECTED_*` 前缀，并追加 `ref_state`、
+`ref_streak`、`switch_pending`、`selected_rank`、`reference_rank`、`ambiguous` 和累计确认
+翻转数 `branch_flips`。候选重投影误差排名变化本身不会被计为物理分支翻转。
+`SWITCH_PENDING` 帧显示为 `REJECTED_AMBIGUITY_PENDING`。歧义帧和重投影误差明确占优的
+非歧义帧采用相同的 3 帧切换确认，避免单帧大误差直接触发控制阶跃。
 
 独立启动：
 
