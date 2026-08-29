@@ -59,8 +59,10 @@ roslaunch front_marker_control front_marker_tracking.launch \
   max_pose_latency_sec:=0.5 pid_dt_max_sec:=0.5
 ```
 
-PID 使用条件积分抗饱和：x、Yaw 的标量输出达到限幅，或 y/z 合成速度达到
-`v_limit` 时，只冻结会继续把输出推向饱和方向的积分；反向误差仍可消减已有积分。
+PID 使用条件积分抗饱和：x、Yaw 的标量输出达到限幅，或 y/z 平面合成速度
+`hypot(vy, vz)` 达到 `vyz_limit` 时，只冻结会继续把输出推向饱和方向的积分；
+反向误差仍可消减已有积分。`vyz_limit` 只限制 YZ 平面合成速度，不是 XYZ 三轴
+总速度上限；X 轴由 `vx_limit` 独立限制。
 积分绝对限幅按控制组配置，以下参数默认均为 `1.0`，设为 `0.0` 可禁止对应组累积积分：
 
 - `integral_limit_x`：前向 x PID 积分限幅

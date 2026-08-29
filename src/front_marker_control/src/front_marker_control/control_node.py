@@ -62,7 +62,7 @@ class FrontMarkerControlNode(object):
             self.ki_yaw,
             self.kd_yaw,
             self.vx_limit,
-            self.v_limit,
+            self.vyz_limit,
             self.yaw_rate_limit,
             self.velocity_deadband,
             self.z_error_deadband,
@@ -191,7 +191,7 @@ class FrontMarkerControlNode(object):
             'integral_limit_yz': 1.0,
             'integral_limit_yaw': 1.0,
             'yaw_lpf_tau': 0.10,
-            'v_limit': 0.80,
+            'vyz_limit': 0.80,
             'vx_limit': 0.20,
             'yaw_rate_limit': 0.80,
             'velocity_deadband': 0.03,
@@ -245,7 +245,7 @@ class FrontMarkerControlNode(object):
         ):
             raise ValueError('integral limits must be non-negative')
         if any(value < 0.0 for value in (
-                self.v_limit,
+                self.vyz_limit,
                 self.vx_limit,
                 self.yaw_rate_limit,
                 self.velocity_deadband,

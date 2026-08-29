@@ -145,7 +145,7 @@ class BodyVelocityController(object):
         ki_yaw,
         kd_yaw,
         vx_limit,
-        v_limit,
+        vyz_limit,
         yaw_rate_limit,
         velocity_deadband,
         z_error_deadband,
@@ -156,7 +156,7 @@ class BodyVelocityController(object):
         integral_limit_yz=1.0,
         integral_limit_yaw=1.0,
     ):
-        self.v_limit = abs(float(v_limit))
+        self.vyz_limit = abs(float(vyz_limit))
         self.velocity_deadband = abs(float(velocity_deadband))
         self.z_error_deadband = abs(float(z_error_deadband))
         self.yaw_error_deadband = abs(float(yaw_error_deadband))
@@ -207,8 +207,8 @@ class BodyVelocityController(object):
         else:
             raw_vz = self.pid_z.update(error_z, dt)
 
-        vy, vz = limit_vector2(raw_vy, raw_vz, self.v_limit)
-        if math.hypot(raw_vy, raw_vz) > self.v_limit:
+        vy, vz = limit_vector2(raw_vy, raw_vz, self.vyz_limit)
+        if math.hypot(raw_vy, raw_vz) > self.vyz_limit:
             if error_y * raw_vy > 0.0:
                 self.pid_y.integral = previous_integral_y
             if error_z * raw_vz > 0.0:
