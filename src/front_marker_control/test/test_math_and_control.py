@@ -95,6 +95,7 @@ class ControllerTest(unittest.TestCase):
             'vx_limit': 0.2,
             'vyz_limit': 0.8,
             'yaw_rate_limit': 0.8,
+            'velocity_deadband_enter': 0.02,
             'velocity_deadband': 0.03,
             'z_error_deadband': 0.04,
             'yaw_error_deadband': 0.06,
@@ -162,6 +163,7 @@ class ControllerTest(unittest.TestCase):
             ki_yz=1.0,
             kd_yz=0.0,
             vyz_limit=0.5,
+            velocity_deadband_enter=0.0,
             velocity_deadband=0.0,
             z_error_deadband=0.0,
             integral_limit_yz=2.0,
@@ -182,6 +184,7 @@ class ControllerTest(unittest.TestCase):
             ki_yz=1.0,
             kd_yz=0.0,
             vyz_limit=0.5,
+            velocity_deadband_enter=0.0,
             velocity_deadband=0.0,
             z_error_deadband=0.0,
             integral_limit_yz=2.0,
@@ -208,6 +211,83 @@ class ControllerTest(unittest.TestCase):
         velocity, _, _ = controller.update((0.0, 0.1, 0.0), 0.0, 1.0)
         self.assertEqual(velocity[1], 0.0)
         self.assertTrue(math.isclose(controller.pid_y.integral, 0.1))
+
+    def test_output_deadband_hysteresis_prevents_boundary_chatter(self):
+        controller = self.controller(
+            kp_x=1.0,
+            ki_x=0.0,
+            kd_x=0.0,
+            vx_limit=1.0,
+            velocity_deadband_enter=0.02,
+            velocity_deadband=0.03,
+        )
+        values = [0.0, 0.031, 0.029, 0.021, 0.020, 0.029, 0.031]
+        outputs = [
+            controller.update((value, 0.0, 0.0), 0.0, 0.1)[0][0]
+            for value in values
+        ]
+        self.assertEqual(
+            outputs,
+            [0.0, 0.031, 0.029, 0.021, 0.0, 0.0, 0.031],
+        )
+
+        controller.reset()
+        negative_outputs = [
+            controller.update((value, 0.0, 0.0), 0.0, 0.1)[0][0]
+            for value in (-0.031, -0.029, -0.020, -0.029, -0.031)
+        ]
+        self.assertEqual(
+            negative_outputs,
+            [-0.031, -0.029, 0.0, 0.0, -0.031],
+        )
+
+    def test_output_deadband_axes_are_independent_and_resettable(self):
+        controller = self.controller(
+            kp_x=1.0,
+            ki_x=0.0,
+            kd_x=0.0,
+            kp_yz=1.0,
+            ki_yz=0.0,
+            kd_yz=0.0,
+            vx_limit=1.0,
+            vyz_limit=1.0,
+            velocity_deadband_enter=0.02,
+            velocity_deadband=0.03,
+            z_error_deadband=0.0,
+        )
+        first, _, _ = controller.update((0.031, 0.010, 0.010), 0.0, 0.1)
+        second, _, _ = controller.update((0.025, 0.031, 0.015), 0.0, 0.1)
+        third, _, _ = controller.update((0.019, 0.025, 0.031), 0.0, 0.1)
+        self.assertEqual(first, (0.031, 0.0, 0.0))
+        self.assertEqual(second, (0.025, 0.031, 0.0))
+        self.assertEqual(third, (0.0, 0.025, 0.031))
+
+        controller.reset()
+        after_reset, _, _ = controller.update((0.025, 0.025, 0.025), 0.0, 0.1)
+        self.assertEqual(after_reset, (0.0, 0.0, 0.0))
+
+    def test_output_deadband_accepts_zero_and_rejects_invalid_thresholds(self):
+        controller = self.controller(
+            kp_x=1.0,
+            kp_yz=1.0,
+            kd_x=0.0,
+            kd_yz=0.0,
+            vx_limit=1.0,
+            vyz_limit=1.0,
+            velocity_deadband_enter=0.0,
+            velocity_deadband=0.0,
+            z_error_deadband=0.0,
+        )
+        velocity, _, _ = controller.update((0.001, -0.001, 0.001), 0.0, 0.1)
+        self.assertEqual(velocity, (0.001, -0.001, 0.001))
+
+        with self.assertRaises(ValueError):
+            self.controller(
+                velocity_deadband_enter=0.04,
+                velocity_deadband=0.03,
+            )
+        with self.assertRaises(ValueError):
+            self.controller(velocity_deadband_enter=-0.01)
 
     def test_limits_deadbands_and_yaw_switch(self):
         enabled = self.controller(True)

@@ -80,6 +80,42 @@ def apply_deadband(value, deadband):
     return 0.0 if abs(float(value)) < abs(float(deadband)) else float(value)
 
 
+class HysteresisDeadband(object):
+    """Stateful deadband with separate thresholds for stopping and starting."""
+
+    def __init__(self, enter_threshold, exit_threshold):
+        self.enter_threshold = float(enter_threshold)
+        self.exit_threshold = float(exit_threshold)
+        if (
+            not math.isfinite(self.enter_threshold)
+            or not math.isfinite(self.exit_threshold)
+        ):
+            raise ValueError('deadband thresholds must be finite')
+        if self.enter_threshold < 0.0 or self.exit_threshold < 0.0:
+            raise ValueError('deadband thresholds must be non-negative')
+        if self.enter_threshold > self.exit_threshold:
+            raise ValueError(
+                'deadband enter threshold must not exceed exit threshold'
+            )
+        self.reset()
+
+    def reset(self):
+        self.active = False
+
+    def update(self, value):
+        value = float(value)
+        if not math.isfinite(value):
+            raise ValueError('deadband value must be finite')
+
+        magnitude = abs(value)
+        if self.active:
+            if magnitude <= self.enter_threshold:
+                self.active = False
+        elif magnitude >= self.exit_threshold:
+            self.active = True
+        return value if self.active else 0.0
+
+
 def limit_vector2(first, second, limit):
     norm = math.hypot(float(first), float(second))
     limit = abs(float(limit))
@@ -155,9 +191,11 @@ class BodyVelocityController(object):
         integral_limit_x=1.0,
         integral_limit_yz=1.0,
         integral_limit_yaw=1.0,
+        velocity_deadband_enter=0.02,
     ):
         self.vyz_limit = abs(float(vyz_limit))
-        self.velocity_deadband = abs(float(velocity_deadband))
+        self.velocity_deadband = float(velocity_deadband)
+        self.velocity_deadband_enter = float(velocity_deadband_enter)
         self.z_error_deadband = abs(float(z_error_deadband))
         self.yaw_error_deadband = abs(float(yaw_error_deadband))
         self.enable_yaw_control = bool(enable_yaw_control)
@@ -182,6 +220,13 @@ class BodyVelocityController(object):
             integral_limit=integral_limit_yaw,
         )
         self.yaw_filter = FirstOrderAngleLowPass(yaw_lpf_tau)
+        self.velocity_deadband_filters = tuple(
+            HysteresisDeadband(
+                self.velocity_deadband_enter,
+                self.velocity_deadband,
+            )
+            for _ in range(3)
+        )
 
     def reset(self):
         self.pid_x.reset()
@@ -189,6 +234,8 @@ class BodyVelocityController(object):
         self.pid_z.reset()
         self.pid_yaw.reset()
         self.yaw_filter.reset()
+        for deadband_filter in self.velocity_deadband_filters:
+            deadband_filter.reset()
 
     def update(self, position_error_body, yaw_error, dt):
         if len(position_error_body) != 3:
@@ -213,10 +260,12 @@ class BodyVelocityController(object):
                 self.pid_y.integral = previous_integral_y
             if error_z * raw_vz > 0.0:
                 self.pid_z.integral = previous_integral_z
-        body_velocity = (
-            apply_deadband(vx, self.velocity_deadband),
-            apply_deadband(vy, self.velocity_deadband),
-            apply_deadband(vz, self.velocity_deadband),
+        body_velocity = tuple(
+            deadband_filter.update(value)
+            for deadband_filter, value in zip(
+                self.velocity_deadband_filters,
+                (vx, vy, vz),
+            )
         )
 
         filtered_yaw_error = self.yaw_filter.update(yaw_error, dt)

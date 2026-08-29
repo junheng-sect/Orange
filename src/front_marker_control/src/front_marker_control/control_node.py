@@ -72,6 +72,7 @@ class FrontMarkerControlNode(object):
             integral_limit_x=self.integral_limit_x,
             integral_limit_yz=self.integral_limit_yz,
             integral_limit_yaw=self.integral_limit_yaw,
+            velocity_deadband_enter=self.velocity_deadband_enter,
         )
         self.velocity_limiter = Vector3SlewRateLimiter()
 
@@ -194,6 +195,7 @@ class FrontMarkerControlNode(object):
             'vyz_limit': 0.80,
             'vx_limit': 0.20,
             'yaw_rate_limit': 0.80,
+            'velocity_deadband_enter': 0.02,
             'velocity_deadband': 0.03,
             'z_error_deadband': 0.04,
             'yaw_error_deadband': 0.06,
@@ -248,6 +250,7 @@ class FrontMarkerControlNode(object):
                 self.vyz_limit,
                 self.vx_limit,
                 self.yaw_rate_limit,
+                self.velocity_deadband_enter,
                 self.velocity_deadband,
                 self.z_error_deadband,
                 self.yaw_error_deadband,
@@ -259,6 +262,10 @@ class FrontMarkerControlNode(object):
                 self.aligned_hold_sec,
         )):
             raise ValueError('limits, deadbands and tolerances must be non-negative')
+        if self.velocity_deadband_enter > self.velocity_deadband:
+            raise ValueError(
+                'velocity_deadband_enter must not exceed velocity_deadband'
+            )
 
     def state_callback(self, message):
         with self.lock:

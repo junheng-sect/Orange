@@ -18,6 +18,7 @@ yaw_lpf_tau: 0.10
 vyz_limit: 0.80
 vx_limit: 0.20
 yaw_rate_limit: 0.80
+velocity_deadband_enter: 0.02
 velocity_deadband: 0.03
 z_error_deadband: 0.04
 yaw_error_deadband: 0.06

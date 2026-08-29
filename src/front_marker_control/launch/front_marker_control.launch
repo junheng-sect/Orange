@@ -15,6 +15,8 @@
   <arg name="integral_limit_x" default="1.0" />
   <arg name="integral_limit_yz" default="1.0" />
   <arg name="integral_limit_yaw" default="1.0" />
+  <arg name="velocity_deadband_enter" default="0.02" />
+  <arg name="velocity_deadband" default="0.03" />
   <arg name="enable_yaw_control" default="false" />
   <arg name="enable_setpoint_output" default="false" />
   <arg name="max_accel" default="0.5" />
@@ -42,6 +44,8 @@
     <param name="integral_limit_x" value="$(arg integral_limit_x)" />
     <param name="integral_limit_yz" value="$(arg integral_limit_yz)" />
     <param name="integral_limit_yaw" value="$(arg integral_limit_yaw)" />
+    <param name="velocity_deadband_enter" value="$(arg velocity_deadband_enter)" />
+    <param name="velocity_deadband" value="$(arg velocity_deadband)" />
     <param name="enable_yaw_control" value="$(arg enable_yaw_control)" />
     <param name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
     <param name="max_accel" value="$(arg max_accel)" />

@@ -69,6 +69,11 @@ PID 使用条件积分抗饱和：x、Yaw 的标量输出达到限幅，或 y/z 
 - `integral_limit_yz`：横向 y 和竖向 z PID 共用的积分限幅
 - `integral_limit_yaw`：Yaw PID 积分限幅
 
+三个线速度输出轴分别使用有状态滞回死区。已激活的轴在速度绝对值降至
+`velocity_deadband_enter`（默认 `0.02m/s`）时归零；已归零的轴只有达到
+`velocity_deadband`（默认 `0.03m/s`）才重新输出。两阈值必须满足
+`0 <= velocity_deadband_enter <= velocity_deadband`，同时设为 `0.0` 可关闭速度死区。
+
 三个参数均可从独立控制入口或完整跟踪入口覆盖：
 
 ```bash
@@ -76,6 +81,13 @@ roslaunch front_marker_control front_marker_tracking.launch \
   integral_limit_x:=0.5 \
   integral_limit_yz:=0.3 \
   integral_limit_yaw:=0.4
+```
+
+滞回阈值也可从独立控制入口或完整跟踪入口覆盖：
+
+```bash
+roslaunch front_marker_control front_marker_tracking.launch \
+  velocity_deadband_enter:=0.02 velocity_deadband:=0.03
 ```
 
 状态 `/front_marker_control/status` 使用 `TRACKING`、`BRAKING_POSE_LOSS` 和
