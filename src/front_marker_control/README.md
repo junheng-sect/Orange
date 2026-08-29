@@ -37,6 +37,27 @@ ROI 只缩小 ArUco 检测输入，不裁剪相机 raw/compressed 或标注图�
 roslaunch front_marker_control front_camera_tf.launch
 ```
 
-默认 `enable_setpoint_output=false`、`enable_yaw_control=false`。真实输出启用后仍要求
-MAVROS connected、armed、OFFBOARD、状态新鲜且 Pose/TF 新鲜；任一条件不满足时只发布
-零 setpoint。本包不会自动解锁、切换模式或起飞。
+默认 `enable_setpoint_output=false`、`enable_yaw_control=false`。真实输出启用后要求
+MAVROS connected、armed、OFFBOARD 且状态新鲜；断联、锁定、退出 OFFBOARD 或状态超时会
+立即发布零 setpoint。本包不会自动解锁、切换模式或起飞。
+
+线速度输出带三维合加速度限制。正常跟踪使用 `max_accel=0.5m/s^2`；控制器连续
+`pose_timeout_sec=0.1s` 没有收到新 Pose 后，立即清除 PID 历史，并使用
+`loss_decel=1.0m/s^2` 将最后输出受控减速到零。刹车期间只要上述 MAVROS 硬门仍满足，
+真实 setpoint 会继续发布递减速度；重新识别后也从当前速度平滑恢复，不会阶跃到速度限幅。
+偏航角速度不经过该斜率限制。
+
+三个时间参数彼此独立：`pose_timeout_sec=0.1s` 只检查最近一次 Pose 的本机接收时间；
+`max_pose_latency_sec=0.5s` 限制 Pose 从相机采集时间戳到控制节点收到时的端到端延迟；
+`pid_dt_max_sec=0.5s` 只在相邻有效 Pose 的源时间戳间隔过大时重置 PID 历史。
+
+三个参数可从完整入口直接覆盖：
+
+```bash
+roslaunch front_marker_control front_marker_tracking.launch \
+  max_accel:=0.5 loss_decel:=1.0 pose_timeout_sec:=0.1 \
+  max_pose_latency_sec:=0.5 pid_dt_max_sec:=0.5
+```
+
+状态 `/front_marker_control/status` 使用 `TRACKING`、`BRAKING_POSE_LOSS` 和
+`WAIT_POSE` 区分正常跟踪、视觉丢失刹车与完全停止。

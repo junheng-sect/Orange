@@ -19,7 +19,11 @@ z_error_deadband: 0.04
 yaw_error_deadband: 0.06
 enable_yaw_control: false
 setpoint_publish_rate_hz: 20.0
-pose_timeout_sec: 0.5
+max_accel: 0.50
+loss_decel: 1.00
+pose_timeout_sec: 0.1
+max_pose_latency_sec: 0.5
+pid_dt_max_sec: 0.5
 state_timeout_sec: 1.0
 future_stamp_tolerance_sec: 0.1
 tf_lookup_timeout_sec: 0.05

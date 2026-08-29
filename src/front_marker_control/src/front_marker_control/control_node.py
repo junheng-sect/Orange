@@ -10,7 +10,11 @@ from std_msgs.msg import Float64, String
 import tf2_geometry_msgs  # noqa: F401 - registers PoseStamped conversions
 import tf2_ros
 
-from front_marker_control.control import BodyVelocityController, wrap_angle
+from front_marker_control.control import (
+    BodyVelocityController,
+    Vector3SlewRateLimiter,
+    wrap_angle,
+)
 from front_marker_control.geometry import (
     finite_vector3,
     marker_heading_body,
@@ -42,8 +46,10 @@ class FrontMarkerControlNode(object):
         self.aligned_start_time = None
         self.latest_body_velocity = (0.0, 0.0, 0.0)
         self.latest_yaw_rate = 0.0
+        self.last_control_time = None
         self.last_observation_issue = '尚未收到 Marker Pose'
         self.last_status = 'PREVIEW_ONLY | WAIT_POSE'
+        self.last_motion_state = None
 
         self.body_controller = BodyVelocityController(
             self.kp_x,
@@ -64,6 +70,7 @@ class FrontMarkerControlNode(object):
             self.yaw_lpf_tau,
             self.enable_yaw_control,
         )
+        self.velocity_limiter = Vector3SlewRateLimiter()
 
         self.tf_buffer = tf2_ros.Buffer(cache_time=rospy.Duration(10.0))
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
@@ -90,7 +97,8 @@ class FrontMarkerControlNode(object):
                 self.setpoint_topic, PositionTarget, queue_size=10
             )
             rospy.logwarn(
-                '真实 MAVROS setpoint 已启用；非零输出仍要求 connected + armed + OFFBOARD + 新鲜 Pose/TF'
+                '真实 MAVROS setpoint 已启用；非零输出要求 connected + armed + OFFBOARD，'
+                '视觉失效后仅允许受控刹车'
             )
         else:
             rospy.logwarn('PREVIEW_ONLY：不会创建 %s 发布者', self.setpoint_topic)
@@ -118,7 +126,9 @@ class FrontMarkerControlNode(object):
         rospy.loginfo(
             'front_marker_control_node started | pose=%s | base=%s | '
             'target=(%.3f, %.3f, %.3f)m | yaw_control=%s | '
-            'setpoint_rate=%.1fHz | setpoint_output=%s',
+            'setpoint_rate=%.1fHz | max_accel=%.3fm/s^2 | '
+            'loss_decel=%.3fm/s^2 | pose_timeout=%.3fs | '
+            'max_pose_latency=%.3fs | pid_dt_max=%.3fs | setpoint_output=%s',
             self.pose_topic,
             self.base_frame,
             self.target_xyz_body[0],
@@ -126,6 +136,11 @@ class FrontMarkerControlNode(object):
             self.target_xyz_body[2],
             'ON' if self.enable_yaw_control else 'OFF',
             self.setpoint_publish_rate_hz,
+            self.max_accel,
+            self.loss_decel,
+            self.pose_timeout_sec,
+            self.max_pose_latency_sec,
+            self.pid_dt_max_sec,
             self.enable_setpoint_output,
         )
 
@@ -177,7 +192,11 @@ class FrontMarkerControlNode(object):
             'z_error_deadband': 0.04,
             'yaw_error_deadband': 0.06,
             'setpoint_publish_rate_hz': 20.0,
-            'pose_timeout_sec': 0.5,
+            'max_accel': 0.50,
+            'loss_decel': 1.00,
+            'pose_timeout_sec': 0.1,
+            'max_pose_latency_sec': 0.5,
+            'pid_dt_max_sec': 0.5,
             'state_timeout_sec': 1.0,
             'future_stamp_tolerance_sec': 0.1,
             'tf_lookup_timeout_sec': 0.05,
@@ -199,8 +218,18 @@ class FrontMarkerControlNode(object):
                 raise ValueError('%s must be finite' % name)
         if self.setpoint_publish_rate_hz <= 0.0:
             raise ValueError('setpoint_publish_rate_hz must be positive')
-        if self.pose_timeout_sec <= 0.0 or self.state_timeout_sec <= 0.0:
-            raise ValueError('pose_timeout_sec and state_timeout_sec must be positive')
+        if self.max_accel <= 0.0 or self.loss_decel <= 0.0:
+            raise ValueError('max_accel and loss_decel must be positive')
+        if (
+            self.pose_timeout_sec <= 0.0
+            or self.max_pose_latency_sec <= 0.0
+            or self.pid_dt_max_sec <= 0.0
+            or self.state_timeout_sec <= 0.0
+        ):
+            raise ValueError(
+                'pose_timeout_sec, max_pose_latency_sec, pid_dt_max_sec and '
+                'state_timeout_sec must be positive'
+            )
         if self.future_stamp_tolerance_sec < 0.0 or self.tf_lookup_timeout_sec < 0.0:
             raise ValueError('timestamp and TF tolerances must be non-negative')
         if any(value < 0.0 for value in (
@@ -231,7 +260,7 @@ class FrontMarkerControlNode(object):
         self.latest_source_stamp = None
         self.latest_receive_time = None
         self.last_observation_issue = reason
-        self.reset_control()
+        self.reset_tracking_target()
 
     def normalized_pose(self, message):
         if not message.header.frame_id:
@@ -263,7 +292,7 @@ class FrontMarkerControlNode(object):
                     return
 
             source_age = (now - message.header.stamp).to_sec()
-            if source_age > self.pose_timeout_sec:
+            if source_age > self.max_pose_latency_sec:
                 self.invalidate_observation(
                     '收到时已过期的 Pose，source_age=%.3fs' % source_age
                 )
@@ -299,7 +328,7 @@ class FrontMarkerControlNode(object):
                 dt = 1.0 / self.setpoint_publish_rate_hz
             else:
                 dt = (message.header.stamp - self.last_pid_source_stamp).to_sec()
-                if not math.isfinite(dt) or dt <= 0.0 or dt > self.pose_timeout_sec:
+                if not math.isfinite(dt) or dt <= 0.0 or dt > self.pid_dt_max_sec:
                     self.reset_pid_state()
                     dt = 1.0 / self.setpoint_publish_rate_hz
 
@@ -334,12 +363,8 @@ class FrontMarkerControlNode(object):
             or self.latest_receive_time is None
         ):
             return False
-        source_age = (now - self.latest_source_stamp).to_sec()
         receive_age = (now - self.latest_receive_time).to_sec()
-        return (
-            -self.future_stamp_tolerance_sec <= source_age <= self.pose_timeout_sec
-            and 0.0 <= receive_age <= self.pose_timeout_sec
-        )
+        return 0.0 <= receive_age <= self.pose_timeout_sec
 
     def state_is_fresh(self, now):
         if self.latest_state_receive_time is None:
@@ -350,7 +375,7 @@ class FrontMarkerControlNode(object):
     def reset_pid_state(self):
         self.body_controller.reset()
 
-    def reset_control(self):
+    def reset_tracking_target(self):
         self.reset_pid_state()
         self.last_pid_source_stamp = None
         self.latest_body_velocity = (0.0, 0.0, 0.0)
@@ -377,47 +402,77 @@ class FrontMarkerControlNode(object):
         held = (now - self.aligned_start_time).to_sec()
         return 'ALIGNED' if held >= self.aligned_hold_sec else 'ALIGN'
 
-    def actual_gate_reason(self, now, pose_fresh):
+    def hard_gate_reason(self, now):
         if not self.state_is_fresh(now) or not self.state.connected:
             return 'WAIT_FCU'
         if not self.state.armed:
             return 'WAIT_ARM'
         if self.state.mode != 'OFFBOARD':
             return 'WAIT_OFFBOARD'
-        if not pose_fresh:
-            return 'WAIT_POSE'
         return None
+
+    def command_dt(self, now):
+        nominal_dt = 1.0 / self.setpoint_publish_rate_hz
+        if self.last_control_time is None:
+            dt = nominal_dt
+        else:
+            dt = (now - self.last_control_time).to_sec()
+            if not math.isfinite(dt) or dt <= 0.0:
+                dt = nominal_dt
+        self.last_control_time = now
+        return min(dt, 2.0 * nominal_dt)
+
+    @staticmethod
+    def velocity_norm(body_velocity):
+        return math.sqrt(sum(float(value) ** 2 for value in body_velocity))
 
     def control_loop(self, _event):
         with self.lock:
             now = rospy.Time.now()
+            dt = self.command_dt(now)
             pose_fresh = self.observation_is_fresh(now)
             if pose_fresh:
-                body_velocity = tuple(self.latest_body_velocity)
+                target_body_velocity = tuple(self.latest_body_velocity)
                 yaw_rate = self.latest_yaw_rate
-                nav_state = self.update_alignment_state(now)
+                alignment_state = self.update_alignment_state(now)
             else:
                 if self.latest_position_error is not None:
                     self.invalidate_observation('Pose 超时')
-                body_velocity = (0.0, 0.0, 0.0)
+                target_body_velocity = (0.0, 0.0, 0.0)
                 yaw_rate = 0.0
-                nav_state = 'WAIT_POSE'
+                alignment_state = None
 
-            gate_reason = None
-            actual_allowed = False
-            if self.enable_setpoint_output:
-                gate_reason = self.actual_gate_reason(now, pose_fresh)
-                actual_allowed = gate_reason is None
+            gate_reason = (
+                self.hard_gate_reason(now) if self.enable_setpoint_output else None
+            )
+            if gate_reason is not None:
+                body_velocity = self.velocity_limiter.reset()
+                yaw_rate = 0.0
+                motion_state = gate_reason
+                actual_allowed = False
+            else:
+                rate_limit = self.max_accel if pose_fresh else self.loss_decel
+                body_velocity = self.velocity_limiter.update(
+                    target_body_velocity, rate_limit, dt
+                )
+                if pose_fresh:
+                    motion_state = 'TRACKING'
+                elif self.velocity_norm(body_velocity) > 1e-9:
+                    motion_state = 'BRAKING_POSE_LOSS'
+                else:
+                    motion_state = 'WAIT_POSE'
+                actual_allowed = self.enable_setpoint_output
 
             self.publish_commands(now, body_velocity, yaw_rate, actual_allowed)
 
             if pose_fresh:
                 preview_text = (
-                    '%s | yaw_control=%s | error_body=(%.3f, %.3f, %.3f)m '
+                    '%s/%s | yaw_control=%s | error_body=(%.3f, %.3f, %.3f)m '
                     'yaw_raw=%.2fdeg yaw_lpf=%.2fdeg | '
                     'cmd_flu=(%.3f, %.3f, %.3f, %.3f)'
                     % (
-                        nav_state,
+                        motion_state,
+                        alignment_state,
                         'ON' if self.enable_yaw_control else 'OFF',
                         self.latest_position_error[0],
                         self.latest_position_error[1],
@@ -431,21 +486,33 @@ class FrontMarkerControlNode(object):
                     )
                 )
             else:
-                preview_text = '%s | yaw_control=%s | %s | cmd=zero' % (
-                    nav_state,
-                    'ON' if self.enable_yaw_control else 'OFF',
-                    self.last_observation_issue or 'Pose 超时',
+                preview_text = (
+                    '%s | yaw_control=%s | %s | cmd_flu=(%.3f, %.3f, %.3f, %.3f)'
+                    % (
+                        motion_state,
+                        'ON' if self.enable_yaw_control else 'OFF',
+                        self.last_observation_issue or 'Pose 超时',
+                        body_velocity[0],
+                        body_velocity[1],
+                        body_velocity[2],
+                        yaw_rate,
+                    )
                 )
 
             if not self.enable_setpoint_output:
-                self.last_status = 'PREVIEW_ONLY | ' + preview_text
-            elif actual_allowed:
-                self.last_status = 'SETPOINT_ACTIVE | ' + preview_text
-            else:
-                self.last_status = '%s | actual=zero | %s' % (
+                status_text = 'PREVIEW_ONLY | ' + preview_text
+            elif gate_reason is not None:
+                status_text = '%s | actual=zero | %s' % (
                     gate_reason,
                     preview_text,
                 )
+            elif motion_state == 'BRAKING_POSE_LOSS':
+                status_text = 'SETPOINT_BRAKING | ' + preview_text
+            elif pose_fresh:
+                status_text = 'SETPOINT_ACTIVE | ' + preview_text
+            else:
+                status_text = 'WAIT_POSE | actual=zero | ' + preview_text
+            self.set_status(status_text, motion_state)
 
     def make_setpoint(self, stamp, body_velocity, yaw_rate):
         vx, vy, vz, wz = body_flu_setpoint_components(
@@ -481,6 +548,13 @@ class FrontMarkerControlNode(object):
                 stamp, (0.0, 0.0, 0.0), 0.0
             )
             self.setpoint_pub.publish(actual)
+
+    def set_status(self, text, motion_state):
+        state_changed = motion_state != self.last_motion_state
+        self.last_status = text
+        self.last_motion_state = motion_state
+        if state_changed:
+            self.status_pub.publish(String(data=text))
 
     def status_loop(self, _event):
         with self.lock:

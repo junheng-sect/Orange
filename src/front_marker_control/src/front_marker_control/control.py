@@ -83,6 +83,47 @@ def limit_vector2(first, second, limit):
     return float(first), float(second)
 
 
+class Vector3SlewRateLimiter(object):
+    """Limit the Euclidean rate of change of a three-dimensional vector."""
+
+    def __init__(self):
+        self.reset()
+
+    @staticmethod
+    def _vector3(value, name):
+        if len(value) != 3:
+            raise ValueError('%s must contain three values' % name)
+        vector = tuple(float(component) for component in value)
+        if not all(math.isfinite(component) for component in vector):
+            raise ValueError('%s must contain finite values' % name)
+        return vector
+
+    def reset(self, value=(0.0, 0.0, 0.0)):
+        self.value = self._vector3(value, 'reset value')
+        return self.value
+
+    def update(self, target, max_rate, dt):
+        target = self._vector3(target, 'target')
+        max_rate = float(max_rate)
+        dt = float(dt)
+        if not math.isfinite(max_rate) or max_rate <= 0.0:
+            raise ValueError('max_rate must be finite and positive')
+        if not math.isfinite(dt) or dt <= 0.0:
+            raise ValueError('slew-rate limiter requires finite positive dt')
+
+        delta = tuple(target[index] - self.value[index] for index in range(3))
+        delta_norm = math.sqrt(sum(component * component for component in delta))
+        max_delta = max_rate * dt
+        if delta_norm <= max_delta or delta_norm <= 1e-12:
+            self.value = target
+        else:
+            scale = max_delta / delta_norm
+            self.value = tuple(
+                self.value[index] + delta[index] * scale for index in range(3)
+            )
+        return self.value
+
+
 class BodyVelocityController(object):
     """Sample-driven FLU position/yaw PID producing a bounded velocity command."""
 

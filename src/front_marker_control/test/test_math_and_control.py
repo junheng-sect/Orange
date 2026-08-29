@@ -3,7 +3,7 @@
 import math
 import unittest
 
-from front_marker_control.control import BodyVelocityController
+from front_marker_control.control import BodyVelocityController, Vector3SlewRateLimiter
 from front_marker_control.geometry import (
     marker_heading_body,
     normalize_quaternion,
@@ -107,6 +107,38 @@ class ControllerTest(unittest.TestCase):
         velocity, _, filtered = controller.update((-0.5, 0.0, 0.0), -0.3, 0.05)
         self.assertTrue(math.isclose(velocity[0], -0.2, abs_tol=1e-9))
         self.assertTrue(math.isclose(filtered, -0.3, abs_tol=1e-9))
+
+
+class Vector3SlewRateLimiterTest(unittest.TestCase):
+    def test_limits_vector_norm_and_preserves_direction(self):
+        limiter = Vector3SlewRateLimiter()
+        value = limiter.update((0.3, 0.4, 0.0), 0.5, 0.1)
+        self.assertTrue(math.isclose(value[0], 0.03, abs_tol=1e-12))
+        self.assertTrue(math.isclose(value[1], 0.04, abs_tol=1e-12))
+        self.assertTrue(math.isclose(math.hypot(value[0], value[1]), 0.05))
+
+    def test_reaches_target_without_overshoot_and_returns_to_zero(self):
+        limiter = Vector3SlewRateLimiter()
+        self.assertEqual(limiter.update((0.02, 0.0, 0.0), 0.5, 0.1), (0.02, 0.0, 0.0))
+        self.assertEqual(limiter.update((0.0, 0.0, 0.0), 1.0, 0.1), (0.0, 0.0, 0.0))
+
+    def test_sign_reversal_and_reset(self):
+        limiter = Vector3SlewRateLimiter()
+        limiter.reset((0.2, 0.0, 0.0))
+        value = limiter.update((-0.2, 0.0, 0.0), 0.5, 0.1)
+        self.assertTrue(math.isclose(value[0], 0.15, abs_tol=1e-12))
+        self.assertEqual(limiter.reset(), (0.0, 0.0, 0.0))
+
+    def test_rejects_invalid_inputs(self):
+        limiter = Vector3SlewRateLimiter()
+        with self.assertRaises(ValueError):
+            limiter.update((1.0, 2.0), 0.5, 0.1)
+        with self.assertRaises(ValueError):
+            limiter.update((float('nan'), 0.0, 0.0), 0.5, 0.1)
+        with self.assertRaises(ValueError):
+            limiter.update((0.0, 0.0, 0.0), 0.0, 0.1)
+        with self.assertRaises(ValueError):
+            limiter.update((0.0, 0.0, 0.0), 0.5, 0.0)
 
 
 class MavrosMaskTest(unittest.TestCase):
