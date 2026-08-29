@@ -80,7 +80,8 @@ public:
   int streak() const;
   int confirmationFrames() const;
   bool switchPending() const;
-  bool posePublishAllowed() const;
+  bool posePublishAllowed(
+    bool ambiguous, bool had_committed_reference_for_frame) const;
   uint64_t branchFlipCount() const;
 
 private:

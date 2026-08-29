@@ -651,12 +651,21 @@ private:
       {
         pose_reference_tracker_.observe(ippe_solution, frame_stamp_sec);
         reference_observed = true;
-        if (!pose_reference_tracker_.posePublishAllowed())
+        const bool had_committed_reference_for_frame = committed_reference != nullptr;
+        if (!pose_reference_tracker_.posePublishAllowed(
+              ippe_solution.ambiguous, had_committed_reference_for_frame))
         {
           rejection_stage = "AMBIGUITY_PENDING";
           std::ostringstream stream;
-          stream << "candidate branch differs from committed reference; confirmation "
-                 << pose_reference_tracker_.streak() << "/"
+          if (ippe_solution.ambiguous && !had_committed_reference_for_frame)
+          {
+            stream << "ambiguous pose has no committed reference; bootstrap confirmation ";
+          }
+          else
+          {
+            stream << "candidate branch differs from committed reference; confirmation ";
+          }
+          stream << pose_reference_tracker_.streak() << "/"
                  << pose_reference_tracker_.confirmationFrames();
           rejection_reason = stream.str();
         }

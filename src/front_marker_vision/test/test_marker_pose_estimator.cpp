@@ -42,7 +42,8 @@ front_marker_vision::PoseSolution trackerPose(
   double yaw_rad,
   double x_m,
   int selected_rank = 0,
-  int reference_rank = -1)
+  int reference_rank = -1,
+  bool ambiguous = false)
 {
   front_marker_vision::PoseSolution solution;
   solution.rvec = cv::Vec3d(0.0, 0.0, yaw_rad);
@@ -50,6 +51,7 @@ front_marker_vision::PoseSolution trackerPose(
   solution.candidate_count = 2;
   solution.selected_candidate_rank = selected_rank;
   solution.reference_candidate_rank = reference_rank;
+  solution.ambiguous = ambiguous;
   return solution;
 }
 
@@ -295,6 +297,43 @@ TEST(PoseReferenceTracker, CommitsOnlyAfterThreeConsistentBootstrapFrames)
   EXPECT_EQ(tracker.branchFlipCount(), 0U);
 }
 
+TEST(PoseReferenceTracker, AmbiguousBootstrapIsSuppressedThroughCommitFrame)
+{
+  front_marker_vision::PoseReferenceTracker tracker;
+
+  const front_marker_vision::PoseSolution first =
+    trackerPose(0.00, 0.00, 0, -1, true);
+  EXPECT_FALSE(tracker.observe(first, 1.0).reference_committed);
+  EXPECT_FALSE(tracker.posePublishAllowed(first.ambiguous, false));
+
+  const front_marker_vision::PoseSolution second =
+    trackerPose(0.01, 0.01, 0, -1, true);
+  EXPECT_FALSE(tracker.observe(second, 1.1).reference_committed);
+  EXPECT_FALSE(tracker.posePublishAllowed(second.ambiguous, false));
+
+  const front_marker_vision::PoseSolution commit =
+    trackerPose(0.02, 0.02, 0, -1, true);
+  EXPECT_TRUE(tracker.observe(commit, 1.2).reference_committed);
+  ASSERT_TRUE(tracker.hasReference());
+  EXPECT_EQ(tracker.state(), front_marker_vision::PoseReferenceState::TRACKING);
+  EXPECT_FALSE(tracker.posePublishAllowed(commit.ambiguous, false));
+
+  const front_marker_vision::PoseSolution tracked =
+    trackerPose(0.03, 0.03, 0, 0, true);
+  EXPECT_TRUE(tracker.observe(tracked, 1.3).reference_committed);
+  EXPECT_TRUE(tracker.posePublishAllowed(tracked.ambiguous, true));
+}
+
+TEST(PoseReferenceTracker, NonAmbiguousBootstrapMayPublishWithoutReference)
+{
+  front_marker_vision::PoseReferenceTracker tracker;
+  const front_marker_vision::PoseSolution decisive = trackerPose(0.00, 0.00);
+
+  EXPECT_FALSE(tracker.observe(decisive, 1.0).reference_committed);
+  EXPECT_EQ(tracker.state(), front_marker_vision::PoseReferenceState::BOOTSTRAP);
+  EXPECT_TRUE(tracker.posePublishAllowed(decisive.ambiguous, false));
+}
+
 TEST(PoseReferenceTracker, BootstrapDiscontinuityRestartsConfirmation)
 {
   front_marker_vision::PoseReferenceTracker tracker;
@@ -312,8 +351,16 @@ TEST(PoseReferenceTracker, OneFrameCompatibilityModeCommitsImmediately)
   options.confirmation_frames = 1;
   front_marker_vision::PoseReferenceTracker tracker(options);
 
-  EXPECT_TRUE(tracker.observe(trackerPose(0.00, 0.00), 1.0).reference_committed);
+  const front_marker_vision::PoseSolution bootstrap =
+    trackerPose(0.00, 0.00, 0, -1, true);
+  EXPECT_TRUE(tracker.observe(bootstrap, 1.0).reference_committed);
   EXPECT_TRUE(tracker.hasReference());
+  EXPECT_FALSE(tracker.posePublishAllowed(bootstrap.ambiguous, false));
+
+  const front_marker_vision::PoseSolution tracked =
+    trackerPose(0.01, 0.01, 0, 0, true);
+  EXPECT_TRUE(tracker.observe(tracked, 1.1).reference_committed);
+  EXPECT_TRUE(tracker.posePublishAllowed(tracked.ambiguous, true));
 }
 
 TEST(PoseReferenceTracker, OneFrameAlternativeDoesNotReplaceCommittedReference)
@@ -323,13 +370,13 @@ TEST(PoseReferenceTracker, OneFrameAlternativeDoesNotReplaceCommittedReference)
   EXPECT_FALSE(
     tracker.observe(trackerPose(0.80, 0.03, 0, 1), 1.3).reference_committed);
   EXPECT_TRUE(tracker.switchPending());
-  EXPECT_FALSE(tracker.posePublishAllowed());
+  EXPECT_FALSE(tracker.posePublishAllowed(false, true));
   EXPECT_NEAR(tracker.reference().rvec[2], 0.02, 1e-12);
 
   EXPECT_FALSE(
     tracker.observe(trackerPose(0.03, 0.03, 1, 1), 1.4).reference_committed);
   EXPECT_FALSE(tracker.switchPending());
-  EXPECT_TRUE(tracker.posePublishAllowed());
+  EXPECT_TRUE(tracker.posePublishAllowed(false, true));
   EXPECT_NEAR(tracker.reference().rvec[2], 0.02, 1e-12);
   EXPECT_EQ(tracker.branchFlipCount(), 0U);
 }
@@ -348,7 +395,7 @@ TEST(PoseReferenceTracker, ThreeAlternativeFramesConfirmExactlyOneBranchFlip)
   EXPECT_TRUE(flipped.branch_flip_confirmed);
   EXPECT_EQ(tracker.branchFlipCount(), 1U);
   EXPECT_FALSE(tracker.switchPending());
-  EXPECT_TRUE(tracker.posePublishAllowed());
+  EXPECT_TRUE(tracker.posePublishAllowed(false, true));
 
   const front_marker_vision::PoseReferenceUpdate continued =
     tracker.observe(trackerPose(0.83, 0.06, 1, 1), 1.6);
@@ -375,7 +422,7 @@ TEST(PoseReferenceTracker, SameRankLargeJumpDoesNotMatchReference)
   EXPECT_FALSE(
     tracker.observe(trackerPose(0.80, 0.03, 0, 0), 1.3).reference_committed);
   EXPECT_TRUE(tracker.switchPending());
-  EXPECT_FALSE(tracker.posePublishAllowed());
+  EXPECT_FALSE(tracker.posePublishAllowed(false, true));
   EXPECT_NEAR(tracker.reference().rvec[2], 0.02, 1e-12);
 }
 
@@ -387,7 +434,7 @@ TEST(PoseReferenceTracker, SingleCandidateFallsBackToAbsoluteGeometry)
 
   EXPECT_FALSE(tracker.observe(single_candidate, 1.3).reference_committed);
   EXPECT_TRUE(tracker.switchPending());
-  EXPECT_FALSE(tracker.posePublishAllowed());
+  EXPECT_FALSE(tracker.posePublishAllowed(false, true));
 }
 
 TEST(PoseReferenceTracker, RejectedFrameBreaksConfirmationStreak)

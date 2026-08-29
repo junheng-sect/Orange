@@ -9,10 +9,11 @@ PID 或 MAVROS。
 
 位姿默认使用 `IPPE_SQUARE`，对平面 Marker 的两个候选解按重投影误差和近期位姿连续性
 选择；需要回退旧路径时可传入 `pose_solver:=LEGACY`。角点亚像素优化仍默认关闭。
-连续性参考默认需要连续 3 帧属于同一物理分支才提交。启动阶段的参考初始化帧仍发布
-Pose/TF；已有参考后，若候选与已提交分支不符，节点进入 `SWITCH_PENDING` 并停止发布
-Pose/TF，使控制端按视觉丢失执行受控刹车。另一分支持续 3 帧后才切换、恢复发布并累计
-一次确认翻转，单帧误选不会污染下一帧参考或进入控制链。
+连续性参考默认需要连续 3 帧属于同一物理分支才提交。首次启动或参考超时后的
+BOOTSTRAP 阶段，无 committed reference 的歧义解仍参与连续确认，但不发布 Pose/TF；
+重投影误差明确占优的非歧义解仍可发布。已有参考后，若候选与已提交分支不符，
+节点进入 `SWITCH_PENDING` 并停止发布 Pose/TF，使控制端按视觉丢失执行受控刹车。另一分支
+持续 3 帧后才切换、恢复发布并累计一次确认翻转，单帧误选不会污染下一帧参考或进入控制链。
 
 ArUco 检测默认启用自适应 ROI。首次检测使用全图；ID33 通过轮廓门禁后，下一帧使用
 Marker 外接框最大边 3 倍、且不小于 128px 的搜索区域。连续丢失时 ROI 依次扩大到
@@ -40,8 +41,9 @@ IPPE 参考状态参数：
 `/front_marker_vision/status` 保留原有 `DETECTED/REJECTED_*` 前缀，并追加 `ref_state`、
 `ref_streak`、`switch_pending`、`selected_rank`、`reference_rank`、`ambiguous` 和累计确认
 翻转数 `branch_flips`。候选重投影误差排名变化本身不会被计为物理分支翻转。
-`SWITCH_PENDING` 帧显示为 `REJECTED_AMBIGUITY_PENDING`。歧义帧和重投影误差明确占优的
-非歧义帧采用相同的 3 帧切换确认，避免单帧大误差直接触发控制阶跃。
+BOOTSTRAP 无参考歧义帧和 `SWITCH_PENDING` 帧都显示为
+`REJECTED_AMBIGUITY_PENDING`，原因文本分别标识 bootstrap 确认和已提交分支切换。歧义帧和
+重投影误差明确占优的非歧义帧采用相同的 3 帧切换确认，避免单帧大误差直接触发控制阶跃。
 
 独立启动：
 

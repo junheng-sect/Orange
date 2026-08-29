@@ -406,9 +406,10 @@ bool PoseReferenceTracker::switchPending() const
   return state() == PoseReferenceState::SWITCH_PENDING;
 }
 
-bool PoseReferenceTracker::posePublishAllowed() const
+bool PoseReferenceTracker::posePublishAllowed(
+  bool ambiguous, bool had_committed_reference_for_frame) const
 {
-  return !switchPending();
+  return !switchPending() && (!ambiguous || had_committed_reference_for_frame);
 }
 
 uint64_t PoseReferenceTracker::branchFlipCount() const
