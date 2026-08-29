@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(front_marker_vision)
 
+if(NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
 add_compile_options(-std=c++14)
 
 if(EXISTS "/usr/lib/aarch64-linux-gnu/cmake/opencv4/OpenCVConfig.cmake")
