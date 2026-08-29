@@ -16,6 +16,9 @@
   <arg name="target_body_x" default="0.8" />
   <arg name="target_body_y" default="0.0" />
   <arg name="target_body_z" default="0.0" />
+  <arg name="integral_limit_x" default="1.0" />
+  <arg name="integral_limit_yz" default="1.0" />
+  <arg name="integral_limit_yaw" default="1.0" />
   <arg name="publish_annotated" default="true" />
   <arg name="annotated_rate_hz" default="5.0" />
   <arg name="enable_yaw_control" default="false" />
@@ -57,6 +60,9 @@
     <arg name="target_body_x" value="$(arg target_body_x)" />
     <arg name="target_body_y" value="$(arg target_body_y)" />
     <arg name="target_body_z" value="$(arg target_body_z)" />
+    <arg name="integral_limit_x" value="$(arg integral_limit_x)" />
+    <arg name="integral_limit_yz" value="$(arg integral_limit_yz)" />
+    <arg name="integral_limit_yaw" value="$(arg integral_limit_yaw)" />
     <arg name="enable_yaw_control" value="$(arg enable_yaw_control)" />
     <arg name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
     <arg name="max_accel" value="$(arg max_accel)" />

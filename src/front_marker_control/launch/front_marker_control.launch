@@ -12,6 +12,9 @@
   <arg name="target_body_x" default="0.8" />
   <arg name="target_body_y" default="0.0" />
   <arg name="target_body_z" default="0.0" />
+  <arg name="integral_limit_x" default="1.0" />
+  <arg name="integral_limit_yz" default="1.0" />
+  <arg name="integral_limit_yaw" default="1.0" />
   <arg name="enable_yaw_control" default="false" />
   <arg name="enable_setpoint_output" default="false" />
   <arg name="max_accel" default="0.5" />
@@ -36,6 +39,9 @@
     <param name="setpoint_preview_topic" value="$(arg setpoint_preview_topic)" />
     <param name="status_topic" value="$(arg status_topic)" />
     <param name="base_frame" value="$(arg base_frame)" />
+    <param name="integral_limit_x" value="$(arg integral_limit_x)" />
+    <param name="integral_limit_yz" value="$(arg integral_limit_yz)" />
+    <param name="integral_limit_yaw" value="$(arg integral_limit_yaw)" />
     <param name="enable_yaw_control" value="$(arg enable_yaw_control)" />
     <param name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
     <param name="max_accel" value="$(arg max_accel)" />

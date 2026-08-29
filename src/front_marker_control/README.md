@@ -59,5 +59,22 @@ roslaunch front_marker_control front_marker_tracking.launch \
   max_pose_latency_sec:=0.5 pid_dt_max_sec:=0.5
 ```
 
+PID 使用条件积分抗饱和：x、Yaw 的标量输出达到限幅，或 y/z 合成速度达到
+`v_limit` 时，只冻结会继续把输出推向饱和方向的积分；反向误差仍可消减已有积分。
+积分绝对限幅按控制组配置，以下参数默认均为 `1.0`，设为 `0.0` 可禁止对应组累积积分：
+
+- `integral_limit_x`：前向 x PID 积分限幅
+- `integral_limit_yz`：横向 y 和竖向 z PID 共用的积分限幅
+- `integral_limit_yaw`：Yaw PID 积分限幅
+
+三个参数均可从独立控制入口或完整跟踪入口覆盖：
+
+```bash
+roslaunch front_marker_control front_marker_tracking.launch \
+  integral_limit_x:=0.5 \
+  integral_limit_yz:=0.3 \
+  integral_limit_yaw:=0.4
+```
+
 状态 `/front_marker_control/status` 使用 `TRACKING`、`BRAKING_POSE_LOSS` 和
 `WAIT_POSE` 区分正常跟踪、视觉丢失刹车与完全停止。

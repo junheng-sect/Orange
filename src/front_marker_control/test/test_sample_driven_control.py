@@ -204,6 +204,7 @@ class SampleDrivenControlTest(unittest.TestCase):
         # keeps PID history because pid_dt_max_sec is independent from the
         # 0.1s receive-freshness timeout. With kp=0.5 and kd=0.03, the second
         # raw x target is 0.5*0.1 + 0.03*(0.1-0.2)/0.2 = 0.035m/s.
+        rospy.sleep(0.1)
         self.publish_state(True, True, 'OFFBOARD')
         first_delayed_stamp = rospy.Time.now() - rospy.Duration(0.25)
         self.pose_pub.publish(camera_pose((0.2, 0.0, 0.0), first_delayed_stamp))

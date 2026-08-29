@@ -69,6 +69,9 @@ class FrontMarkerControlNode(object):
             self.yaw_error_deadband,
             self.yaw_lpf_tau,
             self.enable_yaw_control,
+            integral_limit_x=self.integral_limit_x,
+            integral_limit_yz=self.integral_limit_yz,
+            integral_limit_yaw=self.integral_limit_yaw,
         )
         self.velocity_limiter = Vector3SlewRateLimiter()
 
@@ -184,6 +187,9 @@ class FrontMarkerControlNode(object):
             'kp_yaw': 0.40,
             'ki_yaw': 0.0,
             'kd_yaw': 0.0,
+            'integral_limit_x': 1.0,
+            'integral_limit_yz': 1.0,
+            'integral_limit_yaw': 1.0,
             'yaw_lpf_tau': 0.10,
             'v_limit': 0.80,
             'vx_limit': 0.20,
@@ -232,6 +238,12 @@ class FrontMarkerControlNode(object):
             )
         if self.future_stamp_tolerance_sec < 0.0 or self.tf_lookup_timeout_sec < 0.0:
             raise ValueError('timestamp and TF tolerances must be non-negative')
+        if (
+            self.integral_limit_x < 0.0
+            or self.integral_limit_yz < 0.0
+            or self.integral_limit_yaw < 0.0
+        ):
+            raise ValueError('integral limits must be non-negative')
         if any(value < 0.0 for value in (
                 self.v_limit,
                 self.vx_limit,
