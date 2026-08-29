@@ -151,6 +151,8 @@ class TfFrameLabelsNode:
         return marker
 
     def timer_callback(self, _event):
+        if rospy.is_shutdown():
+            return
         stamp = rospy.Time.now()
         markers = []
         for marker_id, label in enumerate(self.labels):
@@ -172,7 +174,12 @@ class TfFrameLabelsNode:
             position = self._offset_point(origin, label['offset'])
             markers.append(self._leader_marker(stamp, marker_id, label, origin, position))
             markers.append(self._text_marker(stamp, marker_id, label, position))
-        self.publisher.publish(MarkerArray(markers=markers))
+        try:
+            self.publisher.publish(MarkerArray(markers=markers))
+        except rospy.ROSException:
+            # A Timer callback can race with publisher shutdown during rostest exit.
+            if not rospy.is_shutdown():
+                raise
 
 
 def main():

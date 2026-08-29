@@ -31,6 +31,20 @@ roslaunch seeker_visualization front_marker_rviz.launch show_frame_labels:=false
 RViz 默认同时启用 `Image Raw` Display，通过 `raw` transport 订阅
 `/usb_cam/image_raw`，队列长度为 2，以减少调试画面的排队延迟。
 
+固定 Marker 定位调试模式将 `front_marker` 固定在 `map` 的
+`(1.0, 0.0, 0.10)m`，Marker `+Z` 法向沿 `map` 的 `-X`，再由
+`/front_marker/pose` 反算并广播动态 `map -> base_link`：
+
+```bash
+roslaunch seeker_visualization front_marker_rviz.launch fixed_marker_localization:=true
+```
+
+该模式优先于 `debug_static_map_to_base`，并关闭视觉节点原有的动态
+`usb_camera_optical_frame -> front_marker` TF，避免 `front_marker` 出现两个父节点。
+反算结果为未经滤波的完整 6DoF；Marker 丢失后停止更新，不保持最后位姿或使用零位姿
+兜底。若 `start_tracking:=false`，外部视觉节点也必须关闭 Marker TF，只发布
+`/front_marker/pose`。
+
 在板端图形桌面终端启动完整检测与可视化：
 
 ```bash

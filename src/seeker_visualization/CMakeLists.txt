@@ -5,6 +5,7 @@ find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
   nav_msgs
   rospy
+  tf
   tf2_ros
   visualization_msgs
 )
@@ -14,12 +15,14 @@ catkin_package(
     geometry_msgs
     nav_msgs
     rospy
+    tf
     tf2_ros
     visualization_msgs
 )
 
 catkin_install_python(
   PROGRAMS
+    scripts/fixed_marker_base_tf_node.py
     scripts/mavros_odom_tf_node.py
     scripts/tf_frame_labels_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
@@ -38,5 +41,6 @@ install(
 if(CATKIN_ENABLE_TESTING)
   find_package(rostest REQUIRED)
   add_rostest(test/test_mavros_odom_tf.test)
+  add_rostest(test/test_fixed_marker_base_tf.test)
   add_rostest(test/test_tf_frame_labels.test)
 endif()
