@@ -1,0 +1,36 @@
+<launch>
+  <node pkg="tf2_ros" type="static_transform_publisher"
+        name="test_labels_map_to_base"
+        args="0 0 0.1 0 0 0 1 test_map test_base" />
+  <node pkg="tf2_ros" type="static_transform_publisher"
+        name="test_labels_base_to_camera"
+        args="0 0 0 0 0 0 1 test_base test_camera" />
+  <node pkg="tf2_ros" type="static_transform_publisher"
+        name="test_labels_camera_to_marker"
+        args="1 0 0 0 0 0 1 test_camera test_marker" />
+
+  <node pkg="seeker_visualization"
+        type="tf_frame_labels_node.py"
+        name="test_tf_frame_labels_node"
+        clear_params="true"
+        output="screen">
+    <param name="fixed_frame" value="test_map" />
+    <param name="map_frame" value="test_map" />
+    <param name="base_frame" value="test_base" />
+    <param name="camera_frame" value="test_camera" />
+    <param name="marker_frame" value="test_marker" />
+    <param name="topic" value="/test_seeker_visualization/tf_frame_labels" />
+    <param name="publish_rate_hz" value="20.0" />
+    <param name="text_height_m" value="0.03" />
+    <param name="line_width_m" value="0.002" />
+    <rosparam param="map_offset">[-0.1, 0.0, 0.02]</rosparam>
+    <rosparam param="base_offset">[0.1, 0.0, 0.03]</rosparam>
+    <rosparam param="camera_offset">[0.0, 0.1, 0.04]</rosparam>
+    <rosparam param="marker_offset">[0.0, 0.0, 0.05]</rosparam>
+  </node>
+
+  <test test-name="tf_frame_labels"
+        pkg="seeker_visualization"
+        type="test_tf_frame_labels.py"
+        time-limit="15.0" />
+</launch>

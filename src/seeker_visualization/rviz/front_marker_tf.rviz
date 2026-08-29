@@ -51,47 +51,68 @@ Visualization Manager:
         usb_camera_optical_frame:
           Value: true
       Marker Alpha: 1
-      Marker Scale: 0.25
+      Marker Scale: 0.1
       Name: TF
       Show Arrows: true
-      Show Axes: true
-      Show Names: true
+      Show Axes: false
+      Show Names: false
       Tree: {}
       Update Interval: 0
+      Value: true
+    - Class: rviz/MarkerArray
+      Enabled: true
+      Marker Topic: /seeker_visualization/tf_frame_labels
+      Name: TF Labels
+      Namespaces:
+        tf_frame_label_leaders: true
+        tf_frame_label_text: true
+      Queue Size: 10
+      Value: true
+    - Class: rviz/Image
+      Enabled: true
+      Image Topic: /usb_cam/image_raw
+      Max Value: 1
+      Median window: 5
+      Min Value: 0
+      Name: Image Raw
+      Normalize Range: false
+      Queue Size: 2
+      Transport Hint: raw
+      Unreliable: false
       Value: true
     - Alpha: 1
       Class: rviz/Axes
       Enabled: true
-      Length: 0.6
+      Length: 0.1
       Name: map
-      Radius: 0.025
+      Radius: 0.005
       Reference Frame: map
       Show Trail: false
       Value: true
     - Alpha: 1
       Class: rviz/Axes
       Enabled: true
-      Length: 0.4
+      Length: 0.1
       Name: base_link
-      Radius: 0.02
+      Radius: 0.005
       Reference Frame: base_link
       Show Trail: false
       Value: true
     - Alpha: 1
       Class: rviz/Axes
       Enabled: true
-      Length: 0.3
+      Length: 0.1
       Name: usb_camera_optical_frame
-      Radius: 0.015
+      Radius: 0.005
       Reference Frame: usb_camera_optical_frame
       Show Trail: false
       Value: true
     - Alpha: 1
       Class: rviz/Axes
       Enabled: true
-      Length: 0.25
+      Length: 0.1
       Name: front_marker
-      Radius: 0.012
+      Radius: 0.005
       Reference Frame: front_marker
       Show Trail: false
       Value: true

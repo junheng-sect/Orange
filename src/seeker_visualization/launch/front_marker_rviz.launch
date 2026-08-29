@@ -1,5 +1,7 @@
 <launch>
   <arg name="start_tracking" default="true" />
+  <arg name="debug_static_map_to_base" default="false" />
+  <arg name="show_frame_labels" default="true" />
   <arg name="rviz_config" default="$(find seeker_visualization)/rviz/front_marker_tf.rviz" />
   <arg name="odom_topic" default="/mavros/local_position/odom" />
   <arg name="map_frame" default="map" />
@@ -25,13 +27,36 @@
     <arg name="camera_frame" value="$(arg camera_frame)" />
   </include>
 
+  <!-- Debug-only fallback: keep base_link 10 cm above map without MAVROS Odometry. -->
+  <node pkg="tf2_ros"
+        type="static_transform_publisher"
+        name="debug_map_to_base_static_transform"
+        args="0 0 0.10 0 0 0 1 $(arg map_frame) $(arg base_frame)"
+        if="$(arg debug_static_map_to_base)"
+        output="screen" />
+
+  <!-- Never let the debug static edge compete with the authoritative MAVROS edge. -->
   <node pkg="seeker_visualization"
         type="mavros_odom_tf_node.py"
         name="mavros_odom_tf_node"
-        output="screen">
+        output="screen"
+        unless="$(arg debug_static_map_to_base)">
     <param name="odom_topic" value="$(arg odom_topic)" />
     <param name="map_frame" value="$(arg map_frame)" />
     <param name="base_frame" value="$(arg base_frame)" />
+  </node>
+
+  <!-- RViz TF names cannot be offset per frame; publish readable labels separately. -->
+  <node pkg="seeker_visualization"
+        type="tf_frame_labels_node.py"
+        name="tf_frame_labels_node"
+        output="screen"
+        if="$(arg show_frame_labels)">
+    <param name="fixed_frame" value="$(arg map_frame)" />
+    <param name="map_frame" value="$(arg map_frame)" />
+    <param name="base_frame" value="$(arg base_frame)" />
+    <param name="camera_frame" value="$(arg camera_frame)" />
+    <param name="marker_frame" value="$(arg marker_frame)" />
   </node>
 
   <node pkg="rviz"
