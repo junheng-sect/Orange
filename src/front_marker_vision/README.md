@@ -20,6 +20,13 @@ Marker 外接框最大边 3 倍、且不小于 128px 的搜索区域。连续丢
 1.5 倍和 2.25 倍，第 3 次丢失后下一帧恢复全图。ROI 只作用于检测输入，CameraInfo、
 Pose、TF 和完整分辨率标注图仍使用原始图像坐标。
 
+ArUco 候选轮廓的基础下限由 `~min_marker_perimeter_rate` 控制，默认 `0.075`。节点会按
+当前检测输入尺寸动态取 `max(配置值, 4 * min_edge_length_px / ROI最大边)`，使检测器的
+早期过滤与默认 12px 轮廓门禁保持一致。640x480 全图下有效值为 `0.075`，128x128
+最小 ROI 下为 `0.375`；因此不会继续解码之后必然被轮廓门禁拒绝的极小候选。可通过
+launch 同名参数覆盖基础值，但基础值必须大于 0 且小于 OpenCV 的
+`maxMarkerPerimeterRate`。
+
 每次有效 Pose 还会用相同时间戳广播 `pose.header.frame_id -> front_marker` 动态 TF。
 可通过 `publish_marker_tf:=false` 关闭，或用 `marker_frame` 修改子坐标系名称。无有效
 检测时不会广播或伪造 Marker TF。

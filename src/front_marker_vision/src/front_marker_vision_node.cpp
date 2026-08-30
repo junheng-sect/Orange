@@ -163,6 +163,7 @@ public:
                     << " size=" << target_marker_size_m_ << "m"
                     << " | contour_gate=" << (enable_contour_gate_ ? "true" : "false")
                     << " | roi=" << (enable_roi_ ? "adaptive" : "full-frame")
+                    << " | min_marker_perimeter_rate=" << min_marker_perimeter_rate_
                     << " | solver=" << pose_solver_
                     << " | reference_confirm_frames="
                     << pose_reference_options_.confirmation_frames
@@ -195,6 +196,7 @@ private:
     pnh_.param("annotated_rate_hz", annotated_rate_hz_, 5.0);
     pnh_.param("enable_contour_gate", enable_contour_gate_, true);
     pnh_.param("enable_roi", enable_roi_, true);
+    pnh_.param("min_marker_perimeter_rate", min_marker_perimeter_rate_, 0.075);
     pnh_.param<std::string>("pose_solver", pose_solver_, "IPPE_SQUARE");
     pnh_.param("min_edge_length_px", contour_options_.min_edge_length_px, 12.0);
     pnh_.param("edge_sample_offset_ratio", contour_options_.edge_sample_offset_ratio, 0.025);
@@ -236,6 +238,11 @@ private:
     if (!(pose_solver_ == "LEGACY" || pose_solver_ == "IPPE_SQUARE"))
     {
       throw std::runtime_error("pose_solver must be LEGACY or IPPE_SQUARE");
+    }
+    if (!std::isfinite(min_marker_perimeter_rate_) || min_marker_perimeter_rate_ <= 0.0)
+    {
+      throw std::runtime_error(
+        "min_marker_perimeter_rate must be finite and greater than zero");
     }
     if (contour_options_.min_edge_length_px <= 0.0 ||
         contour_options_.edge_sample_offset_ratio <= 0.0 ||
@@ -297,6 +304,27 @@ private:
     dictionary_name_ = key;
     dictionary_ = cv::aruco::getPredefinedDictionary(iterator->second);
     detector_parameters_ = cv::aruco::DetectorParameters::create();
+    if (min_marker_perimeter_rate_ >= detector_parameters_->maxMarkerPerimeterRate)
+    {
+      throw std::runtime_error(
+        "min_marker_perimeter_rate must be less than maxMarkerPerimeterRate");
+    }
+    detector_parameters_->minMarkerPerimeterRate = min_marker_perimeter_rate_;
+  }
+
+  double effectiveMinMarkerPerimeterRate(const cv::Rect& search_rect) const
+  {
+    double effective_rate = min_marker_perimeter_rate_;
+    const int maximum_dimension = std::max(search_rect.width, search_rect.height);
+    if (enable_contour_gate_ && maximum_dimension > 0)
+    {
+      const double contour_gate_rate =
+        4.0 * contour_options_.min_edge_length_px / static_cast<double>(maximum_dimension);
+      effective_rate = std::max(effective_rate, contour_gate_rate);
+    }
+    return std::min(
+      effective_rate,
+      std::nextafter(detector_parameters_->maxMarkerPerimeterRate, 0.0));
   }
 
   void cameraInfoCallback(const sensor_msgs::CameraInfoConstPtr& message)
@@ -464,6 +492,8 @@ private:
 
     std::vector<int> ids;
     std::vector<std::vector<cv::Point2f>> corners;
+    detector_parameters_->minMarkerPerimeterRate =
+      effectiveMinMarkerPerimeterRate(search_rect);
     cv::aruco::detectMarkers(
       gray_image(search_rect), dictionary_, corners, ids, detector_parameters_);
     front_marker_vision::offsetMarkerCorners(
@@ -1017,6 +1047,7 @@ private:
   double annotated_rate_hz_ = 5.0;
   bool enable_contour_gate_ = true;
   bool enable_roi_ = true;
+  double min_marker_perimeter_rate_ = 0.075;
   std::string pose_solver_ = "IPPE_SQUARE";
   front_marker_vision::ContourGateOptions contour_options_;
   double ippe_ambiguity_gap_px_ = 0.2;

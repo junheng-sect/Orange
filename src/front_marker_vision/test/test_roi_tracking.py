@@ -176,6 +176,27 @@ class RoiTrackingTest(unittest.TestCase):
         self.assertAlmostEqual(enabled.pose.position.y, disabled.pose.position.y, places=9)
         self.assertAlmostEqual(enabled.pose.position.z, disabled.pose.position.z, places=9)
 
+        # A 14px marker still passes the existing 12px contour gate. Publish it
+        # twice at the same center: the first detection shrinks the next search
+        # region to the 128px minimum, and the second proves both the adaptive
+        # ROI rate and the full-frame base rate preserve the valid target.
+        small = marker_image_at(125, 225, cell_size=2)
+        small_stamps = [self.publish_frame(small) for _ in range(2)]
+        self.assertTrue(self.wait_until(
+            lambda: all(item is not None for item in self.matching_pose(small_stamps[-1]))
+        ))
+        enabled, disabled = self.matching_pose(small_stamps[-1])
+        self.assertAlmostEqual(enabled.pose.position.x, disabled.pose.position.x, places=9)
+        self.assertAlmostEqual(enabled.pose.position.y, disabled.pose.position.y, places=9)
+        self.assertAlmostEqual(enabled.pose.position.z, disabled.pose.position.z, places=9)
+        with self.lock:
+            enabled_statuses = list(self.enabled_statuses)
+        self.assertTrue(any(
+            text.startswith('DETECTED: ID33')
+            and re.search(r'roi=\d+,\d+,128x128 miss=0', text)
+            for text in enabled_statuses
+        ))
+
         # The far-right marker is outside the base, 1.5x and 2.25x ROIs.
         # After three misses, the fourth callback must search full frame.
         right = marker_image_at(540, 190)
@@ -202,4 +223,3 @@ class RoiTrackingTest(unittest.TestCase):
 if __name__ == '__main__':
     rospy.init_node('test_roi_tracking')
     rostest.rosrun('front_marker_vision', 'roi_tracking', RoiTrackingTest)
-

@@ -13,6 +13,7 @@
   <arg name="marker_frame" default="front_marker" />
   <arg name="pose_solver" default="IPPE_SQUARE" />
   <arg name="enable_roi" default="true" />
+  <arg name="min_marker_perimeter_rate" default="0.075" />
   <arg name="target_body_x" default="0.8" />
   <arg name="target_body_y" default="0.0" />
   <arg name="target_body_z" default="0.0" />
@@ -53,6 +54,7 @@
     <arg name="marker_frame" value="$(arg marker_frame)" />
     <arg name="pose_solver" value="$(arg pose_solver)" />
     <arg name="enable_roi" value="$(arg enable_roi)" />
+    <arg name="min_marker_perimeter_rate" value="$(arg min_marker_perimeter_rate)" />
     <arg name="publish_annotated" value="$(arg publish_annotated)" />
     <arg name="annotated_rate_hz" value="$(arg annotated_rate_hz)" />
   </include>

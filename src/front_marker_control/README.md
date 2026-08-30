@@ -29,7 +29,9 @@ roslaunch front_marker_control front_marker_tracking.launch \
 ```
 
 ROI 只缩小 ArUco 检测输入，不裁剪相机 raw/compressed 或标注图；连续 3 帧丢失目标后
-会自动回到全图搜索。
+会自动回到全图搜索。完整入口还会透传 `min_marker_perimeter_rate`（默认 `0.075`）；
+视觉节点会结合当前 ROI 大小和 12px 轮廓门禁动态提高实际阈值，从检测早期跳过不可能
+通过后续门禁的极小候选。
 
 相机静态外参也可单独启动，供只运行检测与可视化的场景复用：
 

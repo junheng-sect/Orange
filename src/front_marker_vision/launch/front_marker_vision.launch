@@ -13,6 +13,7 @@
   <arg name="marker_frame" default="front_marker" />
   <arg name="pose_solver" default="IPPE_SQUARE" />
   <arg name="enable_roi" default="true" />
+  <arg name="min_marker_perimeter_rate" default="0.075" />
   <arg name="publish_annotated" default="true" />
   <arg name="annotated_rate_hz" default="5.0" />
   <arg name="ippe_reference_confirm_frames" default="3" />
@@ -37,6 +38,7 @@
     <param name="marker_frame" value="$(arg marker_frame)" />
     <param name="enable_contour_gate" value="true" />
     <param name="enable_roi" value="$(arg enable_roi)" />
+    <param name="min_marker_perimeter_rate" value="$(arg min_marker_perimeter_rate)" />
     <param name="pose_solver" value="$(arg pose_solver)" />
     <param name="ippe_reference_confirm_frames" value="$(arg ippe_reference_confirm_frames)" />
     <param name="ippe_reference_max_rotation_step_rad" value="$(arg ippe_reference_max_rotation_step_rad)" />
