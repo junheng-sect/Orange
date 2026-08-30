@@ -16,7 +16,13 @@
     <param name="base_frame" value="test_fixed_base" />
     <param name="camera_frame" value="test_fixed_camera" />
     <param name="marker_frame" value="test_fixed_marker" />
+    <param name="pose_method" value="filtered_6d" />
+    <param name="filter_tau_sec" value="0.25" />
+    <param name="filter_reset_gap_sec" value="0.5" />
+    <param name="max_translation_jump_m" value="0.15" />
+    <param name="max_rotation_jump_rad" value="0.261799" />
     <param name="tf_lookup_timeout_sec" value="0.05" />
+    <rosparam param="target_xyz_body">[0.8, 0.0, 0.0]</rosparam>
   </node>
 
   <!-- This second node must never publish because missing_base has no camera TF. -->
@@ -30,7 +36,35 @@
     <param name="base_frame" value="test_missing_base" />
     <param name="camera_frame" value="test_fixed_camera" />
     <param name="marker_frame" value="test_fixed_marker" />
+    <param name="pose_method" value="filtered_6d" />
+    <param name="filter_tau_sec" value="0.25" />
+    <param name="filter_reset_gap_sec" value="0.5" />
+    <param name="max_translation_jump_m" value="0.15" />
+    <param name="max_rotation_jump_rad" value="0.261799" />
     <param name="tf_lookup_timeout_sec" value="0.02" />
+    <rosparam param="target_xyz_body">[0.8, 0.0, 0.0]</rosparam>
+  </node>
+
+  <node pkg="tf2_ros" type="static_transform_publisher"
+        name="test_error_base_to_camera"
+        args="0 0 0 -0.5 0.5 -0.5 0.5 test_error_base test_error_camera" />
+  <node pkg="seeker_visualization"
+        type="fixed_marker_base_tf_node.py"
+        name="test_fixed_marker_error_yaw_node"
+        clear_params="true"
+        output="screen">
+    <param name="pose_topic" value="/test_fixed_marker/error_pose" />
+    <param name="map_frame" value="test_fixed_map" />
+    <param name="base_frame" value="test_error_base" />
+    <param name="camera_frame" value="test_error_camera" />
+    <param name="marker_frame" value="test_fixed_marker" />
+    <param name="pose_method" value="error_yaw" />
+    <param name="filter_tau_sec" value="0.25" />
+    <param name="filter_reset_gap_sec" value="0.5" />
+    <param name="max_translation_jump_m" value="0.15" />
+    <param name="max_rotation_jump_rad" value="0.261799" />
+    <param name="tf_lookup_timeout_sec" value="0.05" />
+    <rosparam param="target_xyz_body">[0.8, 0.0, 0.0]</rosparam>
   </node>
 
   <test test-name="fixed_marker_base_tf"

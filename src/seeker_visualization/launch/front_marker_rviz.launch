@@ -2,6 +2,11 @@
   <arg name="start_tracking" default="true" />
   <arg name="debug_static_map_to_base" default="false" />
   <arg name="fixed_marker_localization" default="false" />
+  <arg name="base_pose_method" default="filtered_6d" />
+  <arg name="base_pose_filter_tau_sec" default="0.25" />
+  <arg name="base_pose_filter_reset_gap_sec" default="0.5" />
+  <arg name="base_pose_max_translation_jump_m" default="0.15" />
+  <arg name="base_pose_max_rotation_jump_rad" default="0.261799" />
   <arg name="show_frame_labels" default="true" />
   <arg name="rviz_config" default="$(find seeker_visualization)/rviz/front_marker_tf.rviz" />
   <arg name="odom_topic" default="/mavros/local_position/odom" />
@@ -9,6 +14,9 @@
   <arg name="base_frame" default="base_link" />
   <arg name="camera_frame" default="usb_camera_optical_frame" />
   <arg name="marker_frame" default="front_marker" />
+  <arg name="target_body_x" default="0.8" />
+  <arg name="target_body_y" default="0.0" />
+  <arg name="target_body_z" default="0.0" />
 
   <!-- The full pipeline owns the camera driver and base-to-camera static TF. -->
   <include file="$(find front_marker_control)/launch/front_marker_tracking.launch"
@@ -18,6 +26,9 @@
     <arg name="publish_marker_tf"
          value="$(eval not arg('fixed_marker_localization'))" />
     <arg name="marker_frame" value="$(arg marker_frame)" />
+    <arg name="target_body_x" value="$(arg target_body_x)" />
+    <arg name="target_body_y" value="$(arg target_body_y)" />
+    <arg name="target_body_z" value="$(arg target_body_z)" />
     <arg name="enable_yaw_control" value="false" />
     <arg name="enable_setpoint_output" value="false" />
   </include>
@@ -66,7 +77,16 @@
     <param name="base_frame" value="$(arg base_frame)" />
     <param name="camera_frame" value="$(arg camera_frame)" />
     <param name="marker_frame" value="$(arg marker_frame)" />
+    <param name="pose_method" value="$(arg base_pose_method)" />
+    <param name="filter_tau_sec" value="$(arg base_pose_filter_tau_sec)" />
+    <param name="filter_reset_gap_sec"
+           value="$(arg base_pose_filter_reset_gap_sec)" />
+    <param name="max_translation_jump_m"
+           value="$(arg base_pose_max_translation_jump_m)" />
+    <param name="max_rotation_jump_rad"
+           value="$(arg base_pose_max_rotation_jump_rad)" />
     <param name="tf_lookup_timeout_sec" value="0.05" />
+    <rosparam param="target_xyz_body" subst_value="true">[$(arg target_body_x), $(arg target_body_y), $(arg target_body_z)]</rosparam>
   </node>
 
   <!-- RViz TF names cannot be offset per frame; publish readable labels separately. -->

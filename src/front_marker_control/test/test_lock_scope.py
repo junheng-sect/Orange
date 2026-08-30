@@ -36,6 +36,14 @@ class BlockingPublisher(BlockingCall):
         return self.wait()
 
 
+class RosExceptionPublisher(object):
+    def __init__(self, message='publish() to a closed topic'):
+        self.message = message
+
+    def publish(self, _message):
+        raise rospy.ROSException(self.message)
+
+
 class BlockingTransform(BlockingCall):
     def transform(self, _message, _target_frame, _timeout):
         return self.wait()
@@ -215,6 +223,19 @@ class LockScopeTest(unittest.TestCase):
                 blocking_publisher,
                 lambda: node.control_loop(None),
             )
+
+    def test_shutdown_publish_race_is_ignored(self):
+        publisher = RosExceptionPublisher()
+        with mock.patch.object(rospy, 'is_shutdown', return_value=False):
+            self.assertFalse(
+                FrontMarkerControlNode._publish_if_running(publisher, object())
+            )
+
+    def test_non_shutdown_publish_failure_is_not_hidden(self):
+        publisher = RosExceptionPublisher('unexpected transport failure')
+        with mock.patch.object(rospy, 'is_shutdown', return_value=False):
+            with self.assertRaises(rospy.ROSException):
+                FrontMarkerControlNode._publish_if_running(publisher, object())
 
 
 if __name__ == '__main__':

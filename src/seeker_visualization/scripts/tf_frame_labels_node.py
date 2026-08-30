@@ -176,9 +176,9 @@ class TfFrameLabelsNode:
             markers.append(self._text_marker(stamp, marker_id, label, position))
         try:
             self.publisher.publish(MarkerArray(markers=markers))
-        except rospy.ROSException:
+        except rospy.ROSException as exception:
             # A Timer callback can race with publisher shutdown during rostest exit.
-            if not rospy.is_shutdown():
+            if not rospy.is_shutdown() and 'closed topic' not in str(exception):
                 raise
 
 

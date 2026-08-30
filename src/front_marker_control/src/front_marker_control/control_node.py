@@ -397,8 +397,10 @@ class FrontMarkerControlNode(object):
         message.vector.x = float(error[0])
         message.vector.y = float(error[1])
         message.vector.z = float(error[2])
-        self.position_error_pub.publish(message)
-        self.yaw_error_pub.publish(Float64(data=float(yaw_error)))
+        self._publish_if_running(self.position_error_pub, message)
+        self._publish_if_running(
+            self.yaw_error_pub, Float64(data=float(yaw_error))
+        )
 
     def observation_is_fresh(self, now):
         if (
@@ -469,6 +471,20 @@ class FrontMarkerControlNode(object):
     @staticmethod
     def velocity_norm(body_velocity):
         return math.sqrt(sum(float(value) ** 2 for value in body_velocity))
+
+    @staticmethod
+    def _publish_if_running(publisher, message):
+        """Publish unless rospy is shutting down; preserve real publish failures."""
+        if rospy.is_shutdown():
+            return False
+        try:
+            publisher.publish(message)
+        except rospy.ROSException as exception:
+            # Timer/subscriber callbacks can race with publisher closure at exit.
+            if not rospy.is_shutdown() and 'closed topic' not in str(exception):
+                raise
+            return False
+        return True
 
     def control_loop(self, _event):
         status_to_publish = None
@@ -566,7 +582,9 @@ class FrontMarkerControlNode(object):
 
         self.publish_commands(*command_snapshot)
         if status_to_publish is not None:
-            self.status_pub.publish(String(data=status_to_publish))
+            self._publish_if_running(
+                self.status_pub, String(data=status_to_publish)
+            )
 
     def make_setpoint(self, stamp, body_velocity, yaw_rate):
         vx, vy, vz, wz = body_flu_setpoint_components(
@@ -593,15 +611,15 @@ class FrontMarkerControlNode(object):
         command.twist.linear.y = float(body_velocity[1])
         command.twist.linear.z = float(body_velocity[2])
         command.twist.angular.z = float(yaw_rate)
-        self.command_pub.publish(command)
+        self._publish_if_running(self.command_pub, command)
 
         preview = self.make_setpoint(stamp, body_velocity, yaw_rate)
-        self.preview_pub.publish(preview)
+        self._publish_if_running(self.preview_pub, preview)
         if self.setpoint_pub is not None:
             actual = preview if actual_allowed else self.make_setpoint(
                 stamp, (0.0, 0.0, 0.0), 0.0
             )
-            self.setpoint_pub.publish(actual)
+            self._publish_if_running(self.setpoint_pub, actual)
 
     def set_status(self, text, motion_state):
         state_changed = motion_state != self.last_motion_state
@@ -612,8 +630,8 @@ class FrontMarkerControlNode(object):
     def status_loop(self, _event):
         with self.lock:
             text = self.last_status
-        self.status_pub.publish(String(data=text))
-        rospy.loginfo(text)
+        if self._publish_if_running(self.status_pub, String(data=text)):
+            rospy.loginfo(text)
 
 
 def main():

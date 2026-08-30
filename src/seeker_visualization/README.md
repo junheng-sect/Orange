@@ -41,9 +41,20 @@ roslaunch seeker_visualization front_marker_rviz.launch fixed_marker_localizatio
 
 该模式优先于 `debug_static_map_to_base`，并关闭视觉节点原有的动态
 `usb_camera_optical_frame -> front_marker` TF，避免 `front_marker` 出现两个父节点。
-反算结果为未经滤波的完整 6DoF；Marker 丢失后停止更新，不保持最后位姿或使用零位姿
-兜底。若 `start_tracking:=false`，外部视觉节点也必须关闭 Marker TF，只发布
-`/front_marker/pose`。
+默认 `base_pose_method=filtered_6d`：严格反算完整 6DoF 后，以 0.25 s 时间常数低通
+XYZ，并对姿态做最短路径四元数 SLERP。也可切换到复用控制节点几何误差定义的稳定模式：
+
+```bash
+roslaunch seeker_visualization front_marker_rviz.launch \
+  fixed_marker_localization:=true \
+  base_pose_method:=error_yaw
+```
+
+`error_yaw` 使用 `position_error_body()` 与 `marker_heading_body()` 重建三维位置和 Yaw，
+固定 Roll/Pitch 为零。两种方法均以 0.25 s 为默认低通时间常数，拒绝单帧超过 0.15 m
+或 15 deg 的跳变；Marker 丢失超过 0.5 s 后，重新识别首帧直接重置滤波器。丢失期间
+停止更新，不保持最后位姿或使用零位姿兜底。若 `start_tracking:=false`，外部视觉节点也
+必须关闭 Marker TF，只发布 `/front_marker/pose`。
 
 在板端图形桌面终端启动完整检测与可视化：
 
