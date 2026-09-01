@@ -29,6 +29,15 @@
 - 每轮对话如果修改了文件，写入“修改记录”；如果只是排查或回答问题，写入“问题记录”。
 - 不再默认向工作空间根目录追加 `LOG.md` 或 `PI_LOG.md`。
 
+### 板端直接写日志（pclog）
+
+- 在 SEEKER 板端会话中，无需回 PC 侧补记，直接用 `~/bin/pclog` 写入 laptop 日志。
+- 用法：`pclog 修改记录 "内容..."`、`pclog 问题记录 "内容..."`；多行内容可用 `cat xxx | pclog 问题记录`。
+- 依赖 `~/.ssh/config` 的 `Host laptop`（10.42.0.1，用户 `zjh`，密钥 `id_ed25519_laptop` 免密），laptop 端公钥已加入 `authorized_keys`。
+- 日志格式：脚本自动按 `date +%-m.%-d` 定位/创建 `Note/<月.日>/LOG.md`，追加 `## 类型 (YYYY-MM-DD HH:MM:SS)` 小节。
+- laptop 不可达时自动暂存 `~/pclog_offline.md`，恢复后执行 `pclog --replay` 重放。
+- 仅当 pclog 不可用（如链路/免密失效）时，才退回“由 PC 侧补记”的方式。
+
 ## 开发约定
 
 - 优先按教程和板端现有 ROS Noetic/catkin 环境调试。
