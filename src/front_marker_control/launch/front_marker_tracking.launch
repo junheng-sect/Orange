@@ -17,9 +17,6 @@
   <arg name="target_body_x" default="0.8" />
   <arg name="target_body_y" default="0.0" />
   <arg name="target_body_z" default="0.0" />
-  <arg name="integral_limit_x" default="1.0" />
-  <arg name="integral_limit_yz" default="1.0" />
-  <arg name="integral_limit_yaw" default="1.0" />
   <arg name="velocity_deadband_enter" default="0.02" />
   <arg name="velocity_deadband" default="0.03" />
   <arg name="publish_annotated" default="true" />
@@ -30,7 +27,7 @@
   <arg name="loss_decel" default="1.0" />
   <arg name="pose_timeout_sec" default="0.1" />
   <arg name="max_pose_latency_sec" default="0.5" />
-  <arg name="pid_dt_max_sec" default="0.5" />
+  <arg name="filter_dt_max_sec" default="0.5" />
 
   <include file="$(find ov9281_usb_cam)/launch/ov9281.launch">
     <arg name="camera_name" value="$(arg camera_name)" />
@@ -64,9 +61,6 @@
     <arg name="target_body_x" value="$(arg target_body_x)" />
     <arg name="target_body_y" value="$(arg target_body_y)" />
     <arg name="target_body_z" value="$(arg target_body_z)" />
-    <arg name="integral_limit_x" value="$(arg integral_limit_x)" />
-    <arg name="integral_limit_yz" value="$(arg integral_limit_yz)" />
-    <arg name="integral_limit_yaw" value="$(arg integral_limit_yaw)" />
     <arg name="velocity_deadband_enter" value="$(arg velocity_deadband_enter)" />
     <arg name="velocity_deadband" value="$(arg velocity_deadband)" />
     <arg name="enable_yaw_control" value="$(arg enable_yaw_control)" />
@@ -75,6 +69,6 @@
     <arg name="loss_decel" value="$(arg loss_decel)" />
     <arg name="pose_timeout_sec" value="$(arg pose_timeout_sec)" />
     <arg name="max_pose_latency_sec" value="$(arg max_pose_latency_sec)" />
-    <arg name="pid_dt_max_sec" value="$(arg pid_dt_max_sec)" />
+    <arg name="filter_dt_max_sec" value="$(arg filter_dt_max_sec)" />
   </include>
 </launch>

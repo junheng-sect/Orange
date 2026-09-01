@@ -1,4 +1,4 @@
-"""PID and command limiting primitives."""
+"""Proportional control and command limiting primitives."""
 
 import math
 
@@ -36,44 +36,6 @@ class FirstOrderAngleLowPass(object):
                 self.value + alpha * wrap_angle(angle - self.value)
             )
         return self.value
-
-
-class PIDController(object):
-    """PID with explicit dt, conditional integration and output clamping."""
-
-    def __init__(self, kp, ki, kd, output_limit=None, integral_limit=1.0):
-        self.kp = float(kp)
-        self.ki = float(ki)
-        self.kd = float(kd)
-        self.output_limit = None if output_limit is None else abs(float(output_limit))
-        self.integral_limit = float(integral_limit)
-        if not math.isfinite(self.integral_limit) or self.integral_limit < 0.0:
-            raise ValueError('integral limit must be finite and non-negative')
-        self.reset()
-
-    def reset(self):
-        self.integral = 0.0
-        self.previous_error = None
-
-    def update(self, error, dt):
-        error = float(error)
-        dt = float(dt)
-        if not math.isfinite(error) or not math.isfinite(dt) or dt <= 0.0:
-            raise ValueError('PID requires finite error and positive dt')
-        previous_integral = self.integral
-        self.integral += error * dt
-        self.integral = max(-self.integral_limit, min(self.integral_limit, self.integral))
-        derivative = 0.0 if self.previous_error is None else (
-            error - self.previous_error
-        ) / dt
-        raw_output = self.kp * error + self.ki * self.integral + self.kd * derivative
-        output = raw_output
-        if self.output_limit is not None:
-            output = max(-self.output_limit, min(self.output_limit, output))
-            if output != raw_output and error * raw_output > 0.0:
-                self.integral = previous_integral
-        self.previous_error = error
-        return output
 
 
 def apply_deadband(value, deadband):
@@ -167,19 +129,13 @@ class Vector3SlewRateLimiter(object):
 
 
 class BodyVelocityController(object):
-    """Sample-driven FLU position/yaw PID producing a bounded velocity command."""
+    """Sample-driven FLU position/yaw P controller producing a bounded velocity command."""
 
     def __init__(
         self,
         kp_x,
-        ki_x,
-        kd_x,
         kp_yz,
-        ki_yz,
-        kd_yz,
         kp_yaw,
-        ki_yaw,
-        kd_yaw,
         vx_limit,
         vyz_limit,
         yaw_rate_limit,
@@ -188,37 +144,19 @@ class BodyVelocityController(object):
         yaw_error_deadband,
         yaw_lpf_tau,
         enable_yaw_control=True,
-        integral_limit_x=1.0,
-        integral_limit_yz=1.0,
-        integral_limit_yaw=1.0,
         velocity_deadband_enter=0.02,
     ):
+        self.kp_x = self._proportional_gain(kp_x, 'kp_x')
+        self.kp_yz = self._proportional_gain(kp_yz, 'kp_yz')
+        self.kp_yaw = self._proportional_gain(kp_yaw, 'kp_yaw')
+        self.vx_limit = abs(float(vx_limit))
         self.vyz_limit = abs(float(vyz_limit))
+        self.yaw_rate_limit = abs(float(yaw_rate_limit))
         self.velocity_deadband = float(velocity_deadband)
         self.velocity_deadband_enter = float(velocity_deadband_enter)
         self.z_error_deadband = abs(float(z_error_deadband))
         self.yaw_error_deadband = abs(float(yaw_error_deadband))
         self.enable_yaw_control = bool(enable_yaw_control)
-        self.pid_x = PIDController(
-            kp_x,
-            ki_x,
-            kd_x,
-            output_limit=abs(float(vx_limit)),
-            integral_limit=integral_limit_x,
-        )
-        self.pid_y = PIDController(
-            kp_yz, ki_yz, kd_yz, integral_limit=integral_limit_yz
-        )
-        self.pid_z = PIDController(
-            kp_yz, ki_yz, kd_yz, integral_limit=integral_limit_yz
-        )
-        self.pid_yaw = PIDController(
-            kp_yaw,
-            ki_yaw,
-            kd_yaw,
-            output_limit=abs(float(yaw_rate_limit)),
-            integral_limit=integral_limit_yaw,
-        )
         self.yaw_filter = FirstOrderAngleLowPass(yaw_lpf_tau)
         self.velocity_deadband_filters = tuple(
             HysteresisDeadband(
@@ -228,11 +166,14 @@ class BodyVelocityController(object):
             for _ in range(3)
         )
 
+    @staticmethod
+    def _proportional_gain(value, name):
+        gain = float(value)
+        if not math.isfinite(gain) or gain < 0.0:
+            raise ValueError('%s must be finite and non-negative' % name)
+        return gain
+
     def reset(self):
-        self.pid_x.reset()
-        self.pid_y.reset()
-        self.pid_z.reset()
-        self.pid_yaw.reset()
         self.yaw_filter.reset()
         for deadband_filter in self.velocity_deadband_filters:
             deadband_filter.reset()
@@ -240,26 +181,23 @@ class BodyVelocityController(object):
     def update(self, position_error_body, yaw_error, dt):
         if len(position_error_body) != 3:
             raise ValueError('position_error_body must contain three values')
+        error_x, error_y, error_z = (
+            float(value) for value in position_error_body
+        )
+        if not all(math.isfinite(value) for value in (error_x, error_y, error_z)):
+            raise ValueError('position_error_body must contain finite values')
+        dt = float(dt)
+        if not math.isfinite(dt) or dt <= 0.0:
+            raise ValueError('controller requires finite positive dt')
 
-        vx = self.pid_x.update(float(position_error_body[0]), dt)
-        error_y = float(position_error_body[1])
-        error_z = float(position_error_body[2])
-        previous_integral_y = self.pid_y.integral
-        previous_integral_z = self.pid_z.integral
-        raw_vy = self.pid_y.update(error_y, dt)
-
-        if abs(error_z) < self.z_error_deadband:
-            self.pid_z.reset()
-            raw_vz = 0.0
-        else:
-            raw_vz = self.pid_z.update(error_z, dt)
-
+        vx = max(-self.vx_limit, min(self.vx_limit, self.kp_x * error_x))
+        raw_vy = self.kp_yz * error_y
+        raw_vz = (
+            0.0
+            if abs(error_z) < self.z_error_deadband
+            else self.kp_yz * error_z
+        )
         vy, vz = limit_vector2(raw_vy, raw_vz, self.vyz_limit)
-        if math.hypot(raw_vy, raw_vz) > self.vyz_limit:
-            if error_y * raw_vy > 0.0:
-                self.pid_y.integral = previous_integral_y
-            if error_z * raw_vz > 0.0:
-                self.pid_z.integral = previous_integral_z
         body_velocity = tuple(
             deadband_filter.update(value)
             for deadband_filter, value in zip(
@@ -270,12 +208,13 @@ class BodyVelocityController(object):
 
         filtered_yaw_error = self.yaw_filter.update(yaw_error, dt)
         if not self.enable_yaw_control:
-            self.pid_yaw.reset()
             yaw_rate = 0.0
         elif abs(filtered_yaw_error) < self.yaw_error_deadband:
-            self.pid_yaw.reset()
             yaw_rate = 0.0
         else:
-            yaw_rate = self.pid_yaw.update(filtered_yaw_error, dt)
+            yaw_rate = max(
+                -self.yaw_rate_limit,
+                min(self.yaw_rate_limit, self.kp_yaw * filtered_yaw_error),
+            )
 
         return body_velocity, yaw_rate, filtered_yaw_error

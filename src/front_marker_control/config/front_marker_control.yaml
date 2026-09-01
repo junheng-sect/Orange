@@ -1,17 +1,8 @@
 target_xyz_body: [0.8, 0.0, 0.0]
 
 kp_x: 0.50
-ki_x: 0.0
-kd_x: 0.03
 kp_yz: 0.60
-ki_yz: 0.0
-kd_yz: 0.08
 kp_yaw: 0.40
-ki_yaw: 0.0
-kd_yaw: 0.0
-integral_limit_x: 1.0
-integral_limit_yz: 1.0
-integral_limit_yaw: 1.0
 yaw_lpf_tau: 0.10
 
 # Combined YZ-plane speed limit: hypot(vy, vz) <= vyz_limit.
@@ -28,7 +19,7 @@ max_accel: 0.50
 loss_decel: 1.00
 pose_timeout_sec: 0.1
 max_pose_latency_sec: 0.5
-pid_dt_max_sec: 0.5
+filter_dt_max_sec: 0.5
 state_timeout_sec: 1.0
 future_stamp_tolerance_sec: 0.1
 tf_lookup_timeout_sec: 0.05

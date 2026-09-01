@@ -44,48 +44,36 @@ MAVROS connected、armed、OFFBOARD 且状态新鲜；断联、锁定、退出 O
 立即发布零 setpoint。本包不会自动解锁、切换模式或起飞。
 
 线速度输出带三维合加速度限制。正常跟踪使用 `max_accel=0.5m/s^2`；控制器连续
-`pose_timeout_sec=0.1s` 没有收到新 Pose 后，立即清除 PID 历史，并使用
+`pose_timeout_sec=0.1s` 没有收到新 Pose 后，立即清除控制器状态，并使用
 `loss_decel=1.0m/s^2` 将最后输出受控减速到零。刹车期间只要上述 MAVROS 硬门仍满足，
 真实 setpoint 会继续发布递减速度；重新识别后也从当前速度平滑恢复，不会阶跃到速度限幅。
 偏航角速度不经过该斜率限制。
 
 三个时间参数彼此独立：`pose_timeout_sec=0.1s` 只检查最近一次 Pose 的本机接收时间；
 `max_pose_latency_sec=0.5s` 限制 Pose 从相机采集时间戳到控制节点收到时的端到端延迟；
-`pid_dt_max_sec=0.5s` 只在相邻有效 Pose 的源时间戳间隔过大时重置 PID 历史。
+`filter_dt_max_sec=0.5s` 只在相邻有效 Pose 的源时间戳间隔过大时重置 Yaw 低通与
+速度死区状态。
 
 三个参数可从完整入口直接覆盖：
 
 ```bash
 roslaunch front_marker_control front_marker_tracking.launch \
   max_accel:=0.5 loss_decel:=1.0 pose_timeout_sec:=0.1 \
-  max_pose_latency_sec:=0.5 pid_dt_max_sec:=0.5
+  max_pose_latency_sec:=0.5 filter_dt_max_sec:=0.5
 ```
 
-PID 使用条件积分抗饱和：x、Yaw 的标量输出达到限幅，或 y/z 平面合成速度
-`hypot(vy, vz)` 达到 `vyz_limit` 时，只冻结会继续把输出推向饱和方向的积分；
-反向误差仍可消减已有积分。`vyz_limit` 只限制 YZ 平面合成速度，不是 XYZ 三轴
-总速度上限；X 轴由 `vx_limit` 独立限制。
-积分绝对限幅按控制组配置，以下参数默认均为 `1.0`，设为 `0.0` 可禁止对应组累积积分：
-
-- `integral_limit_x`：前向 x PID 积分限幅
-- `integral_limit_yz`：横向 y 和竖向 z PID 共用的积分限幅
-- `integral_limit_yaw`：Yaw PID 积分限幅
+控制器为纯比例控制：`v = Kp · e`，`yaw_rate = kp_yaw · e_yaw,filtered`，
+不含积分与微分项，因此也不存在积分抗饱和。三个增益 `kp_x`、`kp_yz`、`kp_yaw`
+在 `config/front_marker_control.yaml` 中配置。`vyz_limit` 只限制 YZ 平面合成速度，
+不是 XYZ 三轴总速度上限；X 轴由 `vx_limit` 独立限制，Yaw 角速度由
+`yaw_rate_limit` 限幅。
 
 三个线速度输出轴分别使用有状态滞回死区。已激活的轴在速度绝对值降至
 `velocity_deadband_enter`（默认 `0.02m/s`）时归零；已归零的轴只有达到
 `velocity_deadband`（默认 `0.03m/s`）才重新输出。两阈值必须满足
 `0 <= velocity_deadband_enter <= velocity_deadband`，同时设为 `0.0` 可关闭速度死区。
 
-三个参数均可从独立控制入口或完整跟踪入口覆盖：
-
-```bash
-roslaunch front_marker_control front_marker_tracking.launch \
-  integral_limit_x:=0.5 \
-  integral_limit_yz:=0.3 \
-  integral_limit_yaw:=0.4
-```
-
-滞回阈值也可从独立控制入口或完整跟踪入口覆盖：
+滞回阈值可从独立控制入口或完整跟踪入口覆盖：
 
 ```bash
 roslaunch front_marker_control front_marker_tracking.launch \

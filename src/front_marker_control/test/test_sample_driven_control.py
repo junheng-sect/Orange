@@ -195,15 +195,15 @@ class SampleDrivenControlTest(unittest.TestCase):
             0.5,
         ))
         self.assertTrue(math.isclose(
-            rospy.get_param('/sample_front_marker_control/pid_dt_max_sec'),
+            rospy.get_param('/sample_front_marker_control/filter_dt_max_sec'),
             0.5,
         ))
 
         # A 250ms acquisition-to-arrival delay is accepted by the independent
         # 0.5s latency gate. A following sample with a 200ms source-stamp gap
-        # keeps PID history because pid_dt_max_sec is independent from the
-        # 0.1s receive-freshness timeout. With kp=0.5 and kd=0.03, the second
-        # raw x target is 0.5*0.1 + 0.03*(0.1-0.2)/0.2 = 0.035m/s.
+        # keeps yaw-filter history because filter_dt_max_sec is independent
+        # from the 0.1s receive-freshness timeout. With pure proportional
+        # mapping, the raw x target is 0.5*0.1 = 0.05m/s.
         rospy.sleep(0.1)
         self.publish_state(True, True, 'OFFBOARD')
         first_delayed_stamp = rospy.Time.now() - rospy.Duration(0.25)
@@ -225,8 +225,11 @@ class SampleDrivenControlTest(unittest.TestCase):
             lambda: math.isclose(self.latest_error_x(), 0.1, abs_tol=1e-6),
             0.3,
         )
-        rospy.sleep(0.06)
-        self.assertTrue(math.isclose(self.latest_command_x(), 0.035, abs_tol=0.004))
+        # Keep the same target fresh while the output slew limiter settles.
+        # Waiting on a single sample for longer than pose_timeout_sec would
+        # exercise pose-loss braking instead of proportional tracking.
+        self.publish_tracking_for((0.1, 0.0, 0.0), 0.15)
+        self.assertTrue(math.isclose(self.latest_command_x(), 0.05, abs_tol=0.004))
 
         # Hard MAVROS gates keep all final outputs at zero.
         hard_gate_stages = [

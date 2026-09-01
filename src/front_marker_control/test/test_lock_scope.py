@@ -92,7 +92,7 @@ class LockScopeTest(unittest.TestCase):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
         node.lock = threading.RLock()
         node.last_accepted_source_stamp = None
-        node.last_pid_source_stamp = None
+        node.last_filter_stamp = None
         node.max_pose_latency_sec = 0.5
         node.future_stamp_tolerance_sec = 0.1
         node.tf_buffer = transform
@@ -100,7 +100,7 @@ class LockScopeTest(unittest.TestCase):
         node.tf_lookup_timeout_sec = 0.05
         node.target_xyz_body = (0.8, 0.0, 0.0)
         node.setpoint_publish_rate_hz = 20.0
-        node.pid_dt_max_sec = 0.5
+        node.filter_dt_max_sec = 0.5
         node.body_controller = FakeBodyController()
         node.latest_position_error = None
         node.latest_yaw_error = 0.0

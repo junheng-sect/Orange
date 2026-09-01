@@ -41,7 +41,7 @@ class FrontMarkerControlNode(object):
         self.latest_filtered_yaw_error = 0.0
         self.latest_source_stamp = None
         self.latest_receive_time = None
-        self.last_pid_source_stamp = None
+        self.last_filter_stamp = None
         self.last_accepted_source_stamp = None
         self.aligned_start_time = None
         self.latest_body_velocity = (0.0, 0.0, 0.0)
@@ -53,14 +53,8 @@ class FrontMarkerControlNode(object):
 
         self.body_controller = BodyVelocityController(
             self.kp_x,
-            self.ki_x,
-            self.kd_x,
             self.kp_yz,
-            self.ki_yz,
-            self.kd_yz,
             self.kp_yaw,
-            self.ki_yaw,
-            self.kd_yaw,
             self.vx_limit,
             self.vyz_limit,
             self.yaw_rate_limit,
@@ -69,9 +63,6 @@ class FrontMarkerControlNode(object):
             self.yaw_error_deadband,
             self.yaw_lpf_tau,
             self.enable_yaw_control,
-            integral_limit_x=self.integral_limit_x,
-            integral_limit_yz=self.integral_limit_yz,
-            integral_limit_yaw=self.integral_limit_yaw,
             velocity_deadband_enter=self.velocity_deadband_enter,
         )
         self.velocity_limiter = Vector3SlewRateLimiter()
@@ -132,7 +123,7 @@ class FrontMarkerControlNode(object):
             'target=(%.3f, %.3f, %.3f)m | yaw_control=%s | '
             'setpoint_rate=%.1fHz | max_accel=%.3fm/s^2 | '
             'loss_decel=%.3fm/s^2 | pose_timeout=%.3fs | '
-            'max_pose_latency=%.3fs | pid_dt_max=%.3fs | setpoint_output=%s',
+            'max_pose_latency=%.3fs | filter_dt_max=%.3fs | setpoint_output=%s',
             self.pose_topic,
             self.base_frame,
             self.target_xyz_body[0],
@@ -144,7 +135,7 @@ class FrontMarkerControlNode(object):
             self.loss_decel,
             self.pose_timeout_sec,
             self.max_pose_latency_sec,
-            self.pid_dt_max_sec,
+            self.filter_dt_max_sec,
             self.enable_setpoint_output,
         )
 
@@ -180,17 +171,8 @@ class FrontMarkerControlNode(object):
 
         numeric_defaults = {
             'kp_x': 0.50,
-            'ki_x': 0.0,
-            'kd_x': 0.03,
             'kp_yz': 0.60,
-            'ki_yz': 0.0,
-            'kd_yz': 0.08,
             'kp_yaw': 0.40,
-            'ki_yaw': 0.0,
-            'kd_yaw': 0.0,
-            'integral_limit_x': 1.0,
-            'integral_limit_yz': 1.0,
-            'integral_limit_yaw': 1.0,
             'yaw_lpf_tau': 0.10,
             'vyz_limit': 0.80,
             'vx_limit': 0.20,
@@ -204,7 +186,7 @@ class FrontMarkerControlNode(object):
             'loss_decel': 1.00,
             'pose_timeout_sec': 0.1,
             'max_pose_latency_sec': 0.5,
-            'pid_dt_max_sec': 0.5,
+            'filter_dt_max_sec': 0.5,
             'state_timeout_sec': 1.0,
             'future_stamp_tolerance_sec': 0.1,
             'tf_lookup_timeout_sec': 0.05,
@@ -231,21 +213,15 @@ class FrontMarkerControlNode(object):
         if (
             self.pose_timeout_sec <= 0.0
             or self.max_pose_latency_sec <= 0.0
-            or self.pid_dt_max_sec <= 0.0
+            or self.filter_dt_max_sec <= 0.0
             or self.state_timeout_sec <= 0.0
         ):
             raise ValueError(
-                'pose_timeout_sec, max_pose_latency_sec, pid_dt_max_sec and '
+                'pose_timeout_sec, max_pose_latency_sec, filter_dt_max_sec and '
                 'state_timeout_sec must be positive'
             )
         if self.future_stamp_tolerance_sec < 0.0 or self.tf_lookup_timeout_sec < 0.0:
             raise ValueError('timestamp and TF tolerances must be non-negative')
-        if (
-            self.integral_limit_x < 0.0
-            or self.integral_limit_yz < 0.0
-            or self.integral_limit_yaw < 0.0
-        ):
-            raise ValueError('integral limits must be non-negative')
         if any(value < 0.0 for value in (
                 self.vyz_limit,
                 self.vx_limit,
@@ -361,13 +337,13 @@ class FrontMarkerControlNode(object):
                 self.invalidate_observation(rejection_reason)
                 return
 
-            if self.last_pid_source_stamp is None:
-                self.reset_pid_state()
+            if self.last_filter_stamp is None:
+                self.reset_controller_state()
                 dt = 1.0 / self.setpoint_publish_rate_hz
             else:
-                dt = (message.header.stamp - self.last_pid_source_stamp).to_sec()
-                if not math.isfinite(dt) or dt <= 0.0 or dt > self.pid_dt_max_sec:
-                    self.reset_pid_state()
+                dt = (message.header.stamp - self.last_filter_stamp).to_sec()
+                if not math.isfinite(dt) or dt <= 0.0 or dt > self.filter_dt_max_sec:
+                    self.reset_controller_state()
                     dt = 1.0 / self.setpoint_publish_rate_hz
 
             (
@@ -379,7 +355,7 @@ class FrontMarkerControlNode(object):
             self.latest_yaw_error = yaw_error
             self.latest_source_stamp = message.header.stamp
             self.latest_receive_time = now
-            self.last_pid_source_stamp = message.header.stamp
+            self.last_filter_stamp = message.header.stamp
             self.last_accepted_source_stamp = message.header.stamp
             self.last_observation_issue = ''
             publish_snapshot = (
@@ -418,12 +394,12 @@ class FrontMarkerControlNode(object):
         age = (now - self.latest_state_receive_time).to_sec()
         return 0.0 <= age <= self.state_timeout_sec
 
-    def reset_pid_state(self):
+    def reset_controller_state(self):
         self.body_controller.reset()
 
     def reset_tracking_target(self):
-        self.reset_pid_state()
-        self.last_pid_source_stamp = None
+        self.reset_controller_state()
+        self.last_filter_stamp = None
         self.latest_body_velocity = (0.0, 0.0, 0.0)
         self.latest_yaw_rate = 0.0
         self.aligned_start_time = None
