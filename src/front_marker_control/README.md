@@ -39,7 +39,7 @@ ROI 只缩小 ArUco 检测输入，不裁剪相机 raw/compressed 或标注图�
 roslaunch front_marker_control front_camera_tf.launch
 ```
 
-默认 `enable_setpoint_output=false`、`enable_yaw_control=false`。真实输出启用后要求
+默认 `enable_setpoint_output=false`、`enable_yaw_control=true`。真实输出启用后要求
 MAVROS connected、armed、OFFBOARD 且状态新鲜；断联、锁定、退出 OFFBOARD 或状态超时会
 立即发布零 setpoint。本包不会自动解锁、切换模式或起飞。
 

@@ -15,7 +15,7 @@ velocity_deadband_enter: 0.02
 velocity_deadband: 0.03
 z_error_deadband: 0.04
 yaw_error_deadband: 0.06
-enable_yaw_control: false
+enable_yaw_control: true
 setpoint_publish_rate_hz: 20.0
 max_accel: 0.50
 loss_decel: 1.00

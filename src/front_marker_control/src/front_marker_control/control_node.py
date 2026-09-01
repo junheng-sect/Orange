@@ -204,7 +204,7 @@ class FrontMarkerControlNode(object):
             setattr(self, name, float(get('~' + name, default)))
 
         self.enable_setpoint_output = bool(get('~enable_setpoint_output', False))
-        self.enable_yaw_control = bool(get('~enable_yaw_control', False))
+        self.enable_yaw_control = bool(get('~enable_yaw_control', True))
         self.yaw_tolerance_rad = math.radians(self.yaw_tolerance_deg)
 
         for name in numeric_defaults:
