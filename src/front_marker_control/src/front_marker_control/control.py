@@ -38,6 +38,33 @@ class FirstOrderAngleLowPass(object):
         return self.value
 
 
+class FirstOrderLowPass(object):
+    """Sample-driven first-order low-pass for finite scalar values."""
+
+    def __init__(self, tau):
+        self.tau = float(tau)
+        if not math.isfinite(self.tau) or self.tau < 0.0:
+            raise ValueError('low-pass tau must be finite and non-negative')
+        self.reset()
+
+    def reset(self):
+        self.value = None
+
+    def update(self, value, dt):
+        value = float(value)
+        dt = float(dt)
+        if not math.isfinite(value):
+            raise ValueError('low-pass value must be finite')
+        if not math.isfinite(dt) or dt <= 0.0:
+            raise ValueError('low-pass requires finite positive dt')
+        if self.value is None or self.tau == 0.0:
+            self.value = value
+        else:
+            alpha = dt / (self.tau + dt)
+            self.value += alpha * (value - self.value)
+        return self.value
+
+
 def apply_deadband(value, deadband):
     return 0.0 if abs(float(value)) < abs(float(deadband)) else float(value)
 
@@ -145,6 +172,8 @@ class BodyVelocityController(object):
         yaw_lpf_tau,
         enable_yaw_control=True,
         velocity_deadband_enter=0.02,
+        position_lpf_tau_x=0.05,
+        position_lpf_tau_yz=0.10,
     ):
         self.kp_x = self._proportional_gain(kp_x, 'kp_x')
         self.kp_yz = self._proportional_gain(kp_yz, 'kp_yz')
@@ -157,6 +186,11 @@ class BodyVelocityController(object):
         self.z_error_deadband = abs(float(z_error_deadband))
         self.yaw_error_deadband = abs(float(yaw_error_deadband))
         self.enable_yaw_control = bool(enable_yaw_control)
+        self.position_filters = (
+            FirstOrderLowPass(position_lpf_tau_x),
+            FirstOrderLowPass(position_lpf_tau_yz),
+            FirstOrderLowPass(position_lpf_tau_yz),
+        )
         self.yaw_filter = FirstOrderAngleLowPass(yaw_lpf_tau)
         self.velocity_deadband_filters = tuple(
             HysteresisDeadband(
@@ -174,6 +208,8 @@ class BodyVelocityController(object):
         return gain
 
     def reset(self):
+        for position_filter in self.position_filters:
+            position_filter.reset()
         self.yaw_filter.reset()
         for deadband_filter in self.velocity_deadband_filters:
             deadband_filter.reset()
@@ -190,12 +226,23 @@ class BodyVelocityController(object):
         if not math.isfinite(dt) or dt <= 0.0:
             raise ValueError('controller requires finite positive dt')
 
-        vx = max(-self.vx_limit, min(self.vx_limit, self.kp_x * error_x))
-        raw_vy = self.kp_yz * error_y
+        filtered_error_x, filtered_error_y, filtered_error_z = tuple(
+            position_filter.update(value, dt)
+            for position_filter, value in zip(
+                self.position_filters,
+                (error_x, error_y, error_z),
+            )
+        )
+
+        vx = max(
+            -self.vx_limit,
+            min(self.vx_limit, self.kp_x * filtered_error_x),
+        )
+        raw_vy = self.kp_yz * filtered_error_y
         raw_vz = (
             0.0
-            if abs(error_z) < self.z_error_deadband
-            else self.kp_yz * error_z
+            if abs(filtered_error_z) < self.z_error_deadband
+            else self.kp_yz * filtered_error_z
         )
         vy, vz = limit_vector2(raw_vy, raw_vz, self.vyz_limit)
         body_velocity = tuple(

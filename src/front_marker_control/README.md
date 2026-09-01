@@ -68,6 +68,12 @@ roslaunch front_marker_control front_marker_tracking.launch \
 不是 XYZ 三轴总速度上限；X 轴由 `vx_limit` 独立限制，Yaw 角速度由
 `yaw_rate_limit` 限幅。
 
+XYZ 位置误差在进入比例控制、Z 误差死区、速度限幅和速度滞回死区之前，分别经过
+一阶低通滤波。X 轴时间常数由 `position_lpf_tau_x` 配置，默认 `0.05s`；Y、Z
+使用两个独立滤波器并共享 `position_lpf_tau_yz`，默认 `0.10s`。Yaw 的
+`yaw_lpf_tau` 默认 `0.20s`。任一时间常数设为 `0.0` 可关闭对应滤波；滤波首帧
+直接采用当前误差，视觉失效或时间戳异常时会清空历史状态。
+
 三个线速度输出轴分别使用有状态滞回死区。已激活的轴在速度绝对值降至
 `velocity_deadband_enter`（默认 `0.02m/s`）时归零；已归零的轴只有达到
 `velocity_deadband`（默认 `0.03m/s`）才重新输出。两阈值必须满足

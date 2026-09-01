@@ -3,7 +3,9 @@ target_xyz_body: [0.8, 0.0, 0.0]
 kp_x: 0.50
 kp_yz: 0.60
 kp_yaw: 0.40
-yaw_lpf_tau: 0.10
+position_lpf_tau_x: 0.05
+position_lpf_tau_yz: 0.10
+yaw_lpf_tau: 0.20
 
 # Combined YZ-plane speed limit: hypot(vy, vz) <= vyz_limit.
 vyz_limit: 0.80
