@@ -1,10 +1,13 @@
 <launch>
   <arg name="base_frame" default="base_link" />
   <arg name="camera_frame" default="usb_camera_optical_frame" />
+  <arg name="camera_offset_x" default="0.15" />
+  <arg name="camera_offset_y" default="0.0" />
+  <arg name="camera_offset_z" default="0.0" />
 
-  <!-- Existing calibrated mounting convention: base FLU to USB camera optical frame. -->
+  <!-- Camera sits 0.15 m ahead of base_link origin, optical axis facing forward. -->
   <node pkg="tf2_ros"
         type="static_transform_publisher"
         name="front_camera_static_transform"
-        args="0 0 0 -0.5 0.5 -0.5 0.5 $(arg base_frame) $(arg camera_frame)" />
+        args="$(arg camera_offset_x) $(arg camera_offset_y) $(arg camera_offset_z) -0.5 0.5 -0.5 0.5 $(arg base_frame) $(arg camera_frame)" />
 </launch>
