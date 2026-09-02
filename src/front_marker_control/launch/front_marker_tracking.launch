@@ -17,9 +17,9 @@
   <arg name="target_body_x" default="0.8" />
   <arg name="target_body_y" default="0.0" />
   <arg name="target_body_z" default="0.0" />
-  <arg name="kp_x" default="0.50" />
-  <arg name="kp_y" default="0.60" />
-  <arg name="kp_z" default="0.60" />
+  <arg name="kp_x" default="1.50" />
+  <arg name="kp_y" default="1.50" />
+  <arg name="kp_z" default="1.00" />
   <arg name="velocity_deadband_enter" default="0.02" />
   <arg name="velocity_deadband" default="0.03" />
   <arg name="publish_annotated" default="true" />
