@@ -1,7 +1,7 @@
 target_xyz_body: [0.8, 0.0, 0.0]
 
-kp_x: 0.50
-kp_yz: 0.60
+# kp_x/kp_y/kp_z are owned by the launch arguments and are intentionally not
+# duplicated in this config file.
 kp_yaw: 0.40
 position_lpf_tau_x: 0.05
 position_lpf_tau_yz: 0.10

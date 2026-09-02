@@ -95,7 +95,8 @@ class ControllerTest(unittest.TestCase):
     def controller(self, enable_yaw=True, **overrides):
         parameters = {
             'kp_x': 0.5,
-            'kp_yz': 0.6,
+            'kp_y': 0.6,
+            'kp_z': 0.6,
             'kp_yaw': 0.4,
             'vx_limit': 0.2,
             'vyz_limit': 0.8,
@@ -125,17 +126,36 @@ class ControllerTest(unittest.TestCase):
         negative, _, _ = controller.update((-1.0, 0.0, 0.0), 0.0, 0.05)
         self.assertTrue(math.isclose(negative[0], -0.2, abs_tol=1e-12))
 
+    def test_proportional_mapping_uses_independent_xyz_gains(self):
+        controller = self.controller(
+            kp_x=2.0,
+            kp_y=3.0,
+            kp_z=4.0,
+            vx_limit=1.0,
+            vyz_limit=2.0,
+            velocity_deadband_enter=0.0,
+            velocity_deadband=0.0,
+            z_error_deadband=0.0,
+            position_lpf_tau_x=0.0,
+            position_lpf_tau_yz=0.0,
+        )
+        velocity, _, _ = controller.update((0.1, 0.2, 0.3), 0.0, 0.05)
+        for actual, expected in zip(velocity, (0.2, 0.6, 1.2)):
+            self.assertTrue(math.isclose(actual, expected, abs_tol=1e-12))
+
     def test_proportional_gains_are_validated(self):
-        with self.assertRaises(ValueError):
-            self.controller(kp_x=-0.1)
-        with self.assertRaises(ValueError):
-            self.controller(kp_yz=float('nan'))
+        for name in ('kp_x', 'kp_y', 'kp_z'):
+            for invalid in (-0.1, float('nan'), float('inf')):
+                with self.subTest(name=name, invalid=invalid):
+                    with self.assertRaises(ValueError):
+                        self.controller(**{name: invalid})
         with self.assertRaises(ValueError):
             self.controller(kp_yaw=float('inf'))
 
     def test_yz_combined_limit_preserves_direction(self):
         controller = self.controller(
-            kp_yz=1.0,
+            kp_y=1.0,
+            kp_z=1.0,
             vyz_limit=0.5,
             velocity_deadband_enter=0.0,
             velocity_deadband=0.0,
@@ -152,7 +172,8 @@ class ControllerTest(unittest.TestCase):
 
     def test_z_error_deadband_holds_and_releases(self):
         controller = self.controller(
-            kp_yz=1.0,
+            kp_y=1.0,
+            kp_z=1.0,
             vx_limit=1.0,
             vyz_limit=1.0,
             velocity_deadband_enter=0.0,
@@ -229,7 +250,8 @@ class ControllerTest(unittest.TestCase):
     def test_output_deadband_axes_are_independent_and_resettable(self):
         controller = self.controller(
             kp_x=1.0,
-            kp_yz=1.0,
+            kp_y=1.0,
+            kp_z=1.0,
             vx_limit=1.0,
             vyz_limit=1.0,
             velocity_deadband_enter=0.02,
@@ -252,7 +274,8 @@ class ControllerTest(unittest.TestCase):
     def test_output_deadband_accepts_zero_and_rejects_invalid_thresholds(self):
         controller = self.controller(
             kp_x=1.0,
-            kp_yz=1.0,
+            kp_y=1.0,
+            kp_z=1.0,
             vx_limit=1.0,
             vyz_limit=1.0,
             velocity_deadband_enter=0.0,
@@ -300,7 +323,8 @@ class ControllerTest(unittest.TestCase):
     def test_position_low_pass_filters_each_axis_independently(self):
         controller = self.controller(
             kp_x=1.0,
-            kp_yz=1.0,
+            kp_y=1.0,
+            kp_z=1.0,
             vx_limit=4.0,
             vyz_limit=4.0,
             velocity_deadband_enter=0.0,
@@ -318,7 +342,8 @@ class ControllerTest(unittest.TestCase):
     def test_position_low_pass_precedes_gain_deadband_and_limits(self):
         controller = self.controller(
             kp_x=2.0,
-            kp_yz=1.0,
+            kp_y=1.0,
+            kp_z=1.0,
             vx_limit=0.6,
             vyz_limit=0.5,
             velocity_deadband_enter=0.0,

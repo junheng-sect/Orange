@@ -62,9 +62,17 @@ roslaunch front_marker_control front_marker_tracking.launch \
   max_pose_latency_sec:=0.5 filter_dt_max_sec:=0.5
 ```
 
+位置环 XYZ 增益由 launch 参数提供（不在 `config_file` 的 YAML 中重复定义），启动时可分别配置：
+
+```bash
+roslaunch front_marker_control front_marker_tracking.launch \
+  kp_x:=0.5 kp_y:=0.6 kp_z:=0.7
+```
+
 控制器为纯比例控制：`v = Kp · e`，`yaw_rate = kp_yaw · e_yaw,filtered`，
-不含积分与微分项，因此也不存在积分抗饱和。三个增益 `kp_x`、`kp_yz`、`kp_yaw`
-在 `config/front_marker_control.yaml` 中配置。`vyz_limit` 只限制 YZ 平面合成速度，
+不含积分与微分项，因此也不存在积分抗饱和。位置增益 `kp_x`、`kp_y`、`kp_z` 通过 launch
+参数配置；偏航增益 `kp_yaw` 和其他控制参数仍在 `config/front_marker_control.yaml` 中配置。
+`vyz_limit` 只限制 YZ 平面合成速度，
 不是 XYZ 三轴总速度上限；X 轴由 `vx_limit` 独立限制，Yaw 角速度由
 `yaw_rate_limit` 限幅。
 

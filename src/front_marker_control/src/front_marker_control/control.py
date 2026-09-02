@@ -161,7 +161,8 @@ class BodyVelocityController(object):
     def __init__(
         self,
         kp_x,
-        kp_yz,
+        kp_y,
+        kp_z,
         kp_yaw,
         vx_limit,
         vyz_limit,
@@ -176,7 +177,8 @@ class BodyVelocityController(object):
         position_lpf_tau_yz=0.10,
     ):
         self.kp_x = self._proportional_gain(kp_x, 'kp_x')
-        self.kp_yz = self._proportional_gain(kp_yz, 'kp_yz')
+        self.kp_y = self._proportional_gain(kp_y, 'kp_y')
+        self.kp_z = self._proportional_gain(kp_z, 'kp_z')
         self.kp_yaw = self._proportional_gain(kp_yaw, 'kp_yaw')
         self.vx_limit = abs(float(vx_limit))
         self.vyz_limit = abs(float(vyz_limit))
@@ -238,11 +240,11 @@ class BodyVelocityController(object):
             -self.vx_limit,
             min(self.vx_limit, self.kp_x * filtered_error_x),
         )
-        raw_vy = self.kp_yz * filtered_error_y
+        raw_vy = self.kp_y * filtered_error_y
         raw_vz = (
             0.0
             if abs(filtered_error_z) < self.z_error_deadband
-            else self.kp_yz * filtered_error_z
+            else self.kp_z * filtered_error_z
         )
         vy, vz = limit_vector2(raw_vy, raw_vz, self.vyz_limit)
         body_velocity = tuple(

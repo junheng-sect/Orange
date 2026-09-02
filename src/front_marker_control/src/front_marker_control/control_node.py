@@ -53,7 +53,8 @@ class FrontMarkerControlNode(object):
 
         self.body_controller = BodyVelocityController(
             kp_x=self.kp_x,
-            kp_yz=self.kp_yz,
+            kp_y=self.kp_y,
+            kp_z=self.kp_z,
             kp_yaw=self.kp_yaw,
             vx_limit=self.vx_limit,
             vyz_limit=self.vyz_limit,
@@ -122,7 +123,9 @@ class FrontMarkerControlNode(object):
 
         rospy.loginfo(
             'front_marker_control_node started | pose=%s | base=%s | '
-            'target=(%.3f, %.3f, %.3f)m | yaw_control=%s | '
+            'target=(%.3f, %.3f, %.3f)m | '
+            'position_gains=(kp_x=%.3f, kp_y=%.3f, kp_z=%.3f) | '
+            'yaw_gain=%.3f | yaw_control=%s | '
             'setpoint_rate=%.1fHz | max_accel=%.3fm/s^2 | '
             'loss_decel=%.3fm/s^2 | pose_timeout=%.3fs | '
             'max_pose_latency=%.3fs | filter_dt_max=%.3fs | setpoint_output=%s',
@@ -131,6 +134,10 @@ class FrontMarkerControlNode(object):
             self.target_xyz_body[0],
             self.target_xyz_body[1],
             self.target_xyz_body[2],
+            self.kp_x,
+            self.kp_y,
+            self.kp_z,
+            self.kp_yaw,
             'ON' if self.enable_yaw_control else 'OFF',
             self.setpoint_publish_rate_hz,
             self.max_accel,
@@ -173,7 +180,8 @@ class FrontMarkerControlNode(object):
 
         numeric_defaults = {
             'kp_x': 0.50,
-            'kp_yz': 0.60,
+            'kp_y': 0.60,
+            'kp_z': 0.60,
             'kp_yaw': 0.40,
             'position_lpf_tau_x': 0.05,
             'position_lpf_tau_yz': 0.10,
