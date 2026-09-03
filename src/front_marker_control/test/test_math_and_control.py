@@ -101,11 +101,14 @@ class ControllerTest(unittest.TestCase):
             'vx_limit': 0.2,
             'vyz_limit': 0.8,
             'yaw_rate_limit': 0.8,
-            'velocity_deadband_enter': 0.02,
-            'velocity_deadband': 0.03,
-            'z_error_deadband': 0.04,
             'yaw_error_deadband': 0.06,
             'yaw_lpf_tau': 0.20,
+            'velocity_deadband_off_x': 0.0,
+            'velocity_deadband_on_x': 0.0,
+            'velocity_deadband_off_y': 0.0,
+            'velocity_deadband_on_y': 0.0,
+            'velocity_deadband_off_z': 0.0,
+            'velocity_deadband_on_z': 0.0,
             'position_lpf_tau_x': 0.05,
             'position_lpf_tau_y': 0.10,
             'position_lpf_tau_z': 0.10,
@@ -135,9 +138,12 @@ class ControllerTest(unittest.TestCase):
             kp_z=4.0,
             vx_limit=1.0,
             vyz_limit=2.0,
-            velocity_deadband_enter=0.0,
-            velocity_deadband=0.0,
-            z_error_deadband=0.0,
+            velocity_deadband_off_x=0.0,
+            velocity_deadband_on_x=0.0,
+            velocity_deadband_off_y=0.0,
+            velocity_deadband_on_y=0.0,
+            velocity_deadband_off_z=0.0,
+            velocity_deadband_on_z=0.0,
             position_lpf_tau_x=0.0,
             position_lpf_tau_y=0.0,
             position_lpf_tau_z=0.0,
@@ -160,9 +166,12 @@ class ControllerTest(unittest.TestCase):
             kp_y=1.0,
             kp_z=1.0,
             vyz_limit=0.5,
-            velocity_deadband_enter=0.0,
-            velocity_deadband=0.0,
-            z_error_deadband=0.0,
+            velocity_deadband_off_x=0.0,
+            velocity_deadband_on_x=0.0,
+            velocity_deadband_off_y=0.0,
+            velocity_deadband_on_y=0.0,
+            velocity_deadband_off_z=0.0,
+            velocity_deadband_on_z=0.0,
             position_lpf_tau_y=0.0,
             position_lpf_tau_z=0.0,
         )
@@ -174,62 +183,37 @@ class ControllerTest(unittest.TestCase):
             )
             self.assertTrue(math.isclose(velocity[1], velocity[2]))
 
-    def test_z_error_deadband_holds_and_releases(self):
+    def test_z_uses_velocity_hysteresis(self):
+        # The vertical axis is gated by its own velocity hysteresis (off/on),
+        # like x and y; there is no separate position gate.
         controller = self.controller(
             kp_y=1.0,
             kp_z=1.0,
             vx_limit=1.0,
             vyz_limit=1.0,
-            velocity_deadband_enter=0.0,
-            velocity_deadband=0.0,
+            velocity_deadband_off_z=0.003,
+            velocity_deadband_on_z=0.006,
+            position_lpf_tau_x=0.0,
             position_lpf_tau_y=0.0,
             position_lpf_tau_z=0.0,
         )
-        held, _, _ = controller.update((0.0, 0.0, 0.03), 0.0, 0.1)
-        self.assertEqual(held[2], 0.0)
-
-        boundary, _, _ = controller.update((0.0, 0.0, 0.04), 0.0, 0.1)
-        self.assertTrue(math.isclose(boundary[2], 0.04, abs_tol=1e-12))
-
-        released, _, _ = controller.update((0.0, 0.0, 0.05), 0.0, 0.1)
-        self.assertTrue(math.isclose(released[2], 0.05, abs_tol=1e-12))
-
-    def test_yaw_error_deadband_holds_and_releases(self):
-        controller = self.controller(yaw_lpf_tau=0.0, yaw_error_deadband=0.06)
-        _, held, filtered = controller.update((0.0, 0.0, 0.0), 0.05, 0.05)
-        self.assertEqual(held, 0.0)
-        self.assertTrue(math.isclose(filtered, 0.05, abs_tol=1e-12))
-
-        _, released, filtered = controller.update((0.0, 0.0, 0.0), 0.10, 0.05)
-        self.assertTrue(math.isclose(released, 0.04, abs_tol=1e-12))
-        self.assertTrue(math.isclose(filtered, 0.10, abs_tol=1e-12))
-
-    def test_yaw_low_pass_filters_and_reset_clears_history(self):
-        controller = self.controller(
-            kp_yaw=0.4,
-            yaw_rate_limit=1.0,
-            yaw_error_deadband=0.0,
-            yaw_lpf_tau=0.10,
-        )
-        _, yaw_rate, filtered = controller.update((0.0, 0.0, 0.0), 0.3, 0.1)
-        self.assertTrue(math.isclose(filtered, 0.3, abs_tol=1e-9))
-        self.assertTrue(math.isclose(yaw_rate, 0.12, abs_tol=1e-9))
-
-        # dt = tau -> alpha = 0.5, so the filter moves halfway to zero.
-        _, yaw_rate, filtered = controller.update((0.0, 0.0, 0.0), 0.0, 0.1)
-        self.assertTrue(math.isclose(filtered, 0.15, abs_tol=1e-9))
-        self.assertTrue(math.isclose(yaw_rate, 0.06, abs_tol=1e-9))
-
-        controller.reset()
-        _, _, filtered = controller.update((0.0, 0.0, 0.0), -0.3, 0.1)
-        self.assertTrue(math.isclose(filtered, -0.3, abs_tol=1e-9))
+        # below on -> 0 ; crosses on -> active ; above off -> still active ;
+        # drops to/below off -> 0
+        self.assertEqual(controller.update((0.0, 0.0, 0.0059), 0.0, 0.1)[0][2], 0.0)
+        self.assertEqual(controller.update((0.0, 0.0, 0.0065), 0.0, 0.1)[0][2], 0.0065)
+        self.assertEqual(controller.update((0.0, 0.0, 0.0040), 0.0, 0.1)[0][2], 0.0040)
+        self.assertEqual(controller.update((0.0, 0.0, 0.0020), 0.0, 0.1)[0][2], 0.0)
 
     def test_output_deadband_hysteresis_prevents_boundary_chatter(self):
         controller = self.controller(
             kp_x=1.0,
             vx_limit=1.0,
-            velocity_deadband_enter=0.02,
-            velocity_deadband=0.03,
+            velocity_deadband_off_x=0.02,
+            velocity_deadband_on_x=0.03,
+            velocity_deadband_off_y=0.02,
+            velocity_deadband_on_y=0.03,
+            velocity_deadband_off_z=0.02,
+            velocity_deadband_on_z=0.03,
             position_lpf_tau_x=0.0,
         )
         values = [0.0, 0.031, 0.029, 0.021, 0.020, 0.029, 0.031]
@@ -259,9 +243,12 @@ class ControllerTest(unittest.TestCase):
             kp_z=1.0,
             vx_limit=1.0,
             vyz_limit=1.0,
-            velocity_deadband_enter=0.02,
-            velocity_deadband=0.03,
-            z_error_deadband=0.0,
+            velocity_deadband_off_x=0.02,
+            velocity_deadband_on_x=0.03,
+            velocity_deadband_off_y=0.02,
+            velocity_deadband_on_y=0.03,
+            velocity_deadband_off_z=0.02,
+            velocity_deadband_on_z=0.03,
             position_lpf_tau_x=0.0,
             position_lpf_tau_y=0.0,
             position_lpf_tau_z=0.0,
@@ -284,9 +271,12 @@ class ControllerTest(unittest.TestCase):
             kp_z=1.0,
             vx_limit=1.0,
             vyz_limit=1.0,
-            velocity_deadband_enter=0.0,
-            velocity_deadband=0.0,
-            z_error_deadband=0.0,
+            velocity_deadband_off_x=0.0,
+            velocity_deadband_on_x=0.0,
+            velocity_deadband_off_y=0.0,
+            velocity_deadband_on_y=0.0,
+            velocity_deadband_off_z=0.0,
+            velocity_deadband_on_z=0.0,
             position_lpf_tau_x=0.0,
             position_lpf_tau_y=0.0,
             position_lpf_tau_z=0.0,
@@ -296,11 +286,11 @@ class ControllerTest(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.controller(
-                velocity_deadband_enter=0.04,
-                velocity_deadband=0.03,
+                velocity_deadband_off_x=0.04,
+                velocity_deadband_on_x=0.03,
             )
         with self.assertRaises(ValueError):
-            self.controller(velocity_deadband_enter=-0.01)
+            self.controller(velocity_deadband_off_x=-0.01)
 
     def test_limits_deadbands_and_yaw_switch(self):
         enabled = self.controller(True)
@@ -335,9 +325,12 @@ class ControllerTest(unittest.TestCase):
             kp_z=1.0,
             vx_limit=4.0,
             vyz_limit=4.0,
-            velocity_deadband_enter=0.0,
-            velocity_deadband=0.0,
-            z_error_deadband=0.0,
+            velocity_deadband_off_x=0.0,
+            velocity_deadband_on_x=0.0,
+            velocity_deadband_off_y=0.0,
+            velocity_deadband_on_y=0.0,
+            velocity_deadband_off_z=0.0,
+            velocity_deadband_on_z=0.0,
             position_lpf_tau_x=0.0,
             position_lpf_tau_y=0.10,
             position_lpf_tau_z=0.30,
@@ -357,9 +350,12 @@ class ControllerTest(unittest.TestCase):
             kp_z=1.0,
             vx_limit=0.6,
             vyz_limit=0.5,
-            velocity_deadband_enter=0.0,
-            velocity_deadband=0.0,
-            z_error_deadband=0.2,
+            velocity_deadband_off_x=0.0,
+            velocity_deadband_on_x=0.0,
+            velocity_deadband_off_y=0.0,
+            velocity_deadband_on_y=0.0,
+            velocity_deadband_off_z=0.0,
+            velocity_deadband_on_z=0.2,
             position_lpf_tau_x=0.10,
             position_lpf_tau_y=0.10,
             position_lpf_tau_z=0.10,

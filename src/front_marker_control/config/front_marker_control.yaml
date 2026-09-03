@@ -9,9 +9,14 @@ yaw_lpf_tau: 0.20
 vyz_limit: 0.80
 vx_limit: 0.20
 yaw_rate_limit: 0.80
-velocity_deadband_enter: 0.02
-velocity_deadband: 0.03
-z_error_deadband: 0.04
+# Velocity hysteresis deadbands on the commanded speed (m/s):
+#   off = stop producing, on = start producing (on >= off), one pair per axis.
+velocity_deadband_off_x: 0.010
+velocity_deadband_on_x: 0.015
+velocity_deadband_off_y: 0.004
+velocity_deadband_on_y: 0.007
+velocity_deadband_off_z: 0.003
+velocity_deadband_on_z: 0.006
 yaw_error_deadband: 0.06
 enable_yaw_control: true
 setpoint_publish_rate_hz: 20.0

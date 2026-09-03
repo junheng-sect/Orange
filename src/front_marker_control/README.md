@@ -62,8 +62,6 @@ roslaunch front_marker_control front_marker_tracking.launch \
   max_pose_latency_sec:=0.5 filter_dt_max_sec:=0.5
 ```
 
-位置环 XYZ 增益和三轴位置低通时间常数由 launch 参数提供（不在
-`config_file` 的 YAML 中重复定义），启动时可分别配置：
 
 ```bash
 roslaunch front_marker_control front_marker_tracking.launch \
@@ -85,16 +83,17 @@ XYZ 位置误差在进入比例控制、Z 误差死区、速度限幅和速度�
 可关闭对应滤波；滤波首帧
 直接采用当前误差，视觉失效或时间戳异常时会清空历史状态。
 
-三个线速度输出轴分别使用有状态滞回死区。已激活的轴在速度绝对值降至
-`velocity_deadband_enter`（默认 `0.02m/s`）时归零；已归零的轴只有达到
-`velocity_deadband`（默认 `0.03m/s`）才重新输出。两阈值必须满足
-`0 <= velocity_deadband_enter <= velocity_deadband`，同时设为 `0.0` 可关闭速度死区。
+三个线速度输出轴分别使用独立的有状态滞回死区（`off` = 低于则停止输出，
+`on` = 高于则开始输出，需 `on >= off`）：`velocity_deadband_off_x/on_x`、
+`velocity_deadband_off_y/on_y`、`velocity_deadband_off_z/on_z`。默认推荐值
+`0.010/0.015`（x）、`0.004/0.007`（y）、`0.003/0.006`（z），同时设为
+`0.0/0.0` 可关闭对应轴速度死区。
 
 滞回阈值可从独立控制入口或完整跟踪入口覆盖：
 
 ```bash
 roslaunch front_marker_control front_marker_tracking.launch \
-  velocity_deadband_enter:=0.02 velocity_deadband:=0.03
+  velocity_deadband_off_x:=0.010 velocity_deadband_on_x:=0.015
 ```
 
 状态 `/front_marker_control/status` 使用 `TRACKING`、`BRAKING_POSE_LOSS` 和

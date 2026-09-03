@@ -59,12 +59,15 @@ class FrontMarkerControlNode(object):
             vx_limit=self.vx_limit,
             vyz_limit=self.vyz_limit,
             yaw_rate_limit=self.yaw_rate_limit,
-            velocity_deadband=self.velocity_deadband,
-            z_error_deadband=self.z_error_deadband,
             yaw_error_deadband=self.yaw_error_deadband,
             yaw_lpf_tau=self.yaw_lpf_tau,
             enable_yaw_control=self.enable_yaw_control,
-            velocity_deadband_enter=self.velocity_deadband_enter,
+            velocity_deadband_off_x=self.velocity_deadband_off_x,
+            velocity_deadband_on_x=self.velocity_deadband_on_x,
+            velocity_deadband_off_y=self.velocity_deadband_off_y,
+            velocity_deadband_on_y=self.velocity_deadband_on_y,
+            velocity_deadband_off_z=self.velocity_deadband_off_z,
+            velocity_deadband_on_z=self.velocity_deadband_on_z,
             position_lpf_tau_x=self.position_lpf_tau_x,
             position_lpf_tau_y=self.position_lpf_tau_y,
             position_lpf_tau_z=self.position_lpf_tau_z,
@@ -191,10 +194,13 @@ class FrontMarkerControlNode(object):
             'vyz_limit': 0.80,
             'vx_limit': 0.20,
             'yaw_rate_limit': 0.80,
-            'velocity_deadband_enter': 0.02,
-            'velocity_deadband': 0.03,
-            'z_error_deadband': 0.04,
             'yaw_error_deadband': 0.06,
+            'velocity_deadband_off_x': 0.010,
+            'velocity_deadband_on_x': 0.015,
+            'velocity_deadband_off_y': 0.004,
+            'velocity_deadband_on_y': 0.007,
+            'velocity_deadband_off_z': 0.003,
+            'velocity_deadband_on_z': 0.006,
             'setpoint_publish_rate_hz': 20.0,
             'max_accel': 0.50,
             'loss_decel': 1.00,
@@ -240,10 +246,13 @@ class FrontMarkerControlNode(object):
                 self.vyz_limit,
                 self.vx_limit,
                 self.yaw_rate_limit,
-                self.velocity_deadband_enter,
-                self.velocity_deadband,
-                self.z_error_deadband,
                 self.yaw_error_deadband,
+                self.velocity_deadband_off_x,
+                self.velocity_deadband_on_x,
+                self.velocity_deadband_off_y,
+                self.velocity_deadband_on_y,
+                self.velocity_deadband_off_z,
+                self.velocity_deadband_on_z,
                 self.position_lpf_tau_x,
                 self.position_lpf_tau_y,
                 self.position_lpf_tau_z,
@@ -255,10 +264,16 @@ class FrontMarkerControlNode(object):
                 self.aligned_hold_sec,
         )):
             raise ValueError('limits, deadbands and tolerances must be non-negative')
-        if self.velocity_deadband_enter > self.velocity_deadband:
             raise ValueError(
-                'velocity_deadband_enter must not exceed velocity_deadband'
             )
+        for axis in ('x', 'y', 'z'):
+            if getattr(self, 'velocity_deadband_off_' + axis) > getattr(
+                self, 'velocity_deadband_on_' + axis
+            ):
+                raise ValueError(
+                    'velocity_deadband_off_%s must not exceed '
+                    'velocity_deadband_on_%s' % (axis, axis)
+                )
 
     def state_callback(self, message):
         with self.lock:

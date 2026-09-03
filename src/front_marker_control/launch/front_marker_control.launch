@@ -18,8 +18,12 @@
   <arg name="position_lpf_tau_x" default="0.05" />
   <arg name="position_lpf_tau_y" default="0.00" />
   <arg name="position_lpf_tau_z" default="0.00" />
-  <arg name="velocity_deadband_enter" default="0.02" />
-  <arg name="velocity_deadband" default="0.03" />
+  <arg name="velocity_deadband_off_x" default="0.010" />
+  <arg name="velocity_deadband_on_x" default="0.015" />
+  <arg name="velocity_deadband_off_y" default="0.004" />
+  <arg name="velocity_deadband_on_y" default="0.007" />
+  <arg name="velocity_deadband_off_z" default="0.003" />
+  <arg name="velocity_deadband_on_z" default="0.006" />
   <arg name="enable_yaw_control" default="true" />
   <arg name="enable_setpoint_output" default="false" />
   <arg name="max_accel" default="0.5" />
@@ -51,8 +55,12 @@
     <param name="setpoint_preview_topic" value="$(arg setpoint_preview_topic)" />
     <param name="status_topic" value="$(arg status_topic)" />
     <param name="base_frame" value="$(arg base_frame)" />
-    <param name="velocity_deadband_enter" value="$(arg velocity_deadband_enter)" />
-    <param name="velocity_deadband" value="$(arg velocity_deadband)" />
+    <param name="velocity_deadband_off_x" value="$(arg velocity_deadband_off_x)" />
+    <param name="velocity_deadband_on_x" value="$(arg velocity_deadband_on_x)" />
+    <param name="velocity_deadband_off_y" value="$(arg velocity_deadband_off_y)" />
+    <param name="velocity_deadband_on_y" value="$(arg velocity_deadband_on_y)" />
+    <param name="velocity_deadband_off_z" value="$(arg velocity_deadband_off_z)" />
+    <param name="velocity_deadband_on_z" value="$(arg velocity_deadband_on_z)" />
     <param name="enable_yaw_control" value="$(arg enable_yaw_control)" />
     <param name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
     <param name="max_accel" value="$(arg max_accel)" />

@@ -167,12 +167,16 @@ class BodyVelocityController(object):
         vx_limit,
         vyz_limit,
         yaw_rate_limit,
-        velocity_deadband,
-        z_error_deadband,
         yaw_error_deadband,
         yaw_lpf_tau,
         enable_yaw_control=True,
-        velocity_deadband_enter=0.02,
+        *,
+        velocity_deadband_off_x,
+        velocity_deadband_on_x,
+        velocity_deadband_off_y,
+        velocity_deadband_on_y,
+        velocity_deadband_off_z,
+        velocity_deadband_on_z,
         position_lpf_tau_x=0.05,
         position_lpf_tau_y=0.10,
         position_lpf_tau_z=0.10,
@@ -184,9 +188,6 @@ class BodyVelocityController(object):
         self.vx_limit = abs(float(vx_limit))
         self.vyz_limit = abs(float(vyz_limit))
         self.yaw_rate_limit = abs(float(yaw_rate_limit))
-        self.velocity_deadband = float(velocity_deadband)
-        self.velocity_deadband_enter = float(velocity_deadband_enter)
-        self.z_error_deadband = abs(float(z_error_deadband))
         self.yaw_error_deadband = abs(float(yaw_error_deadband))
         self.enable_yaw_control = bool(enable_yaw_control)
         self.position_filters = (
@@ -195,12 +196,16 @@ class BodyVelocityController(object):
             FirstOrderLowPass(position_lpf_tau_z),
         )
         self.yaw_filter = FirstOrderAngleLowPass(yaw_lpf_tau)
+        # Per-axis velocity hysteresis on the commanded speed.  off = stop
+        # producing, on = start producing (on >= off).  HysteresisDeadband
+        # validates non-negative and off <= on for every axis.
         self.velocity_deadband_filters = tuple(
-            HysteresisDeadband(
-                self.velocity_deadband_enter,
-                self.velocity_deadband,
+            HysteresisDeadband(float(off), float(on))
+            for off, on in (
+                (velocity_deadband_off_x, velocity_deadband_on_x),
+                (velocity_deadband_off_y, velocity_deadband_on_y),
+                (velocity_deadband_off_z, velocity_deadband_on_z),
             )
-            for _ in range(3)
         )
 
     @staticmethod
@@ -242,11 +247,7 @@ class BodyVelocityController(object):
             min(self.vx_limit, self.kp_x * filtered_error_x),
         )
         raw_vy = self.kp_y * filtered_error_y
-        raw_vz = (
-            0.0
-            if abs(filtered_error_z) < self.z_error_deadband
-            else self.kp_z * filtered_error_z
-        )
+        raw_vz = self.kp_z * filtered_error_z
         vy, vz = limit_vector2(raw_vy, raw_vz, self.vyz_limit)
         body_velocity = tuple(
             deadband_filter.update(value)
