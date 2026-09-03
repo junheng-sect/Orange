@@ -7,7 +7,7 @@
   <arg name="camera_output_encoding" default="mono8" />
   <arg name="base_frame" default="base_link" />
   <arg name="camera_frame" default="usb_camera_optical_frame" />
-  <arg name="camera_offset_x" default="0.15" />
+  <arg name="camera_offset_x" default="0.18" />
   <arg name="camera_offset_y" default="0.0" />
   <arg name="camera_offset_z" default="0.0" />
   <arg name="target_marker_id" default="33" />

@@ -1,11 +1,11 @@
 <launch>
   <arg name="base_frame" default="base_link" />
   <arg name="camera_frame" default="usb_camera_optical_frame" />
-  <arg name="camera_offset_x" default="0.15" />
+  <arg name="camera_offset_x" default="0.18" />
   <arg name="camera_offset_y" default="0.0" />
   <arg name="camera_offset_z" default="0.0" />
 
-  <!-- Camera sits 0.15 m ahead of base_link origin, optical axis facing forward. -->
+  <!-- Camera sits 0.18 m ahead of base_link origin, optical axis facing forward. -->
   <node pkg="tf2_ros"
         type="static_transform_publisher"
         name="front_camera_static_transform"
