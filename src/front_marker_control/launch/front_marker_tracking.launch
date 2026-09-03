@@ -24,8 +24,8 @@
   <arg name="kp_y" default="1.50" />
   <arg name="kp_z" default="1.00" />
   <arg name="position_lpf_tau_x" default="0.05" />
-  <arg name="position_lpf_tau_y" default="0.10" />
-  <arg name="position_lpf_tau_z" default="0.10" />
+  <arg name="position_lpf_tau_y" default="0.00" />
+  <arg name="position_lpf_tau_z" default="0.00" />
   <arg name="velocity_deadband_enter" default="0.02" />
   <arg name="velocity_deadband" default="0.03" />
   <arg name="publish_annotated" default="true" />
