@@ -174,7 +174,8 @@ class BodyVelocityController(object):
         enable_yaw_control=True,
         velocity_deadband_enter=0.02,
         position_lpf_tau_x=0.05,
-        position_lpf_tau_yz=0.10,
+        position_lpf_tau_y=0.10,
+        position_lpf_tau_z=0.10,
     ):
         self.kp_x = self._proportional_gain(kp_x, 'kp_x')
         self.kp_y = self._proportional_gain(kp_y, 'kp_y')
@@ -190,8 +191,8 @@ class BodyVelocityController(object):
         self.enable_yaw_control = bool(enable_yaw_control)
         self.position_filters = (
             FirstOrderLowPass(position_lpf_tau_x),
-            FirstOrderLowPass(position_lpf_tau_yz),
-            FirstOrderLowPass(position_lpf_tau_yz),
+            FirstOrderLowPass(position_lpf_tau_y),
+            FirstOrderLowPass(position_lpf_tau_z),
         )
         self.yaw_filter = FirstOrderAngleLowPass(yaw_lpf_tau)
         self.velocity_deadband_filters = tuple(

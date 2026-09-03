@@ -62,11 +62,13 @@ roslaunch front_marker_control front_marker_tracking.launch \
   max_pose_latency_sec:=0.5 filter_dt_max_sec:=0.5
 ```
 
-位置环 XYZ 增益由 launch 参数提供（不在 `config_file` 的 YAML 中重复定义），启动时可分别配置：
+位置环 XYZ 增益和三轴位置低通时间常数由 launch 参数提供（不在
+`config_file` 的 YAML 中重复定义），启动时可分别配置：
 
 ```bash
 roslaunch front_marker_control front_marker_tracking.launch \
-  kp_x:=0.5 kp_y:=0.6 kp_z:=0.7
+  kp_x:=0.5 kp_y:=0.6 kp_z:=0.7 \
+  position_lpf_tau_x:=0.05 position_lpf_tau_y:=0.10 position_lpf_tau_z:=0.10
 ```
 
 控制器为纯比例控制：`v = Kp · e`，`yaw_rate = kp_yaw · e_yaw,filtered`，
@@ -77,9 +79,10 @@ roslaunch front_marker_control front_marker_tracking.launch \
 `yaw_rate_limit` 限幅。
 
 XYZ 位置误差在进入比例控制、Z 误差死区、速度限幅和速度滞回死区之前，分别经过
-一阶低通滤波。X 轴时间常数由 `position_lpf_tau_x` 配置，默认 `0.05s`；Y、Z
-使用两个独立滤波器并共享 `position_lpf_tau_yz`，默认 `0.10s`。Yaw 的
-`yaw_lpf_tau` 默认 `0.20s`。任一时间常数设为 `0.0` 可关闭对应滤波；滤波首帧
+一阶低通滤波。X、Y、Z 三轴分别由 `position_lpf_tau_x/y/z` 配置，默认为
+`0.05/0.10/0.10s`，可在两个 launch 入口透传覆盖。Yaw 的 `yaw_lpf_tau` 默认
+`0.20s`，仍由 `config/front_marker_control.yaml` 配置。任一时间常数设为 `0.0`
+可关闭对应滤波；滤波首帧
 直接采用当前误差，视觉失效或时间戳异常时会清空历史状态。
 
 三个线速度输出轴分别使用有状态滞回死区。已激活的轴在速度绝对值降至

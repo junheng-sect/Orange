@@ -7,6 +7,9 @@
   <arg name="camera_output_encoding" default="mono8" />
   <arg name="base_frame" default="base_link" />
   <arg name="camera_frame" default="usb_camera_optical_frame" />
+  <arg name="camera_offset_x" default="0.15" />
+  <arg name="camera_offset_y" default="0.0" />
+  <arg name="camera_offset_z" default="0.0" />
   <arg name="target_marker_id" default="33" />
   <arg name="target_marker_size_m" default="0.070" />
   <arg name="publish_marker_tf" default="true" />
@@ -20,6 +23,9 @@
   <arg name="kp_x" default="1.50" />
   <arg name="kp_y" default="1.50" />
   <arg name="kp_z" default="1.00" />
+  <arg name="position_lpf_tau_x" default="0.05" />
+  <arg name="position_lpf_tau_y" default="0.10" />
+  <arg name="position_lpf_tau_z" default="0.10" />
   <arg name="velocity_deadband_enter" default="0.02" />
   <arg name="velocity_deadband" default="0.03" />
   <arg name="publish_annotated" default="true" />
@@ -45,6 +51,9 @@
   <include file="$(find front_marker_control)/launch/front_camera_tf.launch">
     <arg name="base_frame" value="$(arg base_frame)" />
     <arg name="camera_frame" value="$(arg camera_frame)" />
+    <arg name="camera_offset_x" value="$(arg camera_offset_x)" />
+    <arg name="camera_offset_y" value="$(arg camera_offset_y)" />
+    <arg name="camera_offset_z" value="$(arg camera_offset_z)" />
   </include>
 
   <include file="$(find front_marker_vision)/launch/front_marker_vision.launch">
@@ -67,6 +76,9 @@
     <arg name="kp_x" value="$(arg kp_x)" />
     <arg name="kp_y" value="$(arg kp_y)" />
     <arg name="kp_z" value="$(arg kp_z)" />
+    <arg name="position_lpf_tau_x" value="$(arg position_lpf_tau_x)" />
+    <arg name="position_lpf_tau_y" value="$(arg position_lpf_tau_y)" />
+    <arg name="position_lpf_tau_z" value="$(arg position_lpf_tau_z)" />
     <arg name="velocity_deadband_enter" value="$(arg velocity_deadband_enter)" />
     <arg name="velocity_deadband" value="$(arg velocity_deadband)" />
     <arg name="enable_yaw_control" value="$(arg enable_yaw_control)" />

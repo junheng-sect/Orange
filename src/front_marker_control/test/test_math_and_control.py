@@ -107,7 +107,8 @@ class ControllerTest(unittest.TestCase):
             'yaw_error_deadband': 0.06,
             'yaw_lpf_tau': 0.20,
             'position_lpf_tau_x': 0.05,
-            'position_lpf_tau_yz': 0.10,
+            'position_lpf_tau_y': 0.10,
+            'position_lpf_tau_z': 0.10,
             'enable_yaw_control': enable_yaw,
         }
         parameters.update(overrides)
@@ -116,7 +117,8 @@ class ControllerTest(unittest.TestCase):
     def test_proportional_mapping_and_x_limit(self):
         controller = self.controller(
             position_lpf_tau_x=0.0,
-            position_lpf_tau_yz=0.0,
+            position_lpf_tau_y=0.0,
+            position_lpf_tau_z=0.0,
         )
         velocity, _, _ = controller.update((0.1, 0.0, 0.0), 0.0, 0.05)
         self.assertTrue(math.isclose(velocity[0], 0.05, abs_tol=1e-12))
@@ -137,7 +139,8 @@ class ControllerTest(unittest.TestCase):
             velocity_deadband=0.0,
             z_error_deadband=0.0,
             position_lpf_tau_x=0.0,
-            position_lpf_tau_yz=0.0,
+            position_lpf_tau_y=0.0,
+            position_lpf_tau_z=0.0,
         )
         velocity, _, _ = controller.update((0.1, 0.2, 0.3), 0.0, 0.05)
         for actual, expected in zip(velocity, (0.2, 0.6, 1.2)):
@@ -160,7 +163,8 @@ class ControllerTest(unittest.TestCase):
             velocity_deadband_enter=0.0,
             velocity_deadband=0.0,
             z_error_deadband=0.0,
-            position_lpf_tau_yz=0.0,
+            position_lpf_tau_y=0.0,
+            position_lpf_tau_z=0.0,
         )
 
         for _ in range(2):
@@ -178,7 +182,8 @@ class ControllerTest(unittest.TestCase):
             vyz_limit=1.0,
             velocity_deadband_enter=0.0,
             velocity_deadband=0.0,
-            position_lpf_tau_yz=0.0,
+            position_lpf_tau_y=0.0,
+            position_lpf_tau_z=0.0,
         )
         held, _, _ = controller.update((0.0, 0.0, 0.03), 0.0, 0.1)
         self.assertEqual(held[2], 0.0)
@@ -258,7 +263,8 @@ class ControllerTest(unittest.TestCase):
             velocity_deadband=0.03,
             z_error_deadband=0.0,
             position_lpf_tau_x=0.0,
-            position_lpf_tau_yz=0.0,
+            position_lpf_tau_y=0.0,
+            position_lpf_tau_z=0.0,
         )
         first, _, _ = controller.update((0.031, 0.010, 0.010), 0.0, 0.1)
         second, _, _ = controller.update((0.025, 0.031, 0.015), 0.0, 0.1)
@@ -282,7 +288,8 @@ class ControllerTest(unittest.TestCase):
             velocity_deadband=0.0,
             z_error_deadband=0.0,
             position_lpf_tau_x=0.0,
-            position_lpf_tau_yz=0.0,
+            position_lpf_tau_y=0.0,
+            position_lpf_tau_z=0.0,
         )
         velocity, _, _ = controller.update((0.001, -0.001, 0.001), 0.0, 0.1)
         self.assertEqual(velocity, (0.001, -0.001, 0.001))
@@ -312,7 +319,8 @@ class ControllerTest(unittest.TestCase):
         controller = self.controller(
             True,
             position_lpf_tau_x=0.10,
-            position_lpf_tau_yz=0.10,
+            position_lpf_tau_y=0.10,
+            position_lpf_tau_z=0.10,
         )
         controller.update((0.5, 0.0, 0.0), 0.3, 0.05)
         controller.reset()
@@ -320,7 +328,7 @@ class ControllerTest(unittest.TestCase):
         self.assertTrue(math.isclose(velocity[0], -0.2, abs_tol=1e-9))
         self.assertTrue(math.isclose(filtered, -0.3, abs_tol=1e-9))
 
-    def test_position_low_pass_filters_each_axis_independently(self):
+    def test_position_low_pass_filters_each_axis_with_own_tau(self):
         controller = self.controller(
             kp_x=1.0,
             kp_y=1.0,
@@ -330,14 +338,17 @@ class ControllerTest(unittest.TestCase):
             velocity_deadband_enter=0.0,
             velocity_deadband=0.0,
             z_error_deadband=0.0,
-            position_lpf_tau_x=0.10,
-            position_lpf_tau_yz=0.10,
+            position_lpf_tau_x=0.0,
+            position_lpf_tau_y=0.10,
+            position_lpf_tau_z=0.30,
         )
-        first, _, _ = controller.update((1.0, 2.0, 3.0), 0.0, 0.10)
-        second, _, _ = controller.update((0.0, 2.0, 0.0), 0.0, 0.10)
+        first, _, _ = controller.update((1.0, 1.0, 1.0), 0.0, 0.10)
+        second, _, _ = controller.update((0.0, 0.0, 0.0), 0.0, 0.10)
 
-        self.assertEqual(first, (1.0, 2.0, 3.0))
-        self.assertEqual(second, (0.5, 2.0, 1.5))
+        self.assertEqual(first, (1.0, 1.0, 1.0))
+        self.assertTrue(math.isclose(second[0], 0.0, abs_tol=1e-12))
+        self.assertTrue(math.isclose(second[1], 0.5, abs_tol=1e-12))
+        self.assertTrue(math.isclose(second[2], 0.75, abs_tol=1e-12))
 
     def test_position_low_pass_precedes_gain_deadband_and_limits(self):
         controller = self.controller(
@@ -350,7 +361,8 @@ class ControllerTest(unittest.TestCase):
             velocity_deadband=0.0,
             z_error_deadband=0.2,
             position_lpf_tau_x=0.10,
-            position_lpf_tau_yz=0.10,
+            position_lpf_tau_y=0.10,
+            position_lpf_tau_z=0.10,
         )
         controller.update((0.0, 0.0, 0.0), 0.0, 0.10)
         velocity, _, _ = controller.update((1.0, 0.6, 0.3), 0.0, 0.10)
@@ -360,10 +372,15 @@ class ControllerTest(unittest.TestCase):
         self.assertEqual(velocity[2], 0.0)
 
     def test_position_low_pass_rejects_invalid_parameters(self):
-        with self.assertRaises(ValueError):
-            self.controller(position_lpf_tau_x=-0.01)
-        with self.assertRaises(ValueError):
-            self.controller(position_lpf_tau_yz=float('nan'))
+        for name in (
+            'position_lpf_tau_x',
+            'position_lpf_tau_y',
+            'position_lpf_tau_z',
+        ):
+            for invalid in (-0.01, float('nan'), float('inf')):
+                with self.subTest(name=name, invalid=invalid):
+                    with self.assertRaises(ValueError):
+                        self.controller(**{name: invalid})
 
     def test_rejects_non_finite_errors_and_invalid_dt(self):
         controller = self.controller(True)

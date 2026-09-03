@@ -66,7 +66,8 @@ class FrontMarkerControlNode(object):
             enable_yaw_control=self.enable_yaw_control,
             velocity_deadband_enter=self.velocity_deadband_enter,
             position_lpf_tau_x=self.position_lpf_tau_x,
-            position_lpf_tau_yz=self.position_lpf_tau_yz,
+            position_lpf_tau_y=self.position_lpf_tau_y,
+            position_lpf_tau_z=self.position_lpf_tau_z,
         )
         self.velocity_limiter = Vector3SlewRateLimiter()
 
@@ -184,7 +185,8 @@ class FrontMarkerControlNode(object):
             'kp_z': 0.60,
             'kp_yaw': 0.40,
             'position_lpf_tau_x': 0.05,
-            'position_lpf_tau_yz': 0.10,
+            'position_lpf_tau_y': 0.10,
+            'position_lpf_tau_z': 0.10,
             'yaw_lpf_tau': 0.20,
             'vyz_limit': 0.80,
             'vx_limit': 0.20,
@@ -243,7 +245,8 @@ class FrontMarkerControlNode(object):
                 self.z_error_deadband,
                 self.yaw_error_deadband,
                 self.position_lpf_tau_x,
-                self.position_lpf_tau_yz,
+                self.position_lpf_tau_y,
+                self.position_lpf_tau_z,
                 self.yaw_lpf_tau,
                 self.lateral_tolerance_m,
                 self.vertical_tolerance_m,
