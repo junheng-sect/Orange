@@ -1,0 +1,82 @@
+<launch>
+  <arg name="config_file" default="$(find vz_step_control)/config/vz_step.yaml" />
+  <arg name="enable_setpoint_output" default="true" />
+  <arg name="record" default="true" />
+  <arg name="bag_directory" default="/home/vslam/bags" />
+
+  <!-- Empty string keeps the value loaded from config_file. -->
+  <arg name="step_speed_mps" default="" />
+  <arg name="step_duration_sec" default="" />
+  <arg name="stabilize_duration_sec" default="" />
+  <arg name="hold_duration_sec" default="" />
+  <arg name="cycle_count" default="" />
+  <arg name="setpoint_rate_hz" default="" />
+
+  <arg name="state_topic" default="/mavros/state" />
+  <arg name="odom_topic" default="/mavros/local_position/odom" />
+  <arg name="velocity_topic" default="/mavros/local_position/velocity_local" />
+  <arg name="pose_topic" default="/mavros/local_position/pose" />
+  <arg name="target_topic" default="/mavros/setpoint_raw/target_local" />
+  <arg name="setpoint_topic" default="/mavros/setpoint_raw/local" />
+  <arg name="status_topic" default="/vz_step/status" />
+  <arg name="bag_path_topic" default="/vz_step/bag_path" />
+  <arg name="recorder_health_topic" default="/vz_step/recorder_health" />
+
+  <!-- Start the recorder first so its subscribers exist before OFFBOARD entry.
+       The recorder must NOT be required: a bag/recorder failure must never
+       bring down the setpoint publisher mid-OFFBOARD. Respawn restores the
+       recording capability for the next session. The recorder reports health
+       on recorder_health_topic; vz_step_control_node aborts the test (and
+       holds position) if the recorder is unhealthy while a session is running,
+       so a step is never executed unrecorded. -->
+  <group if="$(arg record)">
+    <node pkg="vz_step_control"
+          type="offboard_bag_recorder.py"
+          name="vz_step_bag_recorder"
+          output="screen"
+          respawn="true"
+          respawn_delay="5.0">
+      <param name="output_directory" value="$(arg bag_directory)" />
+      <param name="state_topic" value="$(arg state_topic)" />
+      <param name="odom_topic" value="$(arg odom_topic)" />
+      <param name="velocity_topic" value="$(arg velocity_topic)" />
+      <param name="pose_topic" value="$(arg pose_topic)" />
+      <param name="target_topic" value="$(arg target_topic)" />
+      <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+      <param name="status_topic" value="$(arg status_topic)" />
+      <param name="bag_path_topic" value="$(arg bag_path_topic)" />
+      <param name="health_topic" value="$(arg recorder_health_topic)" />
+    </node>
+  </group>
+
+  <node pkg="vz_step_control"
+        type="vz_step_control_node"
+        name="vz_step_control_node"
+        output="screen"
+        required="true"
+        clear_params="true">
+    <rosparam command="load" file="$(arg config_file)" />
+    <param name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
+    <param name="recorder_required" value="$(arg record)" />
+    <param name="recorder_topic" value="$(arg recorder_health_topic)" />
+    <param name="state_topic" value="$(arg state_topic)" />
+    <param name="odom_topic" value="$(arg odom_topic)" />
+    <param name="velocity_topic" value="$(arg velocity_topic)" />
+    <param name="pose_topic" value="$(arg pose_topic)" />
+    <param name="target_topic" value="$(arg target_topic)" />
+    <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+    <param name="status_topic" value="$(arg status_topic)" />
+    <param if="$(eval arg('step_speed_mps') != '')"
+           name="step_speed_mps" value="$(arg step_speed_mps)" />
+    <param if="$(eval arg('step_duration_sec') != '')"
+           name="step_duration_sec" value="$(arg step_duration_sec)" />
+    <param if="$(eval arg('stabilize_duration_sec') != '')"
+           name="stabilize_duration_sec" value="$(arg stabilize_duration_sec)" />
+    <param if="$(eval arg('hold_duration_sec') != '')"
+           name="hold_duration_sec" value="$(arg hold_duration_sec)" />
+    <param if="$(eval arg('cycle_count') != '')"
+           name="cycle_count" value="$(arg cycle_count)" />
+    <param if="$(eval arg('setpoint_rate_hz') != '')"
+           name="setpoint_rate_hz" value="$(arg setpoint_rate_hz)" />
+  </node>
+</launch>

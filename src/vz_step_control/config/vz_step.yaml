@@ -1,0 +1,38 @@
+# Step profile: hard Z velocity steps with position holds in between.
+step_speed_mps: 0.2
+step_duration_sec: 3.0
+stabilize_duration_sec: 3.0
+hold_duration_sec: 10.0
+cycle_count: 2
+setpoint_rate_hz: 100.0
+
+# MAVLink telemetry and quality gate (inherited from vz_chirp.yaml)
+requested_telemetry_rate_hz: 100.0
+minimum_data_rate_hz: 90.0
+rate_window_sec: 2.0
+rate_fault_hold_sec: 1.0
+maximum_topic_age_sec: 0.10
+state_timeout_sec: 2.5
+
+# Indoor safety envelope (inherited from vz_chirp.yaml).
+# The upward travel budget is maximum_vertical_span_m: the test starts at the
+# OFFBOARD entry altitude and only climbs, so the peak-to-peak span equals the
+# step displacement. maximum_vertical_offset_m guards downward undershoot.
+maximum_vertical_offset_m: 0.45
+maximum_vertical_span_m: 0.80
+maximum_absolute_vz_mps: 0.60
+maximum_xy_error_m: 0.30
+
+# Restore the previously observed normal rates when a session ends and on
+# shutdown; the 100 Hz request is sent synchronously on each OFFBOARD entry.
+# A session that finishes (COMPLETE) or is refused (ABORT) while still holding
+# in OFFBOARD restores these rates telemetry_tail_sec after the phase change.
+restore_local_position_rate_hz: 30.0
+restore_target_local_rate_hz: 10.0
+telemetry_tail_sec: 1.0
+
+# Bag-recorder coupling: with recording enabled (launch arg record=true, which
+# sets recorder_required) the controller refuses to run an unrecorded step.
+# recorder_health_timeout_sec is how stale a health report may be before the
+# controller treats the recorder as down.
+recorder_health_timeout_sec: 1.0

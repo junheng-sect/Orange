@@ -72,9 +72,10 @@ roslaunch vz_chirp_control vz_chirp_control.launch enable_setpoint_output:=false
 - `vz_chirp_enable_setpoint_output`：是否发布真实 setpoint。
 - `vz_chirp_record`：是否启动 OFFBOARD 自动 rosbag。
 - `enable_front_marker_tracking`：Front Marker 总开关。
+- `enable_vz_step_control`：Z 阶跃测试包 `vz_step_control` 总开关。
 
-当前部署默认值为：扫频包、真实 setpoint 和自动 rosbag 均开启，Front Marker
-关闭。两个控制包不得同时开启，因为它们都会发布
+当前部署默认值为：VZ step 包、真实 setpoint 和自动 rosbag 开启，扫频包与
+Front Marker 关闭。三个控制包不得同时开启，因为它们都会发布
 `/mavros/setpoint_raw/local`。
 
 ## 构建和测试
