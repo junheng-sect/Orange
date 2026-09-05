@@ -1,0 +1,103 @@
+#!/bin/bash
+# pclog —— 从 SEEKER 板端直接写 laptop 的 Obsidian 日志
+#
+# laptop 不可达时，记录会持久化到 seeker 工作区内的可写目录；恢复连接后
+# 执行 `pclog --replay` 即可重放。
+
+NOTE_ROOT="${PCLOG_NOTE_ROOT:-/home/zjh/note/Note}"
+SSH_TARGET="${PCLOG_SSH_TARGET:-laptop}"
+SSH_OPTS=(-o ConnectTimeout=5 -o BatchMode=yes)
+STATE_DIR="${PCLOG_STATE_DIR:-/home/vslam/seeker/.pclog}"
+OFFLINE="${PCLOG_OFFLINE_FILE:-$STATE_DIR/pclog_offline.md}"
+
+now()  { date '+%Y-%m-%d %H:%M:%S'; }
+ddir() { date +%-m.%-d; }
+
+append_remote() {
+    # $1=类型 $2=正文；返回非 0 表示 SSH 或远端写入失败。
+    local type="$1" body="$2" d ts
+    d="$(ddir)"
+    ts="$(now)"
+    ssh "${SSH_OPTS[@]}" "$SSH_TARGET" \
+        "mkdir -p '$NOTE_ROOT/$d'" || return 1
+    printf '\n## %s (%s)\n\n%s\n\n' "$type" "$ts" "$body" \
+        | ssh "${SSH_OPTS[@]}" "$SSH_TARGET" \
+            "cat >> '$NOTE_ROOT/$d/LOG.md'"
+}
+
+prepare_offline_file() {
+    local offline_dir
+    offline_dir="$(dirname -- "$OFFLINE")"
+    if ! mkdir -p -- "$offline_dir"; then
+        echo "pclog: 无法创建离线日志目录: $offline_dir" >&2
+        return 1
+    fi
+    if [ ! -e "$OFFLINE" ]; then
+        (umask 077 && : > "$OFFLINE") || {
+            echo "pclog: 无法创建离线日志文件: $OFFLINE" >&2
+            return 1
+        }
+    fi
+    if [ ! -f "$OFFLINE" ] || [ ! -w "$OFFLINE" ]; then
+        echo "pclog: 离线日志路径不可写: $OFFLINE" >&2
+        return 1
+    fi
+}
+
+queue_offline() {
+    # $1=类型 $2=正文；只有真正写入磁盘后才报告暂存成功。
+    local type="$1" body="$2"
+    prepare_offline_file || return 1
+    if ! printf '\n## %s (%s) [offline, 待 replay]\n\n%s\n\n' \
+        "$type" "$(now)" "$body" >> "$OFFLINE"; then
+        echo "pclog: 写入离线日志失败: $OFFLINE" >&2
+        return 1
+    fi
+    echo "pclog: 无法连接 laptop，已暂存到 $OFFLINE（恢复后执行 pclog --replay）" >&2
+}
+
+case "${1:-}" in
+    --replay|-r)
+        if [ ! -s "$OFFLINE" ]; then
+            echo "pclog: 无离线记录需要重放 ($OFFLINE)"
+            exit 0
+        fi
+        if append_remote "离线补记(重放)" "$(cat "$OFFLINE")"; then
+            archive="$(dirname -- "$OFFLINE")/pclog_offline.replayed.$(date '+%Y%m%d-%H%M%S').md"
+            if mv -- "$OFFLINE" "$archive"; then
+                echo "pclog: 离线记录已重放到 laptop，归档于 $archive"
+                exit 0
+            fi
+            echo "pclog: 已写入 laptop，但无法归档离线文件: $OFFLINE" >&2
+            exit 1
+        fi
+        echo "pclog: 连接 laptop 失败，离线记录保留于 $OFFLINE" >&2
+        exit 1
+        ;;
+esac
+
+TYPE="${1:-问题记录}"
+case "$TYPE" in
+    修改记录|问题记录) ;;
+    *)
+        echo "pclog: 第一个参数应为 修改记录 或 问题记录 (收到: $TYPE)" >&2
+        exit 1
+        ;;
+esac
+shift
+BODY="$( [ "$#" -gt 0 ] && printf '%s\n' "$*"; cat )"
+
+if [ -z "$BODY" ]; then
+    echo "pclog: 内容为空 (参数或 stdin 至少提供一个)" >&2
+    exit 1
+fi
+
+if append_remote "$TYPE" "$BODY"; then
+    echo "pclog: 已写入 laptop Note/$(ddir)/LOG.md"
+elif queue_offline "$TYPE" "$BODY"; then
+    # 本地队列已经持久化，因此本次日志操作整体成功。
+    exit 0
+else
+    echo "pclog: 远端写入和本地暂存均失败，日志未保存" >&2
+    exit 1
+fi

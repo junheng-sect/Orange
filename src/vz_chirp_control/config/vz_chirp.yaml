@@ -1,0 +1,27 @@
+# Sweep profile
+publish_rate_hz: 100.0
+amplitude_mps: 0.20
+start_frequency_hz: 0.20
+end_frequency_hz: 8.0
+sweep_duration_sec: 60.0
+fade_duration_sec: 2.0
+stabilize_duration_sec: 3.0
+post_hold_duration_sec: 5.0
+
+# MAVLink telemetry and quality gate
+requested_telemetry_rate_hz: 100.0
+minimum_data_rate_hz: 90.0
+rate_window_sec: 2.0
+rate_fault_hold_sec: 1.0
+maximum_topic_age_sec: 0.10
+state_timeout_sec: 2.5
+
+# Indoor safety envelope
+maximum_vertical_offset_m: 0.45
+maximum_vertical_span_m: 0.80
+maximum_absolute_vz_mps: 0.60
+maximum_xy_error_m: 0.30
+
+# Restore the previously observed normal rates on clean shutdown.
+restore_local_position_rate_hz: 30.0
+restore_target_local_rate_hz: 10.0

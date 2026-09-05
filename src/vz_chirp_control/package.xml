@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>vz_chirp_control</name>
+  <version>0.1.0</version>
+  <description>Safe 100 Hz vertical-velocity chirp control with OFFBOARD-scoped rosbag recording.</description>
+
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+
+  <depend>geometry_msgs</depend>
+  <depend>mavros_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>roscpp</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>tf2</depend>
+
+  <exec_depend>message_runtime</exec_depend>
+  <exec_depend>rosbag</exec_depend>
+
+  <test_depend>rostest</test_depend>
+
+  <export/>
+</package>

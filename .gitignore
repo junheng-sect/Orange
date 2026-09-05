@@ -8,3 +8,5 @@ logs/
 .catkin_tools/
 .zcode/
 test/
+cam_test/
+.pclog/

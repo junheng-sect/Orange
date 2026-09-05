@@ -1,0 +1,48 @@
+<launch>
+  <arg name="config_file" default="$(find vz_chirp_control)/config/vz_chirp.yaml" />
+  <arg name="enable_setpoint_output" default="true" />
+  <arg name="record" default="true" />
+  <arg name="bag_directory" default="/home/vslam/seeker/logs/vz_chirp" />
+
+  <arg name="state_topic" default="/mavros/state" />
+  <arg name="odom_topic" default="/mavros/local_position/odom" />
+  <arg name="velocity_topic" default="/mavros/local_position/velocity_local" />
+  <arg name="target_topic" default="/mavros/setpoint_raw/target_local" />
+  <arg name="setpoint_topic" default="/mavros/setpoint_raw/local" />
+  <arg name="status_topic" default="/vz_chirp/status" />
+  <arg name="bag_path_topic" default="/vz_chirp/bag_path" />
+
+  <!-- Start the recorder first so its subscribers exist before OFFBOARD entry. -->
+  <group if="$(arg record)">
+    <node pkg="vz_chirp_control"
+          type="offboard_bag_recorder.py"
+          name="vz_chirp_bag_recorder"
+          output="screen"
+          required="true">
+      <param name="output_directory" value="$(arg bag_directory)" />
+      <param name="state_topic" value="$(arg state_topic)" />
+      <param name="odom_topic" value="$(arg odom_topic)" />
+      <param name="velocity_topic" value="$(arg velocity_topic)" />
+      <param name="target_topic" value="$(arg target_topic)" />
+      <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+      <param name="status_topic" value="$(arg status_topic)" />
+      <param name="bag_path_topic" value="$(arg bag_path_topic)" />
+    </node>
+  </group>
+
+  <node pkg="vz_chirp_control"
+        type="vz_chirp_control_node"
+        name="vz_chirp_control_node"
+        output="screen"
+        required="true"
+        clear_params="true">
+    <rosparam command="load" file="$(arg config_file)" />
+    <param name="enable_setpoint_output" value="$(arg enable_setpoint_output)" />
+    <param name="state_topic" value="$(arg state_topic)" />
+    <param name="odom_topic" value="$(arg odom_topic)" />
+    <param name="velocity_topic" value="$(arg velocity_topic)" />
+    <param name="target_topic" value="$(arg target_topic)" />
+    <param name="setpoint_topic" value="$(arg setpoint_topic)" />
+    <param name="status_topic" value="$(arg status_topic)" />
+  </node>
+</launch>

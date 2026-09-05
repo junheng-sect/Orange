@@ -1,0 +1,22 @@
+uint8 WAIT_FCU=0
+uint8 PRESTREAM=1
+uint8 STABILIZE=2
+uint8 SWEEP=3
+uint8 POST_HOLD=4
+uint8 COMPLETE=5
+uint8 ABORT=6
+
+std_msgs/Header header
+uint8 state
+string state_text
+string reason
+float64 sweep_elapsed_sec
+float64 instantaneous_frequency_hz
+float64 command_vz_mps
+float64 setpoint_rate_hz
+float64 target_rate_hz
+float64 velocity_rate_hz
+float64 start_z_m
+float64 current_z_m
+float64 min_z_m
+float64 max_z_m
