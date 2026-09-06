@@ -1,0 +1,6 @@
+# 场景差异项：普通相机查看入口的 raw 输出编码。
+# 仅在 ov9281_common.yaml 之后加载，只覆盖 output_encoding。
+# 差异维护位置：跟踪场景见 config/ov9281_mono8.yaml。
+
+# 解码后 raw 图像编码：rgb8 兼容既有彩色订阅者
+output_encoding: rgb8

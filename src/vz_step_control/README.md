@@ -51,16 +51,21 @@ rostopic echo -n 1 /vz_step/bag_path
 `.vz_step_sequence`（flock 并发保护）与已有 `.bag/.bag.active` 共同决定，
 绝不覆盖。完成或 ABORT 后 bag 再记录 1 s 尾段后关闭。
 
-## 参数覆盖
+## 参数入口
 
-配置入口为 `config/vz_step.yaml`，也可以在 launch 上直接覆盖：
+控制器与记录器的运行参数统一在 `config/vz_step.yaml` 中维护（阶跃 profile、
+遥测门禁、安全包线、输出开关、话题名、记录目录，含中文注释和单位），修改后重启
+launch 生效；launch 不再透传调参参数。控制器与记录器读取同一包配置中的公共值
+（话题名等），两处不会失配。`record` 仍是 launch 的结构开关，决定是否启动
+记录器，并由它派生控制器的 `recorder_required`。要临时换用自定义配置：
 
 ```bash
-roslaunch vz_step_control vz_step_control.launch step_speed_mps:=0.25 step_duration_sec:=2.0
+roslaunch vz_step_control vz_step_control.launch \
+  config_file:=/tmp/my_vz_step.yaml
 ```
 
-- `step_speed_mps`：阶跃幅值，上升取 `+`，下降取 `-`，默认 0.5。
-- `step_duration_sec`：阶跃时长，默认 1.0。
+- `step_speed_mps`：阶跃幅值，上升取 `+`，下降取 `-`，默认 0.2。
+- `step_duration_sec`：阶跃时长，默认 3.0。
 - `stabilize_duration_sec`：OFFBOARD 进入后的定点稳定期，默认 3.0。
 - `hold_duration_sec`：阶跃之间的定点保持时长，默认 10.0。
 - `cycle_count`：上升/下降轮数，默认 2。
@@ -131,10 +136,12 @@ mode != OFFBOARD”的状态，才允许下一次 OFFBOARD 上升沿开包。若
 板端总启动文件 `/etc/ros/noetic/seeker.d/seeker_autostart.launch` 提供：
 
 - `enable_vz_step_control`：是否开机启动本包（当前默认 true）。
-- `vz_step_enable_setpoint_output`：是否发布真实 setpoint。
 - `vz_step_record`：是否启动 OFFBOARD 自动 rosbag。
 - `enable_vz_chirp_control`：扫频包开关（当前默认 false）。
 - `enable_front_marker_tracking`：Front Marker 总开关。
+
+是否发布真实 setpoint 不再由总启动文件控制，改在
+`config/vz_step.yaml` 的 `enable_setpoint_output` 中维护（修改后重启生效）。
 
 三个包都会发布 `/mavros/setpoint_raw/local`，不得同时开启。
 
@@ -154,7 +161,7 @@ python3 src/vz_step_control/test/test_recorder_session.py
 ```bash
 roscore &
 python3 src/vz_step_control/test/fake_mavros.py --prestream 4 &
-roslaunch vz_step_control vz_step_control.launch bag_directory:=/tmp/vz_step_smoke
+roslaunch vz_step_control vz_step_control.launch record:=false
 ```
 
 可选的实时联调脚本（需要已 build 并 source devel，会自动起 roscore/节点/录包并

@@ -1,16 +1,37 @@
-target_xyz_body: [0.8, 0.0, 0.0]
+# front_marker_control 节点运行参数（日常调参唯一入口，修改后重启生效）。
+# launch 不再重复这些默认值；节点代码中的默认值仅作兜底。
+# 场景差异（RViz 可视化关闭 yaw 控制）见 config/front_marker_control_rviz.yaml，
+# 加载顺序固定为先本文件、后场景文件。
 
-# kp_x/kp_y/kp_z and position_lpf_tau_x/y/z are owned by the launch arguments
-# and are intentionally not duplicated in this config file.
+# ---- 目标与坐标系 ----
+# Marker 锁定后机体坐标系下的悬停目标位置（m，前 x / 右 y / 下 z）
+target_xyz_body: [0.8, 0.0, 0.0]
+# TF 坐标系：机体 / 里程计地图
+base_frame: base_link
+map_frame: map
+
+# ---- 位置环增益（速度 = kp * 位置误差，1/s） ----
+kp_x: 1.50
+kp_y: 1.50
+kp_z: 1.00
 kp_yaw: 0.40
 yaw_lpf_tau: 0.20
 
-# Combined YZ-plane speed limit: hypot(vy, vz) <= vyz_limit.
+# ---- 位置低通时间常数（s；0 表示不滤波） ----
+position_lpf_tau_x: 0.05
+position_lpf_tau_y: 0.00
+position_lpf_tau_z: 0.00
+
+# ---- 速度限幅 ----
+# 合成 YZ 平面速度限幅：hypot(vy, vz) <= vyz_limit（m/s）
 vyz_limit: 0.80
+# 前向 x 速度限幅（m/s）
 vx_limit: 0.20
 yaw_rate_limit: 0.80
 # Velocity hysteresis deadbands on the commanded speed (m/s):
 #   off = stop producing, on = start producing (on >= off), one pair per axis.
+
+# ---- 速度滞环死区（m/s）：off = 停止输出阈值，on = 恢复输出阈值，on >= off ----
 velocity_deadband_off_x: 0.010
 velocity_deadband_on_x: 0.015
 velocity_deadband_off_y: 0.004
@@ -18,19 +39,56 @@ velocity_deadband_on_y: 0.007
 velocity_deadband_off_z: 0.003
 velocity_deadband_on_z: 0.006
 yaw_error_deadband: 0.06
+
+# ---- 输出开关 ----
+# 是否启用 yaw 控制（RViz 场景在 front_marker_control_rviz.yaml 中关闭）
 enable_yaw_control: true
+# 是否向 MAVROS 发布 setpoint 输出（false 时仅计算不输出）
+enable_setpoint_output: false
+# setpoint 发布频率（Hz）
 setpoint_publish_rate_hz: 20.0
+
+# ---- 加速度限制与丢标减速 ----
+# 正常逼近加速度上限（m/s^2）
 max_accel: 0.50
+# 丢失目标后的减速加速度（m/s^2）
 loss_decel: 1.00
+
+# ---- 超时（s） ----
+# Marker 位姿超时视为丢失
 pose_timeout_sec: 0.1
+# 位姿时间戳过旧即拒绝（延迟上限）
 max_pose_latency_sec: 0.5
+# 位姿滤波最大积分步长
 filter_dt_max_sec: 0.5
+# 里程计超时
+odom_timeout_sec: 0.20
+# MAVROS state 超时
 state_timeout_sec: 1.0
+# 允许的未来时间戳容差
 future_stamp_tolerance_sec: 0.1
+# TF 查询超时
 tf_lookup_timeout_sec: 0.05
 
+# ---- 输入/输出话题 ----
+pose_topic: /front_marker/pose
+odom_topic: /mavros/local_position/odom
+state_topic: /mavros/state
+setpoint_raw_topic: /mavros/setpoint_raw/local
+position_error_topic: /front_marker_control/position_error
+yaw_error_topic: /front_marker_control/yaw_error
+fixed_yaw_target_topic: /front_marker_control/fixed_yaw_target
+vio_yaw_error_topic: /front_marker_control/vio_yaw_error
+command_topic: /front_marker_control/cmd_vel
+setpoint_preview_topic: /front_marker_control/setpoint_preview
+status_topic: /front_marker_control/status
+
+# ---- 对准判据 ----
+# 侧向/垂向/距离对准容差（m）
 lateral_tolerance_m: 0.08
 vertical_tolerance_m: 0.08
 distance_tolerance_m: 0.12
+# yaw 对准容差（deg）
 yaw_tolerance_deg: 6.0
+# 全部对准后的保持时长（s）
 aligned_hold_sec: 1.0

@@ -23,7 +23,7 @@ catkin_package(
 )
 
 catkin_install_python(
-  PROGRAMS scripts/front_marker_control_node
+  PROGRAMS scripts/front_marker_control_node scripts/front_camera_static_tf_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 install(

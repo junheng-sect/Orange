@@ -197,7 +197,7 @@ class VzStepControlNode {
     private_node_.param<std::string>("status_topic", status_topic_,
                                      "/vz_step/status");
     private_node_.param<std::string>(
-        "recorder_topic", recorder_topic_, "/vz_step/recorder_health");
+        "recorder_health_topic", recorder_topic_, "/vz_step/recorder_health");
     private_node_.param<std::string>(
         "message_interval_service", message_interval_service_,
         "/mavros/set_message_interval");

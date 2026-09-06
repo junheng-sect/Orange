@@ -179,16 +179,22 @@ def main():
     os.makedirs(bag_dir)
 
     launch_log = open('/tmp/vz_abort_launch.log', 'wb')
+    # 阶跃参数已统一到 YAML；测试通过临时 config_file 覆盖，避免改动包内配置。
+    test_config = '/tmp/vz_abort_test_config.yaml'
+    with open(test_config, 'w') as f:
+        f.write(
+            'enable_setpoint_output: true\n'
+            'bag_directory: {}\n'
+            'step_speed_mps: 0.5\n'
+            'step_duration_sec: 0.3\n'
+            'stabilize_duration_sec: 2.5\n'
+            'hold_duration_sec: 0.5\n'
+            'cycle_count: 1\n'.format(bag_dir)
+        )
     launch = subprocess.Popen([
         'roslaunch', 'vz_step_control', 'vz_step_control.launch',
-        'bag_directory:={}'.format(bag_dir),
-        'enable_setpoint_output:=true',
+        'config_file:={}'.format(test_config),
         'record:=true',
-        'step_speed_mps:=0.5',
-        'step_duration_sec:=0.3',
-        'stabilize_duration_sec:=2.5',
-        'hold_duration_sec:=0.5',
-        'cycle_count:=1',
     ], stdout=launch_log, stderr=subprocess.STDOUT,
        preexec_fn=os.setsid)
 

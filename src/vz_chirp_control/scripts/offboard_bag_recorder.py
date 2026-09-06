@@ -22,7 +22,7 @@ class OffboardBagRecorder:
         self._offboard_active = False
 
         self._output_directory = os.path.abspath(
-            rospy.get_param('~output_directory',
+            rospy.get_param('~bag_directory',
                             '/home/vslam/seeker/logs/vz_chirp')
         )
         self._state_topic = rospy.get_param('~state_topic', '/mavros/state')

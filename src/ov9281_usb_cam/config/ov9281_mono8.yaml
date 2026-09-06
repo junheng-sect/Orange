@@ -1,0 +1,6 @@
+# 场景差异项：视觉跟踪入口的 raw 输出编码。
+# 仅在 ov9281_common.yaml 之后加载，只覆盖 output_encoding。
+# 差异维护位置：普通相机场景见 config/ov9281_rgb8.yaml。
+
+# 解码后 raw 图像编码：mono8 供 ArUco 检测，直接复用亮度平面
+output_encoding: mono8

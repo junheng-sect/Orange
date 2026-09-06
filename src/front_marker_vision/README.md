@@ -8,7 +8,8 @@ PID 或 MAVROS。
 为 `0.070m`。
 
 位姿默认使用 `IPPE_SQUARE`，对平面 Marker 的两个候选解按重投影误差和近期位姿连续性
-选择；需要回退旧路径时可传入 `pose_solver:=LEGACY`。角点亚像素优化仍默认关闭。
+选择；需要回退旧路径时把 `config/front_marker_vision.yaml` 中 `pose_solver` 改为
+`LEGACY`。角点亚像素优化仍默认关闭。
 连续性参考默认需要连续 3 帧属于同一物理分支才提交。首次启动或参考超时后的
 BOOTSTRAP 阶段，无 committed reference 的歧义解仍参与连续确认，但不发布 Pose/TF；
 重投影误差明确占优的非歧义解仍可发布。已有参考后，若候选与已提交分支不符，
@@ -28,7 +29,7 @@ launch 同名参数覆盖基础值，但基础值必须大于 0 且小于 OpenCV
 `maxMarkerPerimeterRate`。
 
 每次有效 Pose 还会用相同时间戳广播 `pose.header.frame_id -> front_marker` 动态 TF。
-可通过 `publish_marker_tf:=false` 关闭，或用 `marker_frame` 修改子坐标系名称。无有效
+可通过 YAML 中 `publish_marker_tf: false` 关闭，或用 `marker_frame` 修改子坐标系名称。无有效
 检测时不会广播或伪造 Marker TF。
 
 调试输出：
@@ -58,17 +59,20 @@ BOOTSTRAP 无参考歧义帧和 `SWITCH_PENDING` 帧都显示为
 roslaunch front_marker_vision front_marker_vision.launch
 ```
 
-回退 LEGACY：
+## 参数入口
+
+所有运行参数统一在 `config/front_marker_vision.yaml` 中维护（检测目标、ROI、
+姿态解算、轮廓门控、发布开关/频率、话题名，含中文注释和单位），修改后重启
+launch 生效；launch 不再透传调参参数。要临时换用自定义配置：
 
 ```bash
-roslaunch front_marker_vision front_marker_vision.launch pose_solver:=LEGACY
+roslaunch front_marker_vision front_marker_vision.launch \
+  config_file:=/tmp/my_vision.yaml
 ```
 
-关闭自适应 ROI、恢复每帧全图检测：
+回退 LEGACY：把 YAML 中 `pose_solver` 改为 `LEGACY` 后重启。
 
-```bash
-roslaunch front_marker_vision front_marker_vision.launch enable_roi:=false
-```
+关闭自适应 ROI、恢复每帧全图检测：把 YAML 中 `enable_roi` 改为 `false` 后重启。
 
 无有效标定、图像与 CameraInfo 尺寸或 frame 不一致、未检测到目标、或位姿门禁拒绝时，
 不会发布 Pose 和齐次矩阵。

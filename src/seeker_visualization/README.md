@@ -46,10 +46,11 @@ roslaunch seeker_visualization front_marker_rviz.launch start_tracking:=false
 `start_tracking:=false` 只适用于上述场景；此时本包不再发布相机静态 TF，
 避免同一条 TF 边出现两个发布源。
 
-两种入口都保持 `enable_setpoint_output=false`。坐标系名称由
-`tf_frame_labels_node.py` 以带偏移的文字 Marker 显示，并用细引线指向对应
-原点，避免 `base_link` 与 `usb_camera_optical_frame` 等重合原点的文字互相
-遮挡。可按需关闭：
+两种入口都保持控制输出关闭（RViz 场景在
+`front_marker_control/config/front_marker_control_rviz.yaml` 中关闭 yaw 控制和
+控制输出）。坐标系名称由 `tf_frame_labels_node.py` 以带偏移的文字 Marker 显示，
+并用细引线指向对应原点，避免 `base_link` 与 `usb_camera_optical_frame` 等重合
+原点的文字互相遮挡。可按需关闭：
 
 ```bash
 roslaunch seeker_visualization front_marker_rviz.launch show_frame_labels:=false
@@ -57,6 +58,20 @@ roslaunch seeker_visualization front_marker_rviz.launch show_frame_labels:=false
 
 RViz 默认同时启用 `Image Raw` Display，通过 `raw` transport 订阅
 `/usb_cam/image_raw`，队列长度为 2，以减少调试画面的排队延迟。
+
+## 参数入口
+
+`mavros_odom_tf_node` 与 `tf_frame_labels_node` 的运行参数统一在
+`config/seeker_visualization.yaml` 中维护（里程计话题、TF 坐标系名、标签偏移/
+文字高度/发布频率等，含中文注释和单位），修改后重启 launch 生效。要临时换用
+自定义配置：
+
+```bash
+roslaunch seeker_visualization front_marker_rviz.launch \
+  config_file:=/tmp/my_visualization.yaml
+```
+
+启动接口 `start_tracking`、`show_frame_labels`、`rviz_config` 仍由命令行提供。
 
 ## 注意事项
 

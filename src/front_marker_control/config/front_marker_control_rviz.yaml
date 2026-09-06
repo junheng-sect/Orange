@@ -1,0 +1,8 @@
+# 场景差异项：RViz 可视化入口。
+# 仅在 front_marker_control.yaml 之后加载，只覆盖可视化与跟踪不同的开关。
+# 差异维护位置：普通跟踪场景的开关值见 config/front_marker_control.yaml。
+
+# 可视化入口只观察，不参与 yaw 控制
+enable_yaw_control: false
+# 控制输出保持关闭（与公共配置一致，显式写出防止误改公共值后带入本场景）
+enable_setpoint_output: false

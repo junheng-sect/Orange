@@ -1,0 +1,72 @@
+# front_marker_vision 节点运行参数（日常调参唯一入口，修改后重启生效）。
+# 节点代码中的默认值仅作兜底。
+
+# ---- 输入/输出话题 ----
+# 输入：解码后的相机原图像 / 相机标定
+image_topic: /usb_cam/image_raw
+camera_info_topic: /usb_cam/camera_info
+# 输出：Marker 位姿 / 调试 / 标注图像 / 状态
+pose_topic: /front_marker/pose
+transform_debug_topic: /front_marker_vision/debug/homogeneous_transform
+processing_time_topic: /front_marker_vision/debug/processing_time_ms
+annotated_image_topic: /front_marker_vision/image_annotated
+status_topic: /front_marker_vision/status
+
+# ---- 检测目标 ----
+# ArUco 字典名
+aruco_dictionary: DICT_5X5_1000
+# 目标 Marker ID
+target_marker_id: 33
+# 目标 Marker 实际边长（m）
+target_marker_size_m: 0.070
+
+# ---- 姿态解算 ----
+# 位姿求解器：IPPE_SQUARE 或 LEGACY
+pose_solver: IPPE_SQUARE
+# 位姿连续性参考确认帧数
+ippe_reference_confirm_frames: 3
+# 参考帧间最大旋转步长（rad）
+ippe_reference_max_rotation_step_rad: 0.35
+# 参考帧间最大平移步长（m）
+ippe_reference_max_translation_step_m: 0.10
+# 位姿连续性超时（s）
+pose_continuity_timeout_sec: 0.5
+# IPPE 二义性间隔阈值（px）
+ippe_ambiguity_gap_px: 0.2
+# 重投影误差上限（px）
+max_reprojection_error_px: 1.0
+
+# ---- ROI 跟踪 ----
+# 是否启用自适应 ROI（false 为全帧检测）
+enable_roi: true
+# 轮廓门控：是否要求检测到黑色轮廓
+enable_contour_gate: true
+# Marker 周长占图像周长的最小比例（拒绝过小的检测框）
+min_marker_perimeter_rate: 0.075
+
+# ---- 轮廓门控细项 ----
+# 最小边缘长度（px）
+min_edge_length_px: 12.0
+# 边缘采样偏移比例
+edge_sample_offset_ratio: 0.025
+# 边缘采样偏移下限/上限（px）
+edge_sample_offset_min_px: 1.0
+edge_sample_offset_max_px: 4.0
+# 边缘采样外边距比例
+edge_sample_margin_ratio: 0.15
+# 单侧边缘对比度下限
+min_edge_contrast: 25.0
+# 平均边缘对比度下限
+min_mean_edge_contrast: 40.0
+# 每条边采样点数
+edge_samples_per_side: 32
+
+# ---- 发布 ----
+# 是否发布 Marker TF
+publish_marker_tf: true
+# Marker TF 坐标系名称
+marker_frame: front_marker
+# 是否发布标注图像
+publish_annotated: true
+# 标注图像发布频率（Hz）
+annotated_rate_hz: 5.0

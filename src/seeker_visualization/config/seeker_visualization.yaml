@@ -1,0 +1,32 @@
+# seeker_visualization 公共运行参数（mavros_odom_tf_node 与 tf_frame_labels_node）。
+# 加载顺序固定：先本文件，后场景差异文件（当前无场景差异文件时仅加载本文件）。
+
+# ---- 里程计 TF（mavros_odom_tf_node） ----
+# 输入里程计话题
+odom_topic: /mavros/local_position/odom
+# 里程计父坐标系（TF 边 map -> base_link 的父端）
+map_frame: map
+# 里程计子坐标系（TF 边的子端）
+base_frame: base_link
+
+# ---- 坐标系标签（tf_frame_labels_node） ----
+# 标签显示的固定参考系
+fixed_frame: map
+# 标签 MarkerArray 输出话题
+topic: /seeker_visualization/tf_frame_labels
+# 标签文字高度（m）
+text_height_m: 0.03
+# 引线宽度（m）
+line_width_m: 0.002
+# 标签发布频率（Hz）
+publish_rate_hz: 10.0
+
+# 各坐标系标签的帧名与标注偏移（m，fixed_frame 下）。
+# map_frame/base_frame 与上方里程计 TF 同名同值；camera_frame/marker_frame
+# 仅由 tf_frame_labels_node 读取。
+map_offset: [-0.055, -0.055, 0.025]
+base_offset: [0.055, -0.040, 0.035]
+camera_frame: usb_camera_optical_frame
+camera_offset: [-0.055, 0.045, 0.060]
+marker_frame: front_marker
+marker_offset: [0.045, 0.045, 0.035]

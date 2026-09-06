@@ -1,0 +1,33 @@
+# ov9281_usb_cam 公共运行参数（普通相机/跟踪相机共用的部分）。
+# 加载顺序固定：先本文件，后场景 YAML（config/ov9281_rgb8.yaml 或
+# config/ov9281_mono8.yaml），场景文件只维护 output_encoding 差异项。
+#
+# 分辨率切换（640x480 / 1024x768 / 1280x800）时必须同步修改以下四项：
+# image_width、image_height、camera_name、camera_info_url。
+# 标定 YAML（ov9281_640x480.yaml 等）保持独立，仅保存标定数据。
+
+# V4L2 设备路径（按 USB by-id 固定，避免设备序号漂移）
+video_device: /dev/v4l/by-id/usb-DECXIN_CAMERA_DECXIN_CAMERA_01.00.00-video-index0
+
+# 图像分辨率（像素）
+image_width: 640
+image_height: 480
+
+# 采集帧率（Hz）
+framerate: 30
+
+# V4L2 采集格式：MJPEG 流
+pixel_format: mjpeg
+# 解码后的像素格式（FFmpeg）
+color_format: yuv422p
+
+# V4L2 I/O 方法：内存映射
+io_method: mmap
+
+# 图像消息的 TF 坐标系名称
+camera_frame_id: usb_camera_optical_frame
+
+# CameraInfo 标定源（相机名须与 camera_info_url 内的标定一致）
+camera_name: ov9281_640x480
+# 标定文件地址（绝对路径；更换分辨率时同步替换）
+camera_info_url: file:///home/vslam/seeker/src/ov9281_usb_cam/config/ov9281_640x480.yaml

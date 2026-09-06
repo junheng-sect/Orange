@@ -1,38 +1,71 @@
-# Step profile: hard Z velocity steps with position holds in between.
+# vz_step_control 公共运行参数（控制器与记录器共用同一包配置中的公共值）。
+# 控制器读取"阶跃 profile"部分，记录器读取"记录"部分。
+
+# ---- 控制输出开关 ----
+# 是否向 MAVROS 发布 setpoint 输出（false 时只计算不输出）
+enable_setpoint_output: true
+
+# ---- 阶跃 profile：硬 Z 速度阶跃 + 位置保持 ----
+# 阶跃速度幅值（m/s）：上升取 +，下降取 -
 step_speed_mps: 0.2
+# 每次阶跃持续时间（s）
 step_duration_sec: 3.0
+# 进入 OFFBOARD 后的稳定时长（s）
 stabilize_duration_sec: 3.0
+# 阶跃间位置保持时长（s）
 hold_duration_sec: 10.0
+# 完整循环次数（上升+下降为一循环）
 cycle_count: 2
+# setpoint 发布频率（Hz）
 setpoint_rate_hz: 100.0
 
-# MAVLink telemetry and quality gate (inherited from vz_chirp.yaml)
+# ---- MAVLink 遥测与质量门禁 ----
+# 请求的遥测频率（Hz）
 requested_telemetry_rate_hz: 100.0
+# 遥测频率下限（Hz），低于则判为故障
 minimum_data_rate_hz: 90.0
+# 频率统计窗口（s）
 rate_window_sec: 2.0
+# 频率故障持续多久后终止（s）
 rate_fault_hold_sec: 1.0
+# 话题数据最大年龄（s）
 maximum_topic_age_sec: 0.10
+# MAVROS state 超时（s）
 state_timeout_sec: 2.5
 
-# Indoor safety envelope (inherited from vz_chirp.yaml).
-# The upward travel budget is maximum_vertical_span_m: the test starts at the
-# OFFBOARD entry altitude and only climbs, so the peak-to-peak span equals the
-# step displacement. maximum_vertical_offset_m guards downward undershoot.
+# ---- 室内安全包线 ----
+# 垂直偏移上限（m，防向下超调）
 maximum_vertical_offset_m: 0.45
+# 垂直总行程上限（m，峰峰值；上升累计位移不得超过该值）
 maximum_vertical_span_m: 0.80
+# 垂直速度绝对值上限（m/s）
 maximum_absolute_vz_mps: 0.60
+# 水平误差上限（m）
 maximum_xy_error_m: 0.30
 
-# Restore the previously observed normal rates when a session ends and on
-# shutdown; the 100 Hz request is sent synchronously on each OFFBOARD entry.
-# A session that finishes (COMPLETE) or is refused (ABORT) while still holding
-# in OFFBOARD restores these rates telemetry_tail_sec after the phase change.
+# ---- 会话结束后恢复的常态遥测频率（Hz）----
 restore_local_position_rate_hz: 30.0
 restore_target_local_rate_hz: 10.0
+# COMPLETE/ABORT 后恢复遥测前的等待时长（s）
 telemetry_tail_sec: 1.0
 
-# Bag-recorder coupling: with recording enabled (launch arg record=true, which
-# sets recorder_required) the controller refuses to run an unrecorded step.
-# recorder_health_timeout_sec is how stale a health report may be before the
-# controller treats the recorder as down.
+# ---- 记录器耦合 ----
+# 记录器健康报告最大年龄（s），超过视为记录器离线
 recorder_health_timeout_sec: 1.0
+
+# ---- 话题 ----
+state_topic: /mavros/state
+odom_topic: /mavros/local_position/odom
+velocity_topic: /mavros/local_position/velocity_local
+pose_topic: /mavros/local_position/pose
+target_topic: /mavros/setpoint_raw/target_local
+setpoint_topic: /mavros/setpoint_raw/local
+status_topic: /vz_step/status
+
+# ---- 记录器（vz_step_bag_recorder） ----
+# rosbag 输出根目录
+bag_directory: /home/vslam/bags
+# bag 路径发布话题（String，latched）
+bag_path_topic: /vz_step/bag_path
+# 记录器健康话题（记录器与控制器共同使用）
+recorder_health_topic: /vz_step/recorder_health

@@ -54,28 +54,35 @@ rostopic echo -n 1 /vz_chirp/bag_path
 注意：PX4 内部 `trajectory_setpoint` 和 `vehicle_local_position_setpoint` 是 uORB
 主题，rosbag 不会把上述 MAVROS 代理量伪装成内部原始主题。
 
-## 预览与参数覆盖
+## 预览与参数入口
 
-不向 MAVROS 发布真实 setpoint：
+控制器与记录器的运行参数统一在 `config/vz_chirp.yaml` 中维护（扫频 profile、
+遥测门禁、安全包线、输出开关、话题名、记录目录，含中文注释和单位），修改后重启
+launch 生效。控制器与记录器读取同一包配置中的公共值（话题名等），两处不会失配。
+最高频率必须不超过发布频率的十分之一。
+
+不向 MAVROS 发布真实 setpoint：把 YAML 中 `enable_setpoint_output` 改为 `false`
+后重启（或临时传入 `config_file` 指向自定义配置）。`record` 仍是 launch 的结构
+开关，决定是否启动记录器，并由它派生控制器的 `recorder_required`：
 
 ```bash
-roslaunch vz_chirp_control vz_chirp_control.launch enable_setpoint_output:=false
+roslaunch vz_chirp_control vz_chirp_control.launch record:=false
 ```
-
-配置入口为 `config/vz_chirp.yaml`。最高频率必须不超过发布频率的十分之一。
 
 ## 开机自启动开关
 
 板端总启动文件 `/etc/ros/noetic/seeker.d/seeker_autostart.launch` 提供：
 
 - `enable_vz_chirp_control`：是否开机启动本包。
-- `vz_chirp_enable_setpoint_output`：是否发布真实 setpoint。
 - `vz_chirp_record`：是否启动 OFFBOARD 自动 rosbag。
 - `enable_front_marker_tracking`：Front Marker 总开关。
 - `enable_vz_step_control`：Z 阶跃测试包 `vz_step_control` 总开关。
 
-当前部署默认值为：VZ step 包、真实 setpoint 和自动 rosbag 开启，扫频包与
-Front Marker 关闭。三个控制包不得同时开启，因为它们都会发布
+是否发布真实 setpoint 不再由总启动文件控制，改在
+`config/vz_chirp.yaml` 的 `enable_setpoint_output` 中维护（修改后重启生效）。
+
+当前部署默认值为：VZ step 包和自动 rosbag 开启，扫频包与 Front Marker 关闭。
+三个控制包不得同时开启，因为它们都会发布
 `/mavros/setpoint_raw/local`。
 
 ## 构建和测试

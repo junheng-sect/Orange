@@ -1,28 +1,17 @@
 <launch>
+  <!-- 可视化入口：保留启动开关与 RViz 场景选择；运行参数统一在 YAML 中维护。
+       保留既有行为差异：start_tracking=true 时叠加跟踪管道并把控制场景配置设为
+       关闭 yaw 控制与控制输出。 -->
   <arg name="start_tracking" default="true" />
   <arg name="show_frame_labels" default="true" />
   <arg name="rviz_config" default="$(find seeker_visualization)/rviz/front_marker_tf.rviz" />
-  <arg name="odom_topic" default="/mavros/local_position/odom" />
-  <arg name="map_frame" default="map" />
-  <arg name="base_frame" default="base_link" />
-  <arg name="camera_frame" default="usb_camera_optical_frame" />
-  <arg name="marker_frame" default="front_marker" />
-  <arg name="target_body_x" default="0.8" />
-  <arg name="target_body_y" default="0.0" />
-  <arg name="target_body_z" default="0.0" />
+  <arg name="config_file" default="$(find seeker_visualization)/config/seeker_visualization.yaml" />
+  <arg name="control_scene_config" default="$(find front_marker_control)/config/front_marker_control_rviz.yaml" />
 
   <!-- Full pipeline owns the camera driver, camera static TF and dynamic marker TF. -->
   <include file="$(find front_marker_control)/launch/front_marker_tracking.launch"
            if="$(arg start_tracking)">
-    <arg name="base_frame" value="$(arg base_frame)" />
-    <arg name="camera_frame" value="$(arg camera_frame)" />
-    <arg name="publish_marker_tf" value="true" />
-    <arg name="marker_frame" value="$(arg marker_frame)" />
-    <arg name="target_body_x" value="$(arg target_body_x)" />
-    <arg name="target_body_y" value="$(arg target_body_y)" />
-    <arg name="target_body_z" value="$(arg target_body_z)" />
-    <arg name="enable_yaw_control" value="false" />
-    <arg name="enable_setpoint_output" value="false" />
+    <arg name="control_scene_config" value="$(arg control_scene_config)" />
   </include>
 
   <!-- With start_tracking:=false the full tracking pipeline must already be
@@ -31,9 +20,7 @@
         type="mavros_odom_tf_node.py"
         name="mavros_odom_tf_node"
         output="screen">
-    <param name="odom_topic" value="$(arg odom_topic)" />
-    <param name="map_frame" value="$(arg map_frame)" />
-    <param name="base_frame" value="$(arg base_frame)" />
+    <rosparam command="load" file="$(arg config_file)" />
   </node>
 
   <!-- RViz TF names cannot be offset per frame; publish readable labels separately. -->
@@ -42,11 +29,7 @@
         name="tf_frame_labels_node"
         output="screen"
         if="$(arg show_frame_labels)">
-    <param name="fixed_frame" value="$(arg map_frame)" />
-    <param name="map_frame" value="$(arg map_frame)" />
-    <param name="base_frame" value="$(arg base_frame)" />
-    <param name="camera_frame" value="$(arg camera_frame)" />
-    <param name="marker_frame" value="$(arg marker_frame)" />
+    <rosparam command="load" file="$(arg config_file)" />
   </node>
 
   <node pkg="rviz"
