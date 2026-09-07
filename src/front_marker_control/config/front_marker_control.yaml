@@ -43,7 +43,7 @@ yaw_error_deadband: 0.06
 # 是否启用 yaw 控制（RViz 场景在 front_marker_control_rviz.yaml 中关闭）
 enable_yaw_control: true
 # 是否向 MAVROS 发布 setpoint 输出（false 时仅计算不输出）
-enable_setpoint_output: false
+enable_setpoint_output: true
 # setpoint 发布频率（Hz）
 setpoint_publish_rate_hz: 20.0
 
