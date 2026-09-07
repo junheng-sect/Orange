@@ -1,0 +1,37 @@
+# SEEKER 开机自启动节点开关
+#
+# 用法：修改下面各项（true/false），保存后执行
+#   sudo systemctl restart seeker.service
+# 或直接重启机器，即按本配置启动。
+#
+# 缺省规则：本文件缺失、或删掉某一行，该项回到下方注释中的 default 值。
+# 写错键名或值不是布尔时服务会启动失败（systemctl status seeker 可见原因），
+# 防止带错配置半启动。
+
+# 四目相机/IMU/气压 nodelet + 去畸变管线（seeker_v1，核 4-5）  default true
+base_camera_pipeline: true
+
+# 四目深度管线：disparity/depth/point_cloud2（依赖 base_camera_pipeline）
+# 依赖说明：关掉后 VINS 的图像输入不受影响（去畸变仍在 base 内）      default true
+stereo_depth: true
+
+# VINS 里程计 ov_msckf（核 6-7）                                      default true
+vins: true
+
+# mavros + vision_to_mavros（commute_px4）                            default true
+mavros: true
+
+# 前视 Marker 全套：OV9281 相机 + 静态 TF + 视觉 + 控制               default true
+front_marker_tracking: true
+
+# RC 通道触发的 rosbag 录包                                           default true
+rc_bag_recorder: true
+
+# RC 通道触发的拍照                                                   default true
+rc_photo_capture: true
+
+# 高度扫频（与 front_marker_tracking 互斥：都开会抢 setpoint 话题）   default false
+vz_chirp_control: false
+
+# Z 向速度阶跃（与 front_marker_tracking 互斥）                       default false
+vz_step_control: false

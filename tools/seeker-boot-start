@@ -1,0 +1,21 @@
+#!/bin/bash
+# seeker.service 的 ExecStart wrapper（见 systemd drop-in 20-mode.conf）：
+# 按 /home/vslam/seeker/tools/seeker_boot.yaml 导出各节点组开关，再 exec
+# robot_upstart 生成的原 seeker-start（不复制其逻辑，生成文件保持不动）。
+# YAML 校验失败时直接退出，服务启动失败——避免带错配置半启动。
+# 注意：gen 的输出必须先用命令替换捕获（set -e 能感知其退出码）；
+# 进程替换 < <(...) 会吞掉失败，坏配置会被当成"全默认"放行。
+
+set -euo pipefail
+
+SEEKER_TOOLS=/home/vslam/seeker/tools
+YAML_FILE=$SEEKER_TOOLS/seeker_boot.yaml
+
+if [ -f "$YAML_FILE" ]; then
+  GEN_OUTPUT=$(/usr/bin/python3 "$SEEKER_TOOLS/seeker_boot_gen.py" "$YAML_FILE")
+  while IFS='=' read -r key value; do
+    [ -n "$key" ] && export "$key=$value"
+  done <<< "$GEN_OUTPUT"
+fi
+
+exec /usr/sbin/seeker-start
