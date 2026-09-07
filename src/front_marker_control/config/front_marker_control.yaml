@@ -44,6 +44,9 @@ yaw_error_deadband: 0.06
 enable_yaw_control: true
 # 是否向 MAVROS 发布 setpoint 输出（false 时仅计算不输出）
 enable_setpoint_output: true
+# 是否启用位置锁定（ALIGN -> POS_HOLD）与近墙后退（RETREAT）
+# （RViz 可视化场景无真实飞机/定位，在 front_marker_control_rviz.yaml 中显式关闭）
+enable_position_hold: true
 # setpoint 发布频率（Hz）
 setpoint_publish_rate_hz: 20.0
 
@@ -86,3 +89,26 @@ distance_tolerance_m: 0.12
 yaw_tolerance_deg: 6.0
 # 全部对准后的保持时长（s）
 aligned_hold_sec: 1.0
+
+# ---- 位置锁定与近墙保护（enable_position_hold=true 时生效）----
+# 定位输入话题（Odometry，body 在 local ENU 的位姿）
+odom_topic: /mavros/local_position/odom
+# 定位接收超时（s）：超过视为定位失效
+odom_timeout_sec: 0.20
+# 定位插值最大样本间隔（s）
+odom_interp_gap_max_sec: 0.10
+# 定位源时间戳最大允许年龄（s）：超龄/重放帧一律拒绝
+odom_source_max_age_sec: 0.50
+# POS_HOLD 退出带宽（m/deg，须 >= 对准进入带宽）
+pos_exit_distance_tolerance_m: 0.18
+pos_exit_lateral_tolerance_m: 0.12
+pos_exit_vertical_tolerance_m: 0.12
+pos_exit_yaw_tolerance_deg: 9.0
+# 视觉误差超限需连续保持的时间（s）才退出 POS_HOLD
+pos_exit_hold_sec: 1.0
+# 近墙保护：Marker 距离小于该值（m）即后退（须小于 target_xyz_body[0]）
+min_marker_distance_m: 0.60
+# 后退后重新对准的 Marker 距离（m，须大于 min_marker_distance_m）
+retreat_recover_distance_m: 0.70
+# 后退速度（m/s，须为负）
+retreat_velocity_x: -0.10

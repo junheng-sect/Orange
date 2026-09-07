@@ -5,6 +5,7 @@ import threading
 
 from geometry_msgs.msg import PoseStamped, TwistStamped, Vector3Stamped
 from mavros_msgs.msg import PositionTarget, State
+from nav_msgs.msg import Odometry
 import rospy
 from std_msgs.msg import Float64, String
 import tf2_geometry_msgs  # noqa: F401 - registers PoseStamped conversions
@@ -20,9 +21,12 @@ from front_marker_control.geometry import (
     marker_heading_body,
     normalize_quaternion,
     position_error_body,
+    position_hold_target,
 )
+from front_marker_control.localization import LocalPoseBuffer
 from front_marker_control.mavros_interface import (
     body_flu_setpoint_components,
+    position_only_type_mask,
     velocity_only_type_mask,
 )
 
@@ -50,6 +54,20 @@ class FrontMarkerControlNode(object):
         self.last_observation_issue = '尚未收到 Marker Pose'
         self.last_status = 'PREVIEW_ONLY | WAIT_POSE'
         self.last_motion_state = None
+        self.last_control_mode = None
+        self.last_mode_reason = None
+
+        # 位置锁定状态：ALIGN -> POS_HOLD -> RETREAT。
+        self.control_mode = 'ALIGN'
+        self.mode_reason = '初始'
+        # (p_target ENU, yaw_target ENU rad, lock marker stamp)
+        self.position_target = None
+        self.pos_exit_start_time = None
+        self.local_pose_buffer = LocalPoseBuffer()
+        self.latest_odom_receive_time = None
+        self.latest_odom_source_stamp = None
+        self.last_odom_issue = '尚未收到 Odometry'
+        self.last_localization_issue = ''
 
         self.body_controller = BodyVelocityController(
             kp_x=self.kp_x,
@@ -112,6 +130,14 @@ class FrontMarkerControlNode(object):
             queue_size=1,
             tcp_nodelay=True,
         )
+        if self.enable_position_hold:
+            rospy.Subscriber(
+                self.odom_topic,
+                Odometry,
+                self.odom_callback,
+                queue_size=1,
+                tcp_nodelay=True,
+            )
         rospy.Subscriber(
             self.state_topic,
             State,
@@ -132,7 +158,10 @@ class FrontMarkerControlNode(object):
             'yaw_gain=%.3f | yaw_control=%s | '
             'setpoint_rate=%.1fHz | max_accel=%.3fm/s^2 | '
             'loss_decel=%.3fm/s^2 | pose_timeout=%.3fs | '
-            'max_pose_latency=%.3fs | filter_dt_max=%.3fs | setpoint_output=%s',
+            'max_pose_latency=%.3fs | filter_dt_max=%.3fs | setpoint_output=%s | '
+            'position_hold=%s | odom=%s | odom_timeout=%.3fs | '
+            'pos_exit=(%.2f, %.2f, %.2f)m %.1fdeg %.2fs | '
+            'near_wall=%.2fm->%.2fm retreat_vx=%.2fm/s',
             self.pose_topic,
             self.base_frame,
             self.target_xyz_body[0],
@@ -150,6 +179,17 @@ class FrontMarkerControlNode(object):
             self.max_pose_latency_sec,
             self.filter_dt_max_sec,
             self.enable_setpoint_output,
+            self.enable_position_hold,
+            self.odom_topic,
+            self.odom_timeout_sec,
+            self.pos_exit_distance_tolerance_m,
+            self.pos_exit_lateral_tolerance_m,
+            self.pos_exit_vertical_tolerance_m,
+            self.pos_exit_yaw_tolerance_deg,
+            self.pos_exit_hold_sec,
+            self.min_marker_distance_m,
+            self.retreat_recover_distance_m,
+            self.retreat_velocity_x,
         )
 
     def _read_parameters(self):
@@ -215,13 +255,29 @@ class FrontMarkerControlNode(object):
             'distance_tolerance_m': 0.12,
             'yaw_tolerance_deg': 6.0,
             'aligned_hold_sec': 1.0,
+            'odom_timeout_sec': 0.20,
+            'odom_interp_gap_max_sec': 0.10,
+            'odom_source_max_age_sec': 0.5,
+            'pos_exit_distance_tolerance_m': 0.18,
+            'pos_exit_lateral_tolerance_m': 0.12,
+            'pos_exit_vertical_tolerance_m': 0.12,
+            'pos_exit_yaw_tolerance_deg': 9.0,
+            'pos_exit_hold_sec': 1.0,
+            'min_marker_distance_m': 0.60,
+            'retreat_recover_distance_m': 0.70,
+            'retreat_velocity_x': -0.10,
         }
         for name, default in numeric_defaults.items():
             setattr(self, name, float(get('~' + name, default)))
 
         self.enable_setpoint_output = bool(get('~enable_setpoint_output', False))
         self.enable_yaw_control = bool(get('~enable_yaw_control', True))
+        self.enable_position_hold = bool(get('~enable_position_hold', False))
         self.yaw_tolerance_rad = math.radians(self.yaw_tolerance_deg)
+        self.pos_exit_yaw_tolerance_rad = math.radians(
+            self.pos_exit_yaw_tolerance_deg
+        )
+        self.odom_topic = str(get('~odom_topic', '/mavros/local_position/odom'))
 
         for name in numeric_defaults:
             if not math.isfinite(getattr(self, name)):
@@ -239,6 +295,39 @@ class FrontMarkerControlNode(object):
             raise ValueError(
                 'pose_timeout_sec, max_pose_latency_sec, filter_dt_max_sec and '
                 'state_timeout_sec must be positive'
+            )
+        if (
+            self.odom_timeout_sec <= 0.0
+            or self.odom_interp_gap_max_sec <= 0.0
+            or self.odom_source_max_age_sec <= 0.0
+            or self.min_marker_distance_m <= 0.0
+            or self.retreat_recover_distance_m <= 0.0
+        ):
+            raise ValueError(
+                'odom_timeout_sec, odom_interp_gap_max_sec, '
+                'odom_source_max_age_sec, min_marker_distance_m and '
+                'retreat_recover_distance_m must be positive'
+            )
+        if self.retreat_recover_distance_m <= self.min_marker_distance_m:
+            raise ValueError(
+                'retreat_recover_distance_m must exceed min_marker_distance_m'
+            )
+        if self.target_xyz_body[0] <= self.min_marker_distance_m:
+            raise ValueError(
+                'target_xyz_body[0] must exceed min_marker_distance_m, '
+                'otherwise the aligned lock is immediately broken by the '
+                'near-wall retreat and POS_HOLD is unreachable'
+            )
+        if self.retreat_velocity_x >= 0.0:
+            raise ValueError('retreat_velocity_x must be negative')
+        if (
+            self.pos_exit_distance_tolerance_m < self.distance_tolerance_m
+            or self.pos_exit_lateral_tolerance_m < self.lateral_tolerance_m
+            or self.pos_exit_vertical_tolerance_m < self.vertical_tolerance_m
+            or self.pos_exit_yaw_tolerance_deg < self.yaw_tolerance_deg
+        ):
+            raise ValueError(
+                'pos exit tolerances must not be below the entry tolerances'
             )
         if self.future_stamp_tolerance_sec < 0.0 or self.tf_lookup_timeout_sec < 0.0:
             raise ValueError('timestamp and TF tolerances must be non-negative')
@@ -262,10 +351,13 @@ class FrontMarkerControlNode(object):
                 self.distance_tolerance_m,
                 self.yaw_tolerance_deg,
                 self.aligned_hold_sec,
+                self.pos_exit_distance_tolerance_m,
+                self.pos_exit_lateral_tolerance_m,
+                self.pos_exit_vertical_tolerance_m,
+                self.pos_exit_yaw_tolerance_deg,
+                self.pos_exit_hold_sec,
         )):
             raise ValueError('limits, deadbands and tolerances must be non-negative')
-            raise ValueError(
-            )
         for axis in ('x', 'y', 'z'):
             if getattr(self, 'velocity_deadband_off_' + axis) > getattr(
                 self, 'velocity_deadband_on_' + axis
@@ -279,6 +371,193 @@ class FrontMarkerControlNode(object):
         with self.lock:
             self.state = message
             self.latest_state_receive_time = rospy.Time.now()
+
+    def _localization_rejected(self, issue):
+        """定位数据被拒绝：立即把定位置为不可用，并原子清除位置目标。
+
+        清除不能推迟到控制循环——若下一次有效回调先于控制循环到达，
+        循环会看到“定位新鲜”而继续使用旧的 position_target。RETREAT 是
+        纯视觉近墙保护，不依赖定位，因此不被这里打断。
+        """
+        self.latest_odom_receive_time = None
+        self.last_odom_issue = issue
+        if self.control_mode == 'POS_HOLD':
+            self.enter_align('定位异常 %s' % issue)
+        elif self.position_target is not None:
+            self.clear_position_target()
+
+    def odom_callback(self, message):
+        now = rospy.Time.now()
+        with self.lock:
+            # 源时间与接收时间分别校验：源时间戳判定数据本身是否新鲜/过期，
+            # 接收时间判定链路是否仍在下发；两者任一异常即拒绝该帧。
+            source_stamp = message.header.stamp
+            if source_stamp == rospy.Time():
+                self._localization_rejected('拒绝零时间戳 Odometry')
+                return
+            source_age = now.to_sec() - source_stamp.to_sec()
+            if not math.isfinite(source_age):
+                self._localization_rejected('拒绝非有限定位源时间戳')
+                return
+            if source_age > self.odom_source_max_age_sec:
+                self._localization_rejected(
+                    '拒绝过期定位源 %.1fs' % source_age
+                )
+                return
+            if source_age < -self.future_stamp_tolerance_sec:
+                self._localization_rejected(
+                    '拒绝超前定位源 %.1fs' % (-source_age)
+                )
+                return
+            receive_stamp = now.to_sec()
+            if not math.isfinite(receive_stamp):
+                self._localization_rejected('拒绝非有限接收时间')
+                return
+            # 插值时间轴使用接收时刻：视觉 Pose 的源时间通常晚于最新定位
+            # 样本（定位无外推），按各自接收时刻对齐才可行。该近似会引入
+            # 与两路时延差成正比的目标位置偏差，见位置锁定的时间对齐注释。
+            reason = self.local_pose_buffer.accept(
+                receive_stamp,
+                message.header.frame_id,
+                (
+                    message.pose.pose.position.x,
+                    message.pose.pose.position.y,
+                    message.pose.pose.position.z,
+                ),
+                (
+                    message.pose.pose.orientation.x,
+                    message.pose.pose.orientation.y,
+                    message.pose.pose.orientation.z,
+                    message.pose.pose.orientation.w,
+                ),
+            )
+            if reason is not None:
+                # 非法值或坐标系变化已在 accept 内清除旧定位缓存。
+                self._localization_rejected(reason)
+                return
+            self.latest_odom_receive_time = now
+            self.latest_odom_source_stamp = source_stamp
+            self.last_odom_issue = ''
+            self.last_localization_issue = ''
+
+    def localization_unfresh_reason(self, now):
+        """Return why position-hold localization is unusable, or '' when fresh.
+
+        The odom *source* timestamp is validated at accept time; this only judges
+        the receive-side freshness of the last accepted frame.
+        """
+        if self.latest_odom_receive_time is None:
+            return '定位尚未收到 Odometry'
+        receive_age = (now - self.latest_odom_receive_time).to_sec()
+        if not math.isfinite(receive_age) or receive_age < 0.0:
+            return '定位接收时间异常'
+        if receive_age > self.odom_timeout_sec:
+            return '定位接收超时 %.1fs' % receive_age
+        return ''
+
+    def localization_is_fresh(self, now):
+        return not self.localization_unfresh_reason(now)
+
+    def _report_localization_lost(self, now):
+        """Expose the localization failure reason and log it throttled."""
+        reason = self.localization_unfresh_reason(now)
+        if not reason:
+            return
+        # 具体的拒绝原因（过期源/非法值/坐标系变化）优先于笼统的“尚未收到”。
+        issue = self.last_odom_issue or reason
+        self.last_localization_issue = issue
+        rospy.logwarn_throttle(
+            5.0, '位置锁定暂停：定位不足（%s），等待定位恢复', issue,
+        )
+
+    def clear_position_target(self):
+        self.position_target = None
+        self.pos_exit_start_time = None
+
+    def enter_align(self, reason):
+        self.clear_position_target()
+        self.aligned_start_time = None
+        self.control_mode = 'ALIGN'
+        self.mode_reason = reason
+
+    def enter_retreat(self, reason):
+        self.clear_position_target()
+        self.aligned_start_time = None
+        self.control_mode = 'RETREAT'
+        self.mode_reason = reason
+        # 近墙后退必须丢弃限速器里残留的历史（可能带着朝墙的正向及横向/垂向
+        # 分量），否则后退首周期会继续输出旧的正向速度。清空后由本周期指令
+        # 生成从零按 max_accel 起步后退。
+        self.velocity_limiter.reset()
+
+    def position_exit_exceeded(self):
+        """True when the live vision error exceeds the POS_HOLD exit band."""
+        error = self.latest_position_error
+        if (
+            abs(float(error[0])) > self.pos_exit_distance_tolerance_m
+            or abs(float(error[1])) > self.pos_exit_lateral_tolerance_m
+            or abs(float(error[2])) > self.pos_exit_vertical_tolerance_m
+        ):
+            return True
+        return (
+            self.enable_yaw_control
+            and abs(float(self.latest_yaw_error)) > self.pos_exit_yaw_tolerance_rad
+        )
+
+    def update_control_mode(self, now, pose_fresh, marker_x, near_wall):
+        """Advance the ALIGN/POS_HOLD/RETREAT control-mode state machine."""
+        if self.control_mode == 'RETREAT':
+            if pose_fresh and marker_x >= self.retreat_recover_distance_m:
+                self.enter_align('后退恢复 marker_x=%.2fm' % marker_x)
+            return
+        if pose_fresh and near_wall:
+            # 近墙保护优先于 ALIGN 与 POS_HOLD。
+            self.enter_retreat('近墙保护 marker_x=%.2fm' % marker_x)
+            return
+        if self.control_mode == 'POS_HOLD':
+            if self.position_target is None:
+                self.enter_align('位置目标缺失')
+            elif pose_fresh and self.position_exit_exceeded():
+                if self.pos_exit_start_time is None:
+                    self.pos_exit_start_time = now
+                elif (
+                    (now - self.pos_exit_start_time).to_sec()
+                    >= self.pos_exit_hold_sec
+                ):
+                    self.enter_align('视觉误差超限退出')
+            else:
+                # 丢标（pose_fresh=False）期间不累计退出计时：恢复首帧仍需
+                # 重新连续超限满 hold_sec 才会退出，避免中断后立刻误退出。
+                self.pos_exit_start_time = None
+
+    def try_lock_position_target(self):
+        """Compute and lock the fixed XYZ/yaw target, or return None."""
+        # Marker 与定位都按接收时刻对齐（无外推，靠插值时间轴闭环）。
+        marker_stamp = self.latest_receive_time.to_sec()
+        local_pose = self.local_pose_buffer.lookup(
+            marker_stamp, self.odom_interp_gap_max_sec
+        )
+        if local_pose is None:
+            self.last_localization_issue = '定位无法与 Marker 时间对齐'
+            return None
+        marker_position_body = tuple(
+            self.latest_position_error[index] + self.target_xyz_body[index]
+            for index in range(3)
+        )
+        try:
+            p_target, yaw_target = position_hold_target(
+                local_pose.position,
+                local_pose.quaternion,
+                marker_position_body,
+                self.latest_yaw_error,
+                self.target_xyz_body,
+                apply_yaw_correction=self.enable_yaw_control,
+            )
+        except ValueError as exception:
+            self.last_localization_issue = '锁定目标计算失败: %s' % exception
+            return None
+        self.last_localization_issue = ''
+        return (p_target, yaw_target, marker_stamp)
 
     def invalidate_observation(self, reason):
         self.latest_position_error = None
@@ -500,72 +779,130 @@ class FrontMarkerControlNode(object):
             now = rospy.Time.now()
             dt = self.command_dt(now)
             pose_fresh = self.observation_is_fresh(now)
-            if pose_fresh:
-                target_body_velocity = tuple(self.latest_body_velocity)
-                yaw_rate = self.latest_yaw_rate
-                alignment_state = self.update_alignment_state(now)
-            else:
-                if self.latest_position_error is not None:
-                    self.invalidate_observation('Pose 超时')
-                target_body_velocity = (0.0, 0.0, 0.0)
-                yaw_rate = 0.0
-                alignment_state = None
-
+            localization_ok = (
+                self.enable_position_hold and self.localization_is_fresh(now)
+            )
             gate_reason = (
                 self.hard_gate_reason(now) if self.enable_setpoint_output else None
             )
+
+            if not localization_ok and self.enable_position_hold:
+                # 定位失效：清除位置目标与计时，锁定等待定位恢复。
+                if self.position_target is not None:
+                    self.enter_align('定位失效清除目标')
+                self.aligned_start_time = None
+                self.pos_exit_start_time = None
+                self._report_localization_lost(now)
+            elif pose_fresh:
+                # 有新鲜视觉时推进对齐判定（ALIGNED 状态与视觉误差门限共用）。
+                alignment_state = self.update_alignment_state(now)
+                if (
+                    alignment_state == 'ALIGNED'
+                    and self.control_mode == 'ALIGN'
+                    and self.enable_position_hold
+                    and (not self.enable_setpoint_output or gate_reason is None)
+                    and localization_ok
+                ):
+                    locked = self.try_lock_position_target()
+                    if locked is not None:
+                        self.position_target = locked
+                        self.control_mode = 'POS_HOLD'
+                        self.mode_reason = '对齐锁定'
+                        self.pos_exit_start_time = None
+            else:
+                alignment_state = None
+
+            # 状态切换（近墙保护 RETREAT / POS_HOLD 退出）须在本周期指令生成
+            # 之前完成：避免触发当周期仍发送旧模式的指令（如朝墙的跟踪速度）。
+            if gate_reason is None:
+                if pose_fresh and self.enable_position_hold:
+                    marker_x = (
+                        self.latest_position_error[0] + self.target_xyz_body[0]
+                    )
+                    near_wall = float(marker_x) < self.min_marker_distance_m
+                else:
+                    marker_x = None
+                    near_wall = False
+                self.update_control_mode(now, pose_fresh, marker_x, near_wall)
+
             if gate_reason is not None:
-                body_velocity = self.velocity_limiter.reset()
+                # 非 OFFBOARD、未解锁或 FCU 失联：清除位置目标与计时，不累计。
+                self.enter_align('硬门控 %s' % gate_reason)
+                self.velocity_limiter.reset()
+                body_velocity = (0.0, 0.0, 0.0)
                 yaw_rate = 0.0
                 motion_state = gate_reason
                 actual_allowed = False
+                setpoint_snapshot = None
             else:
-                rate_limit = self.max_accel if pose_fresh else self.loss_decel
-                body_velocity = self.velocity_limiter.update(
-                    target_body_velocity, rate_limit, dt
-                )
-                if pose_fresh:
-                    motion_state = 'TRACKING'
-                elif self.velocity_norm(body_velocity) > 1e-9:
-                    motion_state = 'BRAKING_POSE_LOSS'
+                if self.control_mode == 'RETREAT':
+                    # 近墙后退只依赖视觉、不依赖定位：不因定位失效被清零（安全兜底优先）。
+                    if pose_fresh:
+                        # 后退：取消正向速度，横向/垂向与 yaw 角速度置零。
+                        target_velocity = (self.retreat_velocity_x, 0.0, 0.0)
+                        rate_limit = self.max_accel
+                    else:
+                        # 后退中丢标：目标速度归零，按丢标减速收零。
+                        target_velocity = (0.0, 0.0, 0.0)
+                        rate_limit = self.loss_decel
+                    body_velocity = self.velocity_limiter.update(
+                        target_velocity, rate_limit, dt
+                    )
+                    yaw_rate = 0.0
+                    if pose_fresh:
+                        motion_state = 'RETREAT'
+                    elif self.velocity_norm(body_velocity) > 1e-9:
+                        motion_state = 'BRAKING_POSE_LOSS'
+                    else:
+                        motion_state = 'RETREAT_WAIT_POSE'
+                    actual_allowed = self.enable_setpoint_output
+                    setpoint_snapshot = None
+                elif not localization_ok and self.enable_position_hold:
+                    # 定位失效：输出零速度（不做丢标制动推进）。
+                    self.velocity_limiter.reset()
+                    body_velocity = (0.0, 0.0, 0.0)
+                    yaw_rate = 0.0
+                    motion_state = 'WAIT_LOCAL_POSITION'
+                    actual_allowed = self.enable_setpoint_output
+                    setpoint_snapshot = None
+                elif self.control_mode == 'POS_HOLD':
+                    # 固定 XYZ + 绝对 yaw，目标不随每帧视觉变化。
+                    setpoint_snapshot = (
+                        self.position_target[0],
+                        self.position_target[1],
+                    )
+                    body_velocity = self.velocity_limiter.reset()
+                    yaw_rate = 0.0
+                    motion_state = 'POS_HOLD'
+                    actual_allowed = self.enable_setpoint_output
                 else:
-                    motion_state = 'WAIT_POSE'
-                actual_allowed = self.enable_setpoint_output
-
-            if pose_fresh:
-                preview_text = (
-                    '%s/%s | yaw_control=%s | error_body=(%.3f, %.3f, %.3f)m '
-                    'yaw_raw=%.2fdeg yaw_lpf=%.2fdeg | '
-                    'cmd_flu=(%.3f, %.3f, %.3f, %.3f)'
-                    % (
-                        motion_state,
-                        alignment_state,
-                        'ON' if self.enable_yaw_control else 'OFF',
-                        self.latest_position_error[0],
-                        self.latest_position_error[1],
-                        self.latest_position_error[2],
-                        math.degrees(self.latest_yaw_error),
-                        math.degrees(self.latest_filtered_yaw_error),
-                        body_velocity[0],
-                        body_velocity[1],
-                        body_velocity[2],
-                        yaw_rate,
+                    if pose_fresh:
+                        target_body_velocity = tuple(self.latest_body_velocity)
+                        yaw_rate = self.latest_yaw_rate
+                    else:
+                        if self.latest_position_error is not None:
+                            self.invalidate_observation('Pose 超时')
+                        self.enter_align_if_needed('丢标重新对齐')
+                        target_body_velocity = (0.0, 0.0, 0.0)
+                        yaw_rate = 0.0
+                    rate_limit = self.max_accel if pose_fresh else self.loss_decel
+                    body_velocity = self.velocity_limiter.update(
+                        target_body_velocity, rate_limit, dt
                     )
-                )
-            else:
-                preview_text = (
-                    '%s | yaw_control=%s | %s | cmd_flu=(%.3f, %.3f, %.3f, %.3f)'
-                    % (
-                        motion_state,
-                        'ON' if self.enable_yaw_control else 'OFF',
-                        self.last_observation_issue or 'Pose 超时',
-                        body_velocity[0],
-                        body_velocity[1],
-                        body_velocity[2],
-                        yaw_rate,
-                    )
-                )
+                    if pose_fresh:
+                        motion_state = 'TRACKING'
+                    elif self.velocity_norm(body_velocity) > 1e-9:
+                        motion_state = 'BRAKING_POSE_LOSS'
+                    else:
+                        motion_state = 'WAIT_POSE'
+                    actual_allowed = self.enable_setpoint_output
+                    setpoint_snapshot = None
 
+            preview_text = self.build_preview_text(
+                pose_fresh, body_velocity, yaw_rate, motion_state,
+                setpoint_snapshot,
+                alignment_state=locals().get('alignment_state'),
+            )
             if not self.enable_setpoint_output:
                 status_text = 'PREVIEW_ONLY | ' + preview_text
             elif gate_reason is not None:
@@ -575,6 +912,14 @@ class FrontMarkerControlNode(object):
                 )
             elif motion_state == 'BRAKING_POSE_LOSS':
                 status_text = 'SETPOINT_BRAKING | ' + preview_text
+            elif setpoint_snapshot is not None:
+                status_text = 'SETPOINT_POSITION | ' + preview_text
+            elif motion_state == 'WAIT_LOCAL_POSITION':
+                status_text = 'WAIT_LOCAL_POSITION | actual=zero | ' + preview_text
+            elif motion_state == 'RETREAT':
+                status_text = 'SETPOINT_RETREAT | ' + preview_text
+            elif motion_state == 'POS_HOLD':
+                status_text = 'SETPOINT_ACTIVE | ' + preview_text
             elif pose_fresh:
                 status_text = 'SETPOINT_ACTIVE | ' + preview_text
             else:
@@ -588,11 +933,96 @@ class FrontMarkerControlNode(object):
                 bool(actual_allowed),
             )
 
-        self.publish_commands(*command_snapshot)
+        self.publish_commands(
+            *command_snapshot, position_target=setpoint_snapshot
+        )
         if status_to_publish is not None:
             self._publish_if_running(
                 self.status_pub, String(data=status_to_publish)
             )
+
+    def enter_align_if_needed(self, reason):
+        if self.control_mode != 'ALIGN':
+            self.enter_align(reason)
+
+    def build_preview_text(
+        self, pose_fresh, body_velocity, yaw_rate, motion_state,
+        setpoint_snapshot, alignment_state=None,
+    ):
+        mode_segment = 'mode=%s/%s' % (
+            self.control_mode,
+            self.mode_reason,
+        )
+        if setpoint_snapshot is not None:
+            p_target, yaw_target = setpoint_snapshot
+            return (
+                '%s | %s | yaw_control=%s | hold_local=(%.3f, %.3f, %.3f)m '
+                'yaw=%.2fdeg | %s'
+                % (
+                    motion_state,
+                    mode_segment,
+                    'ON' if self.enable_yaw_control else 'OFF',
+                    p_target[0],
+                    p_target[1],
+                    p_target[2],
+                    math.degrees(yaw_target),
+                    self.last_localization_issue or '',
+                )
+            ).rstrip(' |')
+        if pose_fresh:
+            body_error = self.latest_position_error
+            if alignment_state is not None:
+                state_segment = '%s/%s' % (motion_state, alignment_state)
+            else:
+                state_segment = motion_state
+            text = (
+                '%s | %s | yaw_control=%s | error_body=(%.3f, %.3f, %.3f)m '
+                'yaw_raw=%.2fdeg yaw_lpf=%.2fdeg | '
+                'cmd_flu=(%.3f, %.3f, %.3f, %.3f)'
+                % (
+                    state_segment,
+                    mode_segment,
+                    'ON' if self.enable_yaw_control else 'OFF',
+                    body_error[0],
+                    body_error[1],
+                    body_error[2],
+                    math.degrees(self.latest_yaw_error),
+                    math.degrees(self.latest_filtered_yaw_error),
+                    body_velocity[0],
+                    body_velocity[1],
+                    body_velocity[2],
+                    yaw_rate,
+                )
+            )
+            if self.last_localization_issue:
+                return text + ' | ' + self.last_localization_issue
+            return text
+        issue = self.last_observation_issue or 'Pose 超时'
+        if self.enable_position_hold and not self.localization_is_fresh_markerless():
+            issue = self._compose_wait_issue()
+        return (
+            '%s | %s | yaw_control=%s | %s | cmd_flu=(%.3f, %.3f, %.3f, %.3f)'
+            % (
+                motion_state,
+                mode_segment,
+                'ON' if self.enable_yaw_control else 'OFF',
+                issue,
+                body_velocity[0],
+                body_velocity[1],
+                body_velocity[2],
+                yaw_rate,
+            )
+        )
+
+    def localization_is_fresh_markerless(self):
+        return not self.enable_position_hold
+
+    def _compose_wait_issue(self):
+        if self.last_localization_issue:
+            return self.last_localization_issue
+        if self.last_odom_issue:
+            return self.last_odom_issue
+        return self.last_observation_issue or 'Pose 超时'
 
     def make_setpoint(self, stamp, body_velocity, yaw_rate):
         vx, vy, vz, wz = body_flu_setpoint_components(
@@ -608,20 +1038,50 @@ class FrontMarkerControlNode(object):
         message.yaw_rate = wz
         return message
 
-    def publish_commands(self, stamp, body_velocity, yaw_rate, actual_allowed):
+    def make_position_setpoint(self, stamp, p_target, yaw_target):
+        """速度/加速度/yaw_rate 全部屏蔽的本地位置 setpoint。
+
+        ROS 侧数值保持 ENU，由 MAVROS 完成 ENU->NED 与 yaw 变换。
+        """
+        message = PositionTarget()
+        message.header.stamp = stamp
+        message.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+        message.type_mask = position_only_type_mask()
+        message.position.x = float(p_target[0])
+        message.position.y = float(p_target[1])
+        message.position.z = float(p_target[2])
+        message.yaw = float(yaw_target)
+        return message
+
+    def publish_commands(
+        self, stamp, body_velocity, yaw_rate, actual_allowed,
+        position_target=None,
+    ):
         if not self.enable_yaw_control:
             yaw_rate = 0.0
 
         command = TwistStamped()
         command.header.stamp = stamp
         command.header.frame_id = self.base_frame
-        command.twist.linear.x = float(body_velocity[0])
-        command.twist.linear.y = float(body_velocity[1])
-        command.twist.linear.z = float(body_velocity[2])
-        command.twist.angular.z = float(yaw_rate)
+        if position_target is not None:
+            # 位置模式：cmd_vel 发布零值，不代表实际控制指令。
+            command.twist.linear.x = 0.0
+            command.twist.linear.y = 0.0
+            command.twist.linear.z = 0.0
+            command.twist.angular.z = 0.0
+        else:
+            command.twist.linear.x = float(body_velocity[0])
+            command.twist.linear.y = float(body_velocity[1])
+            command.twist.linear.z = float(body_velocity[2])
+            command.twist.angular.z = float(yaw_rate)
         self._publish_if_running(self.command_pub, command)
 
-        preview = self.make_setpoint(stamp, body_velocity, yaw_rate)
+        if position_target is not None:
+            preview = self.make_position_setpoint(
+                stamp, position_target[0], position_target[1]
+            )
+        else:
+            preview = self.make_setpoint(stamp, body_velocity, yaw_rate)
         self._publish_if_running(self.preview_pub, preview)
         if self.setpoint_pub is not None:
             actual = preview if actual_allowed else self.make_setpoint(
@@ -630,9 +1090,15 @@ class FrontMarkerControlNode(object):
             self._publish_if_running(self.setpoint_pub, actual)
 
     def set_status(self, text, motion_state):
-        state_changed = motion_state != self.last_motion_state
+        state_changed = (
+            motion_state != self.last_motion_state
+            or self.control_mode != self.last_control_mode
+            or self.mode_reason != self.last_mode_reason
+        )
         self.last_status = text
         self.last_motion_state = motion_state
+        self.last_control_mode = self.control_mode
+        self.last_mode_reason = self.mode_reason
         return state_changed
 
     def status_loop(self, _event):

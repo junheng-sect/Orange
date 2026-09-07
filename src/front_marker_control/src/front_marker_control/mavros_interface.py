@@ -15,6 +15,18 @@ def velocity_only_type_mask():
     )
 
 
+def position_only_type_mask():
+    return (
+        PositionTarget.IGNORE_VX
+        | PositionTarget.IGNORE_VY
+        | PositionTarget.IGNORE_VZ
+        | PositionTarget.IGNORE_AFX
+        | PositionTarget.IGNORE_AFY
+        | PositionTarget.IGNORE_AFZ
+        | PositionTarget.IGNORE_YAW_RATE
+    )
+
+
 def body_flu_setpoint_components(vx, vy, vz, yaw_rate):
     """Keep ROS-side FLU signs; MAVROS performs the FLU-to-FRD conversion."""
     return float(vx), float(vy), float(vz), float(yaw_rate)

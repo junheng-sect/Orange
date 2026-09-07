@@ -24,6 +24,7 @@
     <param name="kp_z" value="0.5" />
     <param name="kp_yaw" value="0.0" />
     <param name="enable_setpoint_output" value="true" />
+    <param name="enable_position_hold" value="false" />
   </node>
 
   <test test-name="sample_driven_control"

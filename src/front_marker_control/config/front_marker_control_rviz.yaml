@@ -6,3 +6,6 @@
 enable_yaw_control: false
 # 控制输出保持关闭（与公共配置一致，显式写出防止误改公共值后带入本场景）
 enable_setpoint_output: false
+# 位置锁定需要真实定位/飞机：RViz 可视化场景显式关闭，避免 WAIT_LOCAL_POSITION
+# 卡住纯预览的对齐/跟踪显示
+enable_position_hold: false

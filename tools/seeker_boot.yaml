@@ -13,7 +13,7 @@ base_camera_pipeline: true
 
 # 四目深度管线：disparity/depth/point_cloud2（依赖 base_camera_pipeline）
 # 依赖说明：关掉后 VINS 的图像输入不受影响（去畸变仍在 base 内）      default true
-stereo_depth: true
+stereo_depth: false
 
 # VINS 里程计 ov_msckf（核 6-7）                                      default true
 vins: true
@@ -28,7 +28,7 @@ front_marker_tracking: true
 rc_bag_recorder: true
 
 # RC 通道触发的拍照                                                   default true
-rc_photo_capture: true
+rc_photo_capture: false
 
 # 高度扫频（与 front_marker_tracking 互斥：都开会抢 setpoint 话题）   default false
 vz_chirp_control: false
