@@ -79,9 +79,6 @@ roslaunch front_marker_control front_marker_tracking.launch \
 兜底）：
 
 ```text
-odom_topic                         /mavros/local_position/odom
-map_frame                          map
-odom_timeout_sec                   0.20
 position_lpf_tau_x                0.05
 position_lpf_tau_y                0.00
 position_lpf_tau_z                0.00

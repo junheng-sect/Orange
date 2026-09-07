@@ -17,6 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
 add_message_files(
   FILES
   VzChirpStatus.msg
+  VzRecorderHealth.msg
 )
 
 generate_messages(
@@ -47,7 +48,7 @@ add_dependencies(vz_chirp_control_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${cat
 target_link_libraries(vz_chirp_control_node vz_chirp_profile ${catkin_LIBRARIES})
 
 catkin_install_python(
-  PROGRAMS scripts/offboard_bag_recorder.py
+  PROGRAMS scripts/offboard_bag_recorder.py scripts/recorder_session.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -5,8 +5,12 @@
 #include <deque>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
+
+#include <boost/asio/io_service.hpp>
 
 #include <geometry_msgs/TwistStamped.h>
 #include <mavros_msgs/MessageInterval.h>
@@ -16,6 +20,7 @@
 #include <ros/ros.h>
 
 #include <vz_chirp_control/VzChirpStatus.h>
+#include <vz_chirp_control/VzRecorderHealth.h>
 #include "vz_chirp_control/chirp_profile.h"
 
 namespace vz_chirp_control {
@@ -112,8 +117,15 @@ class VzChirpControlNode {
         target_topic_, 200, &VzChirpControlNode::targetCallback, this,
         ros::TransportHints().tcpNoDelay());
 
+    if (recorder_required_) {
+      recorder_health_subscriber_ = node_.subscribe(
+          recorder_health_topic_, 5,
+          &VzChirpControlNode::recorderHealthCallback, this);
+    }
+
     message_interval_client_ =
         node_.serviceClient<mavros_msgs::MessageInterval>(message_interval_service_);
+    service_thread_ = std::thread([this]() { service_io_.run(); });
     control_timer_ = node_.createWallTimer(
         ros::WallDuration(1.0 / publish_rate_hz_),
         &VzChirpControlNode::controlTimer, this);
@@ -134,7 +146,13 @@ class VzChirpControlNode {
     }
   }
 
-  ~VzChirpControlNode() { restoreTelemetryRates(); }
+  ~VzChirpControlNode() {
+    restoreTelemetryRates();
+    service_work_.reset();
+    if (service_thread_.joinable()) {
+      service_thread_.join();
+    }
+  }
 
  private:
   void readParameters() {
@@ -182,6 +200,12 @@ class VzChirpControlNode {
     private_node_.param<std::string>(
         "message_interval_service", message_interval_service_,
         "/mavros/set_message_interval");
+    private_node_.param("recorder_required", recorder_required_, false);
+    private_node_.param("recorder_health_timeout_sec",
+                        recorder_health_timeout_sec_, 1.0);
+    private_node_.param<std::string>(
+        "recorder_health_topic", recorder_health_topic_,
+        "/vz_chirp/recorder_health");
   }
 
   void validateParameters() const {
@@ -270,11 +294,24 @@ class VzChirpControlNode {
     target_rate_.tick(now);
   }
 
+  void recorderHealthCallback(const VzRecorderHealth::ConstPtr& message) {
+    have_recorder_health_ = true;
+    recorder_healthy_ = message->healthy;
+    recorder_recording_ = message->recording;
+    latest_recorder_health_time_ = steadyNowSec();
+  }
+
   void beginOffboard(double now) {
     lockCurrentTarget();
+    telemetry_rates_requested_ = streamsRequested();
     if (!have_odom_ || now - latest_odom_time_ > maximum_topic_age_sec_ ||
         !telemetry_rates_requested_) {
       abort("entered OFFBOARD before odometry/telemetry preflight was ready");
+      return;
+    }
+    if (recorder_required_ && !recorderHealthy(now)) {
+      abort("entered OFFBOARD without a healthy bag recorder; a chirp must "
+            "never run unrecorded");
       return;
     }
     offboard_entry_time_ = now;
@@ -312,6 +349,10 @@ class VzChirpControlNode {
         abort("OFFBOARD gate lost while stabilizing");
       } else if (!safetyOkay(now)) {
         // safetyOkay sets the specific reason.
+      } else if (!recorderOkay(now)) {
+        // safetyOkay sets the specific reason on other failures; recorder
+        // loss is its own abort so a chirp never runs unrecorded.
+        abort("bag recorder unhealthy or not recording during STABILIZE");
       } else if (now - offboard_entry_time_ >= stabilize_duration_sec_) {
         if (!ratesOkay(now)) {
           abort("one or more 100 Hz data streams are below 90 Hz");
@@ -326,6 +367,8 @@ class VzChirpControlNode {
       sweep_elapsed_sec_ = std::max(0.0, now - sweep_start_time_);
       if (!offboard_active_) {
         abort("OFFBOARD gate lost during sweep");
+      } else if (!recorderOkay(now)) {
+        abort("bag recorder unhealthy or not recording during sweep");
       } else if (!safetyOkay(now)) {
         // safetyOkay sets the specific reason.
       } else if (!ratesOkay(now)) {
@@ -353,6 +396,8 @@ class VzChirpControlNode {
       sweep_elapsed_sec_ = sweep_duration_sec_;
       if (!offboard_active_) {
         abort("OFFBOARD gate lost during post-hold");
+      } else if (!recorderOkay(now)) {
+        abort("bag recorder unhealthy or not recording during post-hold");
       } else if (!safetyOkay(now)) {
         // safetyOkay sets the specific reason.
       } else if (now - post_hold_start_time_ >= post_hold_duration_sec_) {
@@ -372,16 +417,52 @@ class VzChirpControlNode {
         stage_ == VzChirpStatus::COMPLETE) {
       return;
     }
+    telemetry_rates_requested_ = streamsRequested();
     if (have_odom_) {
       lockCurrentTarget();
     }
-    const bool ready = have_state_ && state_.connected && have_odom_ &&
-                       now - latest_state_time_ <= state_timeout_sec_ &&
-                       now - latest_odom_time_ <= maximum_topic_age_sec_ &&
-                       telemetry_rates_requested_;
-    setStage(ready ? VzChirpStatus::PRESTREAM : VzChirpStatus::WAIT_FCU,
-             ready ? "ready; streaming zero vz and waiting for OFFBOARD"
-                   : "waiting for FCU, odometry and telemetry setup");
+    const bool base_ready = have_state_ && state_.connected && have_odom_ &&
+                            now - latest_state_time_ <= state_timeout_sec_ &&
+                            now - latest_odom_time_ <= maximum_topic_age_sec_ &&
+                            telemetry_rates_requested_;
+    const bool recorder_ready = !recorder_required_ || recorderHealthy(now);
+    const bool ready = base_ready && recorder_ready;
+    const char* text;
+    if (base_ready && !recorder_ready) {
+      text = "ready; waiting for the bag recorder before OFFBOARD";
+    } else if (ready) {
+      text = "ready; streaming zero vz and waiting for OFFBOARD";
+    } else {
+      text = "waiting for FCU, odometry and telemetry setup";
+    }
+    setStage(ready ? VzChirpStatus::PRESTREAM : VzChirpStatus::WAIT_FCU, text);
+  }
+
+  // Recorder interlock: healthy alone only proves the node is alive; while
+  // a session is running (STABILIZE onward) the bag must actually be open.
+  bool recorderOkay(double now) const {
+    if (!recorder_required_) {
+      return true;
+    }
+    if (!have_recorder_health_ ||
+        now - latest_recorder_health_time_ > recorder_health_timeout_sec_) {
+      return false;
+    }
+    if (!recorder_healthy_) {
+      return false;
+    }
+    const bool session_running = stage_ == VzChirpStatus::STABILIZE ||
+                                 stage_ == VzChirpStatus::SWEEP ||
+                                 stage_ == VzChirpStatus::POST_HOLD;
+    return !session_running || recorder_recording_;
+  }
+
+  bool recorderHealthy(double now) const {
+    if (!recorder_required_) {
+      return true;
+    }
+    return have_recorder_health_ && recorder_healthy_ &&
+           now - latest_recorder_health_time_ <= recorder_health_timeout_sec_;
   }
 
   bool ratesOkay(double now) {
@@ -454,20 +535,85 @@ class VzChirpControlNode {
     setpoint_rate_.tick(now);
   }
 
+  // Per-stream rate state: message 32 (LOCAL_POSITION_NED) and 85
+  // (POSITION_TARGET_LOCAL_NED) succeed or fail independently. Tracking them
+  // separately lets a retry or restore recover only the stream(s) that are
+  // still misconfigured, and a restore on exit recovers a stream whose pair
+  // failed. The calls run on a dedicated service thread so a slow MAVROS
+  // reply never blocks the 100 Hz setpoint timer (the default callback queue
+  // is single-threaded).
+  struct StreamState {
+    bool requested{false};   // currently set to the 100 Hz test rate
+    bool restored{true};     // back at the normal (non-test) rate
+  };
+
+  bool streamsRequested() {
+    std::lock_guard<std::mutex> lock(streams_mutex_);
+    return local_stream_.requested && target_stream_.requested;
+  }
+
+  void requestStream(std::uint32_t message_id, double rate_hz) {
+    if (setMessageRate(message_id, rate_hz)) {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      streamFor(message_id).requested = true;
+      streamFor(message_id).restored = false;
+      ROS_INFO("requested MAVLink message %u at %.1f Hz", message_id, rate_hz);
+    }
+  }
+
+  void restoreStream(std::uint32_t message_id, double rate_hz) {
+    {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      if (!streamFor(message_id).requested || streamFor(message_id).restored) {
+        return;
+      }
+    }
+    if (setMessageRate(message_id, rate_hz)) {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      streamFor(message_id).restored = true;
+      streamFor(message_id).requested = false;
+      ROS_INFO("restored MAVLink message %u to %.1f Hz", message_id, rate_hz);
+    }
+  }
+
+  void requestTelemetryRates() {
+    service_io_.post([this]() {
+      requestStream(kLocalPositionNedMessageId, requested_telemetry_rate_hz_);
+      requestStream(kPositionTargetLocalNedMessageId,
+                    requested_telemetry_rate_hz_);
+    });
+  }
+
   void telemetryTimer(const ros::WallTimerEvent&) {
-    if (!have_state_ || !state_.connected || telemetry_rates_requested_ ||
+    if (!have_state_ || !state_.connected ||
         (offboard_session_started_ && !offboard_active_)) {
       return;
     }
-    const bool local_ok = setMessageRate(kLocalPositionNedMessageId,
-                                         requested_telemetry_rate_hz_);
-    const bool target_ok = setMessageRate(kPositionTargetLocalNedMessageId,
-                                          requested_telemetry_rate_hz_);
-    telemetry_rates_requested_ = local_ok && target_ok;
+    {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      telemetry_rates_requested_ =
+          local_stream_.requested && target_stream_.requested;
+    }
     if (telemetry_rates_requested_) {
-      telemetry_rates_restored_ = false;
-      ROS_INFO("requested MAVLink LOCAL_POSITION_NED and POSITION_TARGET_LOCAL_NED at %.1f Hz",
-               requested_telemetry_rate_hz_);
+      return;
+    }
+    // Retry only the stream(s) whose 100 Hz request did not stick.
+    bool local_pending, target_pending;
+    {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      local_pending = !local_stream_.requested;
+      target_pending = !target_stream_.requested;
+    }
+    if (local_pending) {
+      service_io_.post([this]() {
+        requestStream(kLocalPositionNedMessageId, requested_telemetry_rate_hz_);
+      });
+    }
+    if (target_pending) {
+      service_io_.post([this]() {
+        requestStream(kPositionTargetLocalNedMessageId,
+                      requested_telemetry_rate_hz_);
+      });
     }
   }
 
@@ -484,20 +630,15 @@ class VzChirpControlNode {
   }
 
   void restoreTelemetryRates() {
-    if (!telemetry_rates_requested_ || telemetry_rates_restored_ ||
-        !have_state_ || !state_.connected) {
+    if (!have_state_ || !state_.connected) {
       return;
     }
-    const bool local_ok = setMessageRate(kLocalPositionNedMessageId,
-                                         restore_local_position_rate_hz_);
-    const bool target_ok = setMessageRate(kPositionTargetLocalNedMessageId,
-                                          restore_target_local_rate_hz_);
-    if (local_ok && target_ok) {
-      telemetry_rates_restored_ = true;
-      telemetry_rates_requested_ = false;
-      ROS_INFO("restored MAVLink message rates to local=%.1f Hz target=%.1f Hz",
-               restore_local_position_rate_hz_, restore_target_local_rate_hz_);
-    }
+    service_io_.post([this]() {
+      restoreStream(kLocalPositionNedMessageId,
+                    restore_local_position_rate_hz_);
+      restoreStream(kPositionTargetLocalNedMessageId,
+                    restore_target_local_rate_hz_);
+    });
   }
 
   void statusTimer(const ros::WallTimerEvent&) {
@@ -574,6 +715,7 @@ class VzChirpControlNode {
   ros::Subscriber odom_subscriber_;
   ros::Subscriber velocity_subscriber_;
   ros::Subscriber target_subscriber_;
+  ros::Subscriber recorder_health_subscriber_;
   ros::ServiceClient message_interval_client_;
   ros::WallTimer control_timer_;
   ros::WallTimer status_timer_;
@@ -594,7 +736,26 @@ class VzChirpControlNode {
   bool offboard_session_started_{false};
   bool hold_target_locked_{false};
   bool telemetry_rates_requested_{false};
-  bool telemetry_rates_restored_{false};
+
+  StreamState local_stream_;
+  StreamState target_stream_;
+  std::mutex streams_mutex_;
+  boost::asio::io_service service_io_;
+  std::unique_ptr<boost::asio::io_service::work> service_work_{
+      new boost::asio::io_service::work(service_io_)};
+  std::thread service_thread_;
+
+  StreamState& streamFor(std::uint32_t message_id) {
+    // Caller holds streams_mutex_.
+    return message_id == kLocalPositionNedMessageId ? local_stream_
+                                                    : target_stream_;
+  }
+  bool recorder_required_{false};
+  bool have_recorder_health_{false};
+  bool recorder_healthy_{false};
+  bool recorder_recording_{false};
+  double latest_recorder_health_time_{-1.0};
+  double recorder_health_timeout_sec_{1.0};
 
   std::uint8_t stage_{VzChirpStatus::WAIT_FCU};
   std::string reason_{"waiting for FCU"};
@@ -644,6 +805,7 @@ class VzChirpControlNode {
   std::string target_topic_;
   std::string setpoint_topic_;
   std::string status_topic_;
+  std::string recorder_health_topic_;
   std::string message_interval_service_;
 };
 

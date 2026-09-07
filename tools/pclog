@@ -85,7 +85,17 @@ case "$TYPE" in
         ;;
 esac
 shift
-BODY="$( [ "$#" -gt 0 ] && printf '%s\n' "$*"; cat )"
+# 两条互斥的输入路径：有参数时直接用参数（不再等待 stdin）；无参数时才
+# 从 stdin 读（管道/heredoc），且 stdin 为 TTY 时明确报错而不是挂住等 EOF。
+if [ "$#" -gt 0 ]; then
+    BODY="$(printf '%s\n' "$*")"
+else
+    if [ -t 0 ]; then
+        echo "pclog: 未提供内容 (无参数且 stdin 是终端; 用管道输入或直接传参)" >&2
+        exit 1
+    fi
+    BODY="$(cat)"
+fi
 
 if [ -z "$BODY" ]; then
     echo "pclog: 内容为空 (参数或 stdin 至少提供一个)" >&2

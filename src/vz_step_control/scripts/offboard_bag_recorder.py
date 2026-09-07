@@ -222,18 +222,30 @@ class OffboardBagRecorder:
         if self._bag is None:
             return
         path = self._bag_path
+        close_failed = False
         try:
             self._bag.close()
         except Exception as exception:
+            close_failed = True
             rospy.logerr('failed to close rosbag %s cleanly: %s', path,
                          exception)
         finally:
             self._bag = None
             self._bag_path = ''
-            self._session.bag_closed()
         if self._tail_timer is not None:
             self._tail_timer.cancel()
             self._tail_timer = None
+        if close_failed:
+            # A half-closed bag is not a clean recording: mark the recorder
+            # unhealthy (session.fail) and report CLOSE_FAILED instead of
+            # CLOSED, so the controller never treats this recorder as able
+            # to record the next session without a respawn.
+            self._session.fail()
+            self._publish_health()
+            self._path_publisher.publish(
+                String(data='CLOSE_FAILED ' + path))
+            return
+        self._session.bag_closed()
         self._path_publisher.publish(String(data='CLOSED ' + path))
         rospy.logwarn('OFFBOARD ended: closed %s', path)
         self._publish_health()

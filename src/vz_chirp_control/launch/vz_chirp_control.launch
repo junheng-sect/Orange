@@ -1,17 +1,24 @@
 <launch>
   <!-- 控制与记录参数统一在 YAML 中维护（控制器与记录器读取同一包配置）。
-       record 仍是结构开关：决定是否启动记录器，并由它派生 recorder_required，
-       两处不会失配。 -->
+       record 仍是结构开关：决定是否启动记录器，同时把 recorder_required
+       传给控制器，两处不会失配。 -->
   <arg name="config_file" default="$(find vz_chirp_control)/config/vz_chirp.yaml" />
   <arg name="record" default="true" />
 
-  <!-- Start the recorder first so its subscribers exist before OFFBOARD entry. -->
+  <!-- Start the recorder first so its subscribers exist before OFFBOARD entry.
+       The recorder must NOT be required: a bag/recorder failure must never
+       bring down the setpoint publisher mid-OFFBOARD. Respawn restores the
+       recording capability for the next session. The recorder reports health
+       on recorder_health_topic; vz_chirp_control_node aborts the sweep (and
+       holds position) if the recorder is unhealthy or not recording while a
+       session runs, so a chirp is never executed unrecorded. -->
   <group if="$(arg record)">
     <node pkg="vz_chirp_control"
           type="offboard_bag_recorder.py"
           name="vz_chirp_bag_recorder"
           output="screen"
-          required="true">
+          respawn="true"
+          respawn_delay="5.0">
       <rosparam command="load" file="$(arg config_file)" />
     </node>
   </group>

@@ -51,7 +51,10 @@ class FakeMavros:
         self.complete_seen = False
         self.x, self.y, self.z, self.yaw = 0.5, -0.25, 1.2, 0.3
         self.vz = 0.0
-        self.entered = time.time()
+        # `entered` is armed by start_session() once the controller node is
+        # actually subscribing, so the POSCTL prime always precedes the first
+        # state message the node observes.
+        self.entered = None
 
         self.state_pub = rospy.Publisher(STATE_TOPIC, State, queue_size=10)
         self.odom_pub = rospy.Publisher(
@@ -94,7 +97,22 @@ class FakeMavros:
         if message.state == VzStepStatus.COMPLETE:
             self.complete_seen = True
 
+    def node_subscribed(self):
+        # The controller node subscribes /mavros/state with a fixed name.
+        publishers = rospy.get_published_topics(STATE_TOPIC)
+        sub_count = None
+        try:
+            import rosnode
+            # pub/sub counts are not directly exposed; use the connection
+            # count on our publisher instead.
+            sub_count = self.state_pub.get_num_connections()
+        except Exception:
+            sub_count = self.state_pub.get_num_connections()
+        return sub_count > 0
+
     def _offboard(self):
+        if self.entered is None:
+            return False               # before the node is up: stay disengaged
         elapsed = time.time() - self.entered
         if elapsed < 1.0:
             return False               # POSCTL (disengaged) prime
@@ -167,22 +185,22 @@ def _wait_until(predicate, timeout, label):
 
 
 def main():
-    existing_master = (subprocess.run(['rosnode', 'list'],
-                                      capture_output=True).returncode == 0)
-    if existing_master:
-        roscore_proc = None
-    else:
-        roscore_proc = subprocess.Popen(['roscore'],
-                                        stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL,
-                                        preexec_fn=os.setsid)
-        time.sleep(2.0)
+    # Always start a private master: the real board runs the seeker.service
+    # bringup (front_marker_control) on the default master, and its
+    # /mavros/setpoint_raw/local publisher would trip this node's duplicate
+    # setpoint publisher monitor and abort the session under test.
+    import random
+    port = random.randint(12000, 18000)
+    roscore_proc = subprocess.Popen(['roscore', '-p', str(port)],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    preexec_fn=os.setsid)
+    os.environ['ROS_MASTER_URI'] = 'http://localhost:%d' % port
     _ensure_roscore(roscore_proc)
 
     rospy.init_node('vz_wire_integration', anonymous=True)
     driver = FakeMavros()
-    rospy.Timer(rospy.Duration(0.1), driver.publish_state)
-    rospy.Timer(rospy.Duration(0.01), driver.publish_data)
+    data_timer = rospy.Timer(rospy.Duration(0.01), driver.publish_data)
 
     node_log = open('/tmp/vz_wire_node.log', 'wb')
     node_proc = subprocess.Popen([
@@ -202,6 +220,14 @@ def main():
         '_telemetry_tail_sec:=1.0',
     ], stdout=node_log, stderr=subprocess.STDOUT,
        preexec_fn=os.setsid)
+
+    # Drive state only after the controller node is up: until it subscribes,
+    # every state message stays POSCTL, so the node's first observed state is
+    # a healthy disengaged one.
+    _wait_until(lambda: driver.node_subscribed(), 10.0,
+                'controller node state subscription')
+    driver.entered = time.time()
+    state_timer = rospy.Timer(rospy.Duration(0.1), driver.publish_state)
 
     try:
         # Wait for the fast test to reach COMPLETE, then a little more so the
@@ -263,8 +289,7 @@ def main():
         time.sleep(0.5)
         node_log.flush()
         node_log.close()
-        if roscore_proc is not None:
-            os.killpg(os.getpgid(roscore_proc.pid), signal.SIGTERM)
+        os.killpg(os.getpgid(roscore_proc.pid), signal.SIGTERM)
 
     if FAILURES:
         try:

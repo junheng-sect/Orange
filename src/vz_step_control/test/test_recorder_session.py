@@ -115,6 +115,25 @@ class RecorderPolicyTests(unittest.TestCase):
         self.assertIsNone(session.on_state(True, True, True))
         self.assertFalse(session.recording())
 
+    def test_close_failure_is_fatal_not_closed(self):
+        # bag.close() raising must leave the recorder unhealthy: the half
+        # written bag is not a clean recording, and the next session must not
+        # open without a respawn (which the controller enforces via the
+        # health interlock).
+        session = RecorderSession()
+        session.on_state(True, False, False)
+        self.assertEqual(session.on_state(True, True, True), 'open')
+        session.bag_opened()
+        self.assertTrue(session.recording())
+        # Close path fails: the node calls fail() instead of bag_closed().
+        session.fail()
+        self.assertFalse(session.recording())
+        self.assertFalse(session.healthy())
+        session.on_state(True, False, False)
+        session.on_state(True, False, False)
+        self.assertIsNone(session.on_state(True, True, True))
+        self.assertFalse(session.recording())
+
     def test_terminal_status_keeps_session_healthy_after_tail_close(self):
         session = RecorderSession()
         session.on_state(True, False, False)

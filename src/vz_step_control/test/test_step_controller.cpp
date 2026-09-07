@@ -63,6 +63,7 @@ struct Harness {
   bool feed_state{true};
   bool feed_recorder{false};
   bool recorder_healthy{true};
+  bool recorder_recording{true};
   double creep_z_per_tick{0.0};  // non-zero disables plant z tracking
   double drift_x_per_tick{0.0};  // applied after the plant xy snap
   std::vector<StepCommand> log;
@@ -88,7 +89,7 @@ struct Harness {
       controller->onOdom(odom_x, odom_y, odom_z, odom_yaw, now);
     }
     if (feed_recorder) {
-      controller->onRecorderHealth(recorder_healthy, now);
+      controller->onRecorderHealth(recorder_healthy, recorder_recording, now);
     }
     if (feed_telemetry) {
       controller->onVelocityVz(odom_vz, now);
@@ -605,14 +606,37 @@ TEST(StepController, PrestreamWaitsForRequiredRecorderHealth) {
   EXPECT_EQ(controller.phase(), kWaitFcu);
   EXPECT_NE(controller.reason().find("bag recorder"), std::string::npos);
 
-  controller.onRecorderHealth(true, now + 0.02);
+  controller.onRecorderHealth(true, false, now + 0.02);
   controller.tick(now + 0.03);
   EXPECT_EQ(controller.phase(), kPrestream);
 
   // Recorder becomes unhealthy while idling: back to not-ready.
-  controller.onRecorderHealth(false, now + 0.04);
+  controller.onRecorderHealth(false, false, now + 0.04);
   controller.tick(now + 0.05);
   EXPECT_EQ(controller.phase(), kWaitFcu);
+}
+
+// A recorder that is healthy but has no bag open (e.g. respawned recorder
+// waiting for a clean OFFBOARD re-entry) must not count as okay while a test
+// is running: the STABILIZE->UP_STEP handoff is refused with an abort.
+TEST(StepController, HealthyButNotRecordingAbortsRunningTest) {
+  StepParams params;
+  params.recorder_required = true;
+  Harness harness(params);
+  harness.feed_recorder = true;
+  harness.recorder_healthy = true;
+  harness.recorder_recording = false;
+  harness.enterOffboard();
+  EXPECT_EQ(harness.controller->phase(), kStabilize);
+  harness.spin(4.0);  // past stabilize_duration_sec: the handoff must refuse
+  EXPECT_EQ(harness.controller->phase(), kAbort);
+  EXPECT_NE(harness.controller->reason().find("recorder"),
+            std::string::npos);
+  for (const StepCommand& command : harness.log) {
+    ASSERT_TRUE(command.publish);
+    EXPECT_FALSE(command.velocity_z_mode);  // no step ever ran unrecorded
+    EXPECT_DOUBLE_EQ(command.vz, 0.0);
+  }
 }
 
 TEST(StepController, RecorderRequiredMissingRefusesOffboardEntry) {

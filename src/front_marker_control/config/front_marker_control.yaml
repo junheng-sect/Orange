@@ -6,9 +6,8 @@
 # ---- 目标与坐标系 ----
 # Marker 锁定后机体坐标系下的悬停目标位置（m，前 x / 右 y / 下 z）
 target_xyz_body: [0.8, 0.0, 0.0]
-# TF 坐标系：机体 / 里程计地图
+# TF 坐标系：机体
 base_frame: base_link
-map_frame: map
 
 # ---- 位置环增益（速度 = kp * 位置误差，1/s） ----
 kp_x: 1.50
@@ -61,8 +60,6 @@ pose_timeout_sec: 0.1
 max_pose_latency_sec: 0.5
 # 位姿滤波最大积分步长
 filter_dt_max_sec: 0.5
-# 里程计超时
-odom_timeout_sec: 0.20
 # MAVROS state 超时
 state_timeout_sec: 1.0
 # 允许的未来时间戳容差
@@ -72,13 +69,10 @@ tf_lookup_timeout_sec: 0.05
 
 # ---- 输入/输出话题 ----
 pose_topic: /front_marker/pose
-odom_topic: /mavros/local_position/odom
 state_topic: /mavros/state
 setpoint_raw_topic: /mavros/setpoint_raw/local
 position_error_topic: /front_marker_control/position_error
 yaw_error_topic: /front_marker_control/yaw_error
-fixed_yaw_target_topic: /front_marker_control/fixed_yaw_target
-vio_yaw_error_topic: /front_marker_control/vio_yaw_error
 command_topic: /front_marker_control/cmd_vel
 setpoint_preview_topic: /front_marker_control/setpoint_preview
 status_topic: /front_marker_control/status

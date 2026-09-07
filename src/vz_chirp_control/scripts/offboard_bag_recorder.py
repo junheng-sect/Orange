@@ -1,7 +1,24 @@
 #!/usr/bin/env python3
-"""Write one standard rosbag for each armed OFFBOARD session."""
+"""Write one standard rosbag for each armed OFFBOARD session.
+
+Recording opens on the OFFBOARD rising edge; leaving OFFBOARD or disarming
+closes the bag immediately. Bags are named with a timestamp prefix and made
+unique against existing files.
+
+The recorder is respawned by roslaunch (never required) and reports its health
+on /vz_chirp/recorder_health at ~2 Hz. The chirp controller treats a running
+sweep as unsafe (ABORT + position hold) whenever the recorder is unhealthy or
+not recording, so a chirp is never left unrecorded. The recorder itself only
+opens a bag on an OFFBOARD edge it observed coming from a healthy
+non-OFFBOARD state, so a respawn that lands mid-OFFBOARD waits for a real exit
+and re-entry instead of manufacturing a half-length bag.
+
+The ROS-free decision/health policy lives in RecorderSession so it can be
+driven deterministically in unit tests.
+"""
 
 import os
+import sys
 import threading
 from datetime import datetime
 
@@ -11,7 +28,12 @@ from geometry_msgs.msg import TwistStamped
 from mavros_msgs.msg import PositionTarget, State
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
-from vz_chirp_control.msg import VzChirpStatus
+from vz_chirp_control.msg import VzChirpStatus, VzRecorderHealth
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from recorder_session import RecorderSession  # noqa: E402
+
+HEALTH_PERIOD_SEC = 0.5
 
 
 class OffboardBagRecorder:
@@ -19,7 +41,7 @@ class OffboardBagRecorder:
         self._lock = threading.RLock()
         self._bag = None
         self._bag_path = ''
-        self._offboard_active = False
+        self._session = RecorderSession()
 
         self._output_directory = os.path.abspath(
             rospy.get_param('~bag_directory',
@@ -54,8 +76,13 @@ class OffboardBagRecorder:
         ]
         bag_path_topic = rospy.get_param('~bag_path_topic',
                                          '/vz_chirp/bag_path')
+        health_topic = rospy.get_param('~recorder_health_topic',
+                                       '/vz_chirp/recorder_health')
         self._path_publisher = rospy.Publisher(
             bag_path_topic, String, queue_size=1, latch=True
+        )
+        self._health_publisher = rospy.Publisher(
+            health_topic, VzRecorderHealth, queue_size=1, latch=True
         )
 
         # Data subscribers are connected before the State subscriber. Once the
@@ -78,9 +105,13 @@ class OffboardBagRecorder:
             queue_size=50,
             tcp_nodelay=True,
         )
+        self._health_timer = rospy.Timer(
+            rospy.Duration(HEALTH_PERIOD_SEC), self._health_tick
+        )
         rospy.on_shutdown(self.close)
-        rospy.loginfo('OFFBOARD bag recorder ready; output=%s',
-                      self._output_directory)
+        rospy.loginfo('OFFBOARD bag recorder ready; output=%s health=%s',
+                      self._output_directory, health_topic)
+        self._publish_health()
 
     @staticmethod
     def _is_offboard(message):
@@ -92,22 +123,25 @@ class OffboardBagRecorder:
 
     def _state_callback(self, message):
         now = rospy.Time.now()
-        active = self._is_offboard(message)
         with self._lock:
-            if active and not self._offboard_active:
+            action = self._session.on_state(
+                message.connected, message.mode == 'OFFBOARD',
+                message.armed)
+            if action == 'open':
                 self._open_locked()
-                self._write_locked(self._state_topic, message, now)
-            elif not active and self._offboard_active:
+                if self._bag is not None:
+                    # Include the exact state message that started the session.
+                    self._write_locked(self._state_topic, message, now)
+            elif action == 'close':
                 # Include the exact state message that ended the recording.
                 self._write_locked(self._state_topic, message, now)
                 self._close_locked()
-            elif active:
+            elif self._session.offboard_active:
                 self._write_locked(self._state_topic, message, now)
-            self._offboard_active = active
 
     def _data_callback(self, message, topic):
         with self._lock:
-            if self._offboard_active and self._bag is not None:
+            if self._session.offboard_active and self._bag is not None:
                 self._write_locked(topic, message, rospy.Time.now())
 
     def _unique_path(self):
@@ -128,14 +162,20 @@ class OffboardBagRecorder:
             os.makedirs(self._output_directory, exist_ok=True)
             self._bag_path = self._unique_path()
             self._bag = rosbag.Bag(self._bag_path, mode='w')
+            self._session.bag_opened()
         except Exception as exception:
             self._bag = None
             self._bag_path = ''
+            self._session.fail()
+            self._publish_health()
             rospy.logfatal('cannot open OFFBOARD rosbag: %s', exception)
+            # Exit so roslaunch respawns a clean recorder; the controller
+            # independently holds position via the health interlock.
             rospy.signal_shutdown('cannot open OFFBOARD rosbag')
             return
         self._path_publisher.publish(String(data='OPEN ' + self._bag_path))
         rospy.logwarn('OFFBOARD entered: recording %s', self._bag_path)
+        self._publish_health()
 
     def _write_locked(self, topic, message, stamp):
         if self._bag is None:
@@ -144,27 +184,61 @@ class OffboardBagRecorder:
             self._bag.write(topic, message, t=stamp)
         except Exception as exception:
             rospy.logerr('rosbag write failed for %s: %s', topic, exception)
-            self._close_locked()
+            path = self._bag_path
+            try:
+                self._bag.close()
+            except Exception as close_exception:
+                rospy.logerr('also failed to close %s cleanly: %s', path,
+                             close_exception)
+            self._bag = None
+            self._bag_path = ''
+            self._session.fail()
+            self._publish_health()
             rospy.signal_shutdown('OFFBOARD rosbag write failed')
 
     def _close_locked(self):
         if self._bag is None:
             return
         path = self._bag_path
+        close_failed = False
         try:
             self._bag.close()
         except Exception as exception:
-            rospy.logerr('failed to close rosbag %s cleanly: %s', path, exception)
+            close_failed = True
+            rospy.logerr('failed to close rosbag %s cleanly: %s', path,
+                         exception)
         finally:
             self._bag = None
             self._bag_path = ''
+        if close_failed:
+            # A half-closed bag is not a clean recording: mark the recorder
+            # unhealthy (not CLOSED) so the controller never treats this
+            # recorder as able to record the next session without a respawn.
+            self._session.fail()
+            self._publish_health()
+            self._path_publisher.publish(
+                String(data='CLOSE_FAILED ' + path))
+            return
+        self._session.bag_closed()
         self._path_publisher.publish(String(data='CLOSED ' + path))
         rospy.logwarn('OFFBOARD ended: closed %s', path)
+        self._publish_health()
+
+    def _health_tick(self, _event):
+        with self._lock:
+            self._publish_health()
+
+    def _publish_health(self):
+        message = VzRecorderHealth()
+        message.header.stamp = rospy.Time.now()
+        message.healthy = self._session.healthy()
+        message.recording = self._session.recording()
+        message.bag_path = self._bag_path or ''
+        self._health_publisher.publish(message)
 
     def close(self):
         with self._lock:
             self._close_locked()
-            self._offboard_active = False
 
 
 def main():

@@ -82,8 +82,10 @@ void StepController::setState(bool connected, bool armed, bool offboard_mode,
   }
 }
 
-void StepController::onRecorderHealth(bool healthy, double now) {
+void StepController::onRecorderHealth(bool healthy, bool recording,
+                                     double now) {
   recorder_healthy_ = healthy;
+  recorder_recording_ = recording;
   have_recorder_health_ = true;
   latest_recorder_health_time_ = now;
 }
@@ -305,7 +307,14 @@ bool StepController::recorderOkay(double now) const {
       params_.recorder_health_timeout_sec) {
     return false;
   }
-  return recorder_healthy_;
+  if (!recorder_healthy_) {
+    return false;
+  }
+  // Healthy alone only proves the recorder node is alive; while a test is
+  // running (STABILIZE through HOLD_DOWN) the bag must actually be open, so
+  // "alive but not recording" is treated as not okay.
+  const bool test_running = phase_ >= kStabilize && phase_ <= kHoldDown;
+  return !test_running || recorder_recording_;
 }
 
 bool StepController::safetyOkay(double now) {

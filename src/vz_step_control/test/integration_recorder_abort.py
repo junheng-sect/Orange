@@ -159,15 +159,19 @@ class FakeMavros:
 
 def main():
     bag_dir = sys.argv[1] if len(sys.argv) > 1 else '/tmp/vz_live_bags'
-    existing_master = (subprocess.run(['rosnode', 'list'],
-                                      capture_output=True).returncode == 0)
-    roscore_proc = None
-    if not existing_master:
-        roscore_proc = subprocess.Popen(['roscore'],
-                                        stdout=subprocess.DEVNULL,
-                                        stderr=subprocess.DEVNULL,
-                                        preexec_fn=os.setsid)
-        time.sleep(2.0)
+    # Always start a private master: the real board runs the seeker.service
+    # bringup (front_marker_control) on the default master, and its
+    # /mavros/setpoint_raw/local publisher would trip this node's duplicate
+    # setpoint publisher monitor and abort the session under test.
+    import random
+    port = random.randint(12000, 18000)
+    env = dict(os.environ, ROS_MASTER_URI='http://localhost:%d' % port)
+    roscore_proc = subprocess.Popen(['roscore', '-p', str(port)],
+                                    stdout=subprocess.DEVNULL,
+                                    stderr=subprocess.DEVNULL,
+                                    preexec_fn=os.setsid)
+    os.environ['ROS_MASTER_URI'] = 'http://localhost:%d' % port
+    time.sleep(2.0)
 
     rospy.init_node('vz_recorder_abort_integration', anonymous=True)
     driver = FakeMavros()
@@ -254,10 +258,15 @@ def main():
         check('kept publishing position holds after abort', ok)
 
         # Telemetry: entry boosted to 100 Hz, restored to 30/10 after ABORT
-        # (1 s tail), and NOT re-boosted while the hold continues.
+        # (1 s tail), and NOT re-boosted while the hold continues.  The two
+        # streams (32 and 85) are restored independently, so wait for BOTH
+        # low-rate restores before asserting, not just any one of them.
         ok = _wait_until(
-            lambda: any(r < 90.0 for (_m, r, _t) in driver.interval_requests),
-            4.0, 'telemetry restore after ABORT')
+            lambda: (any(m == 32 and r < 90.0
+                         for (m, r, _t) in driver.interval_requests)
+                     and any(m == 85 and r < 90.0
+                             for (m, r, _t) in driver.interval_requests)),
+            4.0, 'telemetry restore after ABORT (both 32 and 85)')
         check('telemetry restored to normal rates after ABORT', ok)
         boost = [(m, r) for (m, r, _) in driver.interval_requests if r >= 90.0]
         restore = [(m, r) for (m, r, _) in driver.interval_requests if r < 90.0]
@@ -282,8 +291,7 @@ def main():
         if launch.poll() is None:
             os.killpg(os.getpgid(launch.pid), signal.SIGTERM)
         time.sleep(1.0)
-        if roscore_proc is not None:
-            os.killpg(os.getpgid(roscore_proc.pid), signal.SIGTERM)
+        os.killpg(os.getpgid(roscore_proc.pid), signal.SIGTERM)
         launch_log.flush()
         launch_log.close()
 

@@ -2,9 +2,13 @@
 #include <chrono>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+
+#include <boost/asio/io_service.hpp>
 
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TwistStamped.h>
@@ -81,9 +85,11 @@ class VzStepControlNode {
       // 100 Hz MAVLink streams back to their normal rates after the 1 s
       // recorder tail drains, instead of leaving them boosted for the whole
       // hold. The next OFFBOARD entry re-requests 100 Hz.
-      if ((phase == kComplete || phase == kAbort) &&
-          telemetry_rates_requested_) {
-        restore_after_end_at_ = steadyNowSec() + telemetry_tail_sec_;
+      if (phase == kComplete || phase == kAbort) {
+        std::lock_guard<std::mutex> lock(streams_mutex_);
+        if (local_stream_.requested || target_stream_.requested) {
+          restore_after_end_at_ = steadyNowSec() + telemetry_tail_sec_;
+        }
       }
     });
 
@@ -125,6 +131,7 @@ class VzStepControlNode {
 
     message_interval_client_ =
         node_.serviceClient<mavros_msgs::MessageInterval>(message_interval_service_);
+    service_thread_ = std::thread([this]() { service_io_.run(); });
     control_timer_ = node_.createWallTimer(
         ros::WallDuration(1.0 / params_.setpoint_rate_hz),
         &VzStepControlNode::controlTimer, this);
@@ -142,7 +149,13 @@ class VzStepControlNode {
              params_.maximum_vertical_offset_m);
   }
 
-  ~VzStepControlNode() { restoreTelemetryRates(); }
+  ~VzStepControlNode() {
+    restoreTelemetryRates();
+    service_work_.reset();
+    if (service_thread_.joinable()) {
+      service_thread_.join();
+    }
+  }
 
  private:
   StepParams readParameters() {
@@ -211,9 +224,15 @@ class VzStepControlNode {
     if (active && !controller_->offboardActive()) {
       // OFFBOARD entry: raise the MAVLink streams to 100 Hz before the
       // controller's preflight runs. Any restore scheduled by a previous
-      // finished session is cancelled: this is a new session.
+      // finished session is cancelled: this is a new session.  These calls run
+      // on the state callback thread, not the 100 Hz control timer, and each
+      // stream is tracked independently so a partial failure is retried.
       restore_after_end_at_ = -1.0;
-      requestTelemetryRates();
+      requestStream(kLocalPositionNedMessageId,
+                    params_.requested_telemetry_rate_hz);
+      requestStream(kPositionTargetLocalNedMessageId,
+                    params_.requested_telemetry_rate_hz);
+      controller_->setTelemetryRequested(streamsRequested());
     } else if (!active && controller_->offboardActive()) {
       // Session end: hand the FCU streams back to their normal rates.
       restore_after_end_at_ = -1.0;
@@ -226,7 +245,8 @@ class VzStepControlNode {
   }
 
   void recorderHealthCallback(const VzRecorderHealth::ConstPtr& message) {
-    controller_->onRecorderHealth(message->healthy, steadyNowSec());
+    controller_->onRecorderHealth(message->healthy, message->recording,
+                                  steadyNowSec());
   }
 
   void odomCallback(const nav_msgs::Odometry::ConstPtr& message) {
@@ -317,29 +337,67 @@ class VzStepControlNode {
     setpoint_publisher_.publish(message);
   }
 
-  bool requestTelemetryRates() {
-    const bool local_ok = setMessageRate(kLocalPositionNedMessageId,
-                                         params_.requested_telemetry_rate_hz);
-    const bool target_ok =
-        setMessageRate(kPositionTargetLocalNedMessageId,
-                       params_.requested_telemetry_rate_hz);
-    telemetry_rates_requested_ = local_ok && target_ok;
-    controller_->setTelemetryRequested(telemetry_rates_requested_);
-    if (telemetry_rates_requested_) {
-      telemetry_rates_restored_ = false;
-      ROS_INFO("requested MAVLink LOCAL_POSITION_NED and "
-               "POSITION_TARGET_LOCAL_NED at %.1f Hz",
-               params_.requested_telemetry_rate_hz);
+  // Per-stream rate state: message 32 (LOCAL_POSITION_NED) and 85
+  // (POSITION_TARGET_LOCAL_NED) succeed or fail independently. Tracking them
+  // separately lets a retry or restore recover only the stream(s) that are
+  // still misconfigured instead of demanding both calls succeed together.
+  struct StreamState {
+    bool requested{false};   // currently set to the 100 Hz test rate
+    bool restored{true};     // back at the normal (non-test) rate
+  };
+
+  bool streamsRequested() {
+    std::lock_guard<std::mutex> lock(streams_mutex_);
+    return local_stream_.requested && target_stream_.requested;
+  }
+
+  void requestStream(std::uint32_t message_id, double rate_hz) {
+    if (setMessageRate(message_id, rate_hz)) {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      StreamState& stream = streamFor(message_id);
+      stream.requested = true;
+      stream.restored = false;
+      ROS_INFO("requested MAVLink message %u at %.1f Hz", message_id, rate_hz);
     }
-    return telemetry_rates_requested_;
+  }
+
+  void restoreStream(std::uint32_t message_id, double rate_hz) {
+    {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      const StreamState& stream = streamFor(message_id);
+      if (!stream.requested || stream.restored) {
+        return;
+      }
+    }
+    if (setMessageRate(message_id, rate_hz)) {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      StreamState& stream = streamFor(message_id);
+      stream.restored = true;
+      stream.requested = false;
+      ROS_INFO("restored MAVLink message %u to %.1f Hz", message_id, rate_hz);
+    }
+  }
+
+  bool requestTelemetryRates() {
+    // Dispatched on the service thread pool so a slow MAVROS service reply
+    // can never stall the 100 Hz control timer (the default callback queue
+    // is single-threaded).
+    service_io_.post([this]() {
+      requestStream(kLocalPositionNedMessageId,
+                    params_.requested_telemetry_rate_hz);
+      requestStream(kPositionTargetLocalNedMessageId,
+                    params_.requested_telemetry_rate_hz);
+    });
+    return true;
   }
 
   void telemetryTimer(const ros::WallTimerEvent&) {
-    if (!have_state_ || !latest_state_.connected || telemetry_rates_requested_) {
+    if (!have_state_ || !latest_state_.connected) {
       return;
     }
+    controller_->setTelemetryRequested(streamsRequested());
     if (!controller_->offboardActive()) {
-      return;  // streams are requested synchronously on the OFFBOARD edge
+      return;  // streams are requested on the OFFBOARD edge
     }
     // Only a session that still has steps ahead may re-request the 100 Hz test
     // rate. A finished hold (COMPLETE) or a refused/aborted hold (ABORT) must
@@ -349,7 +407,26 @@ class VzStepControlNode {
     if (phase < kStabilize || phase > kHoldDown) {
       return;
     }
-    requestTelemetryRates();  // session running but the request did not stick
+    // Per-stream retry: the session is running but one of the two 100 Hz
+    // requests did not stick; recover only the pending stream(s).
+    bool local_pending, target_pending;
+    {
+      std::lock_guard<std::mutex> lock(streams_mutex_);
+      local_pending = !local_stream_.requested;
+      target_pending = !target_stream_.requested;
+    }
+    if (local_pending) {
+      service_io_.post([this]() {
+        requestStream(kLocalPositionNedMessageId,
+                      params_.requested_telemetry_rate_hz);
+      });
+    }
+    if (target_pending) {
+      service_io_.post([this]() {
+        requestStream(kPositionTargetLocalNedMessageId,
+                      params_.requested_telemetry_rate_hz);
+      });
+    }
   }
 
   bool setMessageRate(std::uint32_t message_id, double rate_hz) {
@@ -365,24 +442,15 @@ class VzStepControlNode {
   }
 
   void restoreTelemetryRates() {
-    if (!telemetry_rates_requested_ || telemetry_rates_restored_ ||
-        !have_state_ || !latest_state_.connected) {
+    if (!have_state_ || !latest_state_.connected) {
       return;
     }
-    const bool local_ok =
-        setMessageRate(kLocalPositionNedMessageId,
-                       params_.restore_local_position_rate_hz);
-    const bool target_ok =
-        setMessageRate(kPositionTargetLocalNedMessageId,
-                       params_.restore_target_local_rate_hz);
-    if (local_ok && target_ok) {
-      telemetry_rates_restored_ = true;
-      telemetry_rates_requested_ = false;
-      controller_->setTelemetryRequested(false);
-      ROS_INFO("restored MAVLink message rates to local=%.1f Hz target=%.1f Hz",
-               params_.restore_local_position_rate_hz,
-               params_.restore_target_local_rate_hz);
-    }
+    service_io_.post([this]() {
+      restoreStream(kLocalPositionNedMessageId,
+                    params_.restore_local_position_rate_hz);
+      restoreStream(kPositionTargetLocalNedMessageId,
+                    params_.restore_target_local_rate_hz);
+    });
   }
 
   void statusTimer(const ros::WallTimerEvent&) {
@@ -445,8 +513,22 @@ class VzStepControlNode {
   bool have_state_{false};
   bool have_odom_{false};
   bool have_velocity_{false};
-  bool telemetry_rates_requested_{false};
-  bool telemetry_rates_restored_{false};
+
+  // Per-stream MAVLink rate state, guarded by streams_mutex_. The service
+  // calls run on service_io_ so a slow reply never blocks the control timer.
+  StreamState local_stream_;
+  StreamState target_stream_;
+  std::mutex streams_mutex_;
+  boost::asio::io_service service_io_;
+  std::unique_ptr<boost::asio::io_service::work> service_work_{
+      new boost::asio::io_service::work(service_io_)};
+  std::thread service_thread_;
+
+  StreamState& streamFor(std::uint32_t message_id) {
+    // Caller holds streams_mutex_.
+    return message_id == kLocalPositionNedMessageId ? local_stream_
+                                                    : target_stream_;
+  }
   bool enable_setpoint_output_{true};
   bool recorder_required_{false};
   double telemetry_tail_sec_{1.0};

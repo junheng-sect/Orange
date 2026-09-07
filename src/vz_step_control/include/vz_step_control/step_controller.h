@@ -67,8 +67,9 @@ class StepController {
   // Feed each recorder health report (published at ~2 Hz while the recorder is
   // alive). When params_.recorder_required is true, OFFBOARD entry and the
   // STABILIZE->UP_STEP handoff are refused and a running test is aborted
-  // whenever this health goes stale or false (a test never runs unrecorded).
-  void onRecorderHealth(bool healthy, double now);
+  // whenever this health goes stale or false, or the recorder is healthy but
+  // not actually recording (a test never runs unrecorded).
+  void onRecorderHealth(bool healthy, bool recording, double now);
   void onOdom(double x, double y, double z, double yaw, double now);
   void onVelocityVz(double vz, double now);
   void noteTargetMessage(double now) { target_rate_.tick(now); }
@@ -139,6 +140,7 @@ class StepController {
   bool need_healthy_disengage_{false};
   bool have_recorder_health_{false};
   bool recorder_healthy_{false};
+  bool recorder_recording_{false};
   double latest_recorder_health_time_{-1.0};
 
   double latest_state_time_{0.0};

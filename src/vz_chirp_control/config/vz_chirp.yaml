@@ -60,6 +60,12 @@ setpoint_topic: /mavros/setpoint_raw/local
 status_topic: /vz_chirp/status
 
 # ---- 记录器（vz_chirp_bag_recorder） ----
+# 是否要求录包器健康联锁（true 时录包失败/不录制会 ABORT 并保持位置）
+recorder_required: true
+# 录包器健康消息超时（s）
+recorder_health_timeout_sec: 1.0
+# 录包器健康消息话题（VzRecorderHealth，~2 Hz latched）
+recorder_health_topic: /vz_chirp/recorder_health
 # rosbag 输出根目录
 bag_directory: /home/vslam/seeker/logs/vz_chirp
 # bag 路径发布话题（String，latched）
