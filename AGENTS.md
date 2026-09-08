@@ -9,6 +9,15 @@
 - SEEKER 板端：RK3588，Ubuntu 20.04，ROS Noetic
 - 板端 seeker 工作空间：`/home/vslam/seeker`
 
+## 两端分工与同步（必读）
+
+本仓库同时存在于两端，通过 GitHub (junheng-sect/Orange) 同步，同步方向固定为单向：
+
+- **SEEKER 板端**（`/home/vslam/seeker`）：唯一开发端。代码修改、commit、push、catkin 构建、实机运行都在这里进行。
+- **laptop 端**（`/home/zjh/project/seeker`）：只读查看端。仅用于阅读代码和分析问题，不构建、不运行 ROS 节点、**不修改文件、不 commit、不 push**。
+- 更新方式：板端 push 后，laptop 执行 `git pull`。laptop 端任何改动都会造成两端分叉，一律不允许。
+- 涉及实机验证的结论，以板端代码为准；laptop 看到的可能落后于板端未提交的修改。
+
 ## SEEKER 连接与凭据
 
 - 用户：`vslam`
