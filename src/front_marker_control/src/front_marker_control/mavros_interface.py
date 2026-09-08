@@ -30,3 +30,9 @@ def position_only_type_mask():
 def body_flu_setpoint_components(vx, vy, vz, yaw_rate):
     """Keep ROS-side FLU signs; MAVROS performs the FLU-to-FRD conversion."""
     return float(vx), float(vy), float(vz), float(yaw_rate)
+
+
+def velocity_absolute_yaw_type_mask():
+    """Local ENU velocity + absolute yaw; no position, acceleration or yaw rate."""
+    return ((velocity_only_type_mask() & ~PositionTarget.IGNORE_YAW)
+            | PositionTarget.IGNORE_YAW_RATE)

@@ -293,7 +293,7 @@ class PositionHoldTest(unittest.TestCase):
             3.0, 'retreat velocity established',
             body_error=retreat_error,
         )
-        rospy.sleep(0.2)
+        self.publish_aligned(0.2, body_error=retreat_error)
         with self.lock:
             retreat_command = self.commands[-1]
         self.assertLess(retreat_command.twist.linear.x, -0.001)

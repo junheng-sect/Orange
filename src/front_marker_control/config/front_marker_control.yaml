@@ -112,3 +112,30 @@ min_marker_distance_m: 0.60
 retreat_recover_distance_m: 0.70
 # 后退速度（m/s，须为负）
 retreat_velocity_x: -0.10
+
+# ---- 连续源时间采样与最终 XYZ+yaw 精对准 ----
+# 仅 enable_position_hold 与 enable_yaw_control 同时开启时生效。
+# 稳位进入不要求 yaw 已收敛；采样中视觉 XYZ 稳位并保持绝对 local yaw。
+yaw_sampling_duration_sec: 3.0
+# 剔除离群值后最少样本数；每个 Marker 源时间戳只使用一次。
+yaw_sampling_min_samples: 60
+# 相对圆周中位数的离群阈值（deg）、最小保留比例、圆周标准差上限（deg）。
+yaw_sampling_outlier_deg: 15.0
+yaw_sampling_min_inlier_ratio: 0.80
+yaw_sampling_max_std_deg: 6.0
+# 候选相对采样保持航向的最大修正（deg）；超限回到稳位重采样。
+yaw_refinement_max_correction_deg: 20.0
+# 等待源时间戳两侧 Odometry 的最长接收时间（s），不外推。
+yaw_sample_pending_timeout_sec: 0.50
+# local 位置差分速度门限（m/s），稳位与实际目标到位的持续时间（s）。
+refine_speed_gate_mps: 0.05
+refine_stable_hold_sec: 1.0
+# 最终位置 SP 使用静止到静止梯形速度轨迹，yaw 走圆周最短方向。
+pose_transition_speed_mps: 0.10
+pose_transition_accel_mps2: 0.50
+pose_transition_yaw_rate_deg_s: 10.0
+# 实际 yaw 距最终 SP 的到位阈值（deg），随后独立采集 3 秒视觉验收。
+pose_settle_yaw_tolerance_deg: 2.0
+# 验收/定点监测窗口的视觉 yaw 圆周均值绝对值上限（deg）。
+yaw_acceptance_tolerance_deg: 3.0
+fixed_yaw_target_topic: /front_marker_control/fixed_yaw_target

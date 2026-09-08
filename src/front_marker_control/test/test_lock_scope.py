@@ -93,6 +93,7 @@ class LockScopeTest(unittest.TestCase):
 
     def pose_node(self, transform, position_publisher=None):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
+        node.refiner = None
         node.lock = threading.RLock()
         node.last_accepted_source_stamp = None
         node.last_filter_stamp = None
@@ -123,6 +124,7 @@ class LockScopeTest(unittest.TestCase):
 
     def control_node(self, command_publisher=None, status_publisher=None):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
+        node.refiner = None
         node.lock = threading.RLock()
         node.setpoint_publish_rate_hz = 20.0
         node.last_control_time = None
@@ -265,6 +267,7 @@ class PositionHoldRegressionTest(unittest.TestCase):
     def hold_node(self, control_mode='ALIGN', error_x=0.0):
         """A hold-enabled node whose localization never arrived (stale)."""
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
+        node.refiner = None
         node.lock = threading.RLock()
         node.setpoint_publish_rate_hz = 20.0
         node.last_control_time = None
@@ -373,8 +376,10 @@ class LocalizationRejectRegressionTest(unittest.TestCase):
 
     def hold_odom_node(self, control_mode='POS_HOLD'):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
+        node.refiner = None
         node.lock = threading.RLock()
         node.odom_source_max_age_sec = 0.5
+        node.odom_interp_gap_max_sec = 0.1
         node.future_stamp_tolerance_sec = 0.1
         node.local_pose_buffer = LocalPoseBuffer()
         node.control_mode = control_mode

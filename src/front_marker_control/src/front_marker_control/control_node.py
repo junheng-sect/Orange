@@ -22,12 +22,15 @@ from front_marker_control.geometry import (
     normalize_quaternion,
     position_error_body,
     position_hold_target,
+    rotate_vector_by_quaternion,
 )
+from front_marker_control.refinement import DEFAULTS, FinalPoseRefiner, validate_parameters
 from front_marker_control.localization import LocalPoseBuffer
 from front_marker_control.mavros_interface import (
     body_flu_setpoint_components,
     position_only_type_mask,
     velocity_only_type_mask,
+    velocity_absolute_yaw_type_mask,
 )
 
 
@@ -68,6 +71,15 @@ class FrontMarkerControlNode(object):
         self.latest_odom_source_stamp = None
         self.last_odom_issue = '尚未收到 Odometry'
         self.last_localization_issue = ''
+        self.latest_local_pose = None
+        self.latest_local_speed = float('inf')
+        self.refiner = None
+        if self.enable_position_hold and self.enable_yaw_control:
+            self.refiner = FinalPoseRefiner(
+                self.refinement_parameters, self.target_xyz_body,
+                (self.distance_tolerance_m, self.lateral_tolerance_m, self.vertical_tolerance_m),
+                self.odom_interp_gap_max_sec, self.pose_timeout_sec,
+            )
 
         self.body_controller = BodyVelocityController(
             kp_x=self.kp_x,
@@ -100,6 +112,9 @@ class FrontMarkerControlNode(object):
         )
         self.yaw_error_pub = rospy.Publisher(
             self.yaw_error_topic, Float64, queue_size=10
+        )
+        self.fixed_yaw_pub = rospy.Publisher(
+            self.fixed_yaw_target_topic, Float64, queue_size=10, latch=True
         )
         self.command_pub = rospy.Publisher(
             self.command_topic, TwistStamped, queue_size=10
@@ -214,6 +229,11 @@ class FrontMarkerControlNode(object):
         self.status_topic = str(
             get('~status_topic', '/front_marker_control/status')
         )
+        self.fixed_yaw_target_topic = str(get(
+            '~fixed_yaw_target_topic', '/front_marker_control/fixed_yaw_target'))
+        self.refinement_parameters = {name: float(get('~' + name, value))
+                                      for name, value in DEFAULTS.items()}
+        validate_parameters(self.refinement_parameters)
         self.base_frame = str(get('~base_frame', 'base_link'))
         if not self.base_frame:
             raise ValueError('base_frame must not be empty')
@@ -370,7 +390,14 @@ class FrontMarkerControlNode(object):
     def state_callback(self, message):
         with self.lock:
             self.state = message
-            self.latest_state_receive_time = rospy.Time.now()
+            now = rospy.Time.now()
+            interrupted = (self.latest_state_receive_time is not None
+                           and (now-self.latest_state_receive_time).to_sec() > self.state_timeout_sec)
+            self.latest_state_receive_time = now
+            if self.refiner is not None and self.enable_setpoint_output and (
+                    interrupted or not message.connected or not message.armed or message.mode != 'OFFBOARD'):
+                self.enter_align('FCU gate interrupted')
+                self.velocity_limiter.reset()
 
     def _localization_rejected(self, issue):
         """定位数据被拒绝：立即把定位置为不可用，并原子清除位置目标。
@@ -381,7 +408,13 @@ class FrontMarkerControlNode(object):
         """
         self.latest_odom_receive_time = None
         self.last_odom_issue = issue
-        if self.control_mode == 'POS_HOLD':
+        self.latest_local_pose = None
+        self.latest_local_speed = float('inf')
+        self.local_pose_buffer.clear()
+        if self.refiner is not None:
+            self.refiner.reset(issue)
+        self.aligned_start_time = None
+        if self.control_mode in ('YAW_SAMPLING', 'POSE_ALIGNING', 'POS_HOLD'):
             self.enter_align('定位异常 %s' % issue)
         elif self.position_target is not None:
             self.clear_position_target()
@@ -413,11 +446,9 @@ class FrontMarkerControlNode(object):
             if not math.isfinite(receive_stamp):
                 self._localization_rejected('拒绝非有限接收时间')
                 return
-            # 插值时间轴使用接收时刻：视觉 Pose 的源时间通常晚于最新定位
-            # 样本（定位无外推），按各自接收时刻对齐才可行。该近似会引入
-            # 与两路时延差成正比的目标位置偏差，见位置锁定的时间对齐注释。
+            # Pair on source timestamps; Marker observations wait for a bracketing odom.
             reason = self.local_pose_buffer.accept(
-                receive_stamp,
+                source_stamp.to_sec(),
                 message.header.frame_id,
                 (
                     message.pose.pose.position.x,
@@ -435,6 +466,31 @@ class FrontMarkerControlNode(object):
                 # 非法值或坐标系变化已在 accept 内清除旧定位缓存。
                 self._localization_rejected(reason)
                 return
+            if (self.refiner is not None and self.latest_odom_receive_time is not None
+                    and (now-self.latest_odom_receive_time).to_sec() > self.odom_timeout_sec):
+                # Recovery arriving before the timer must still invalidate the old epoch.
+                self.refiner.reset('Odometry stream interrupted')
+                self.position_target = None
+                self.aligned_start_time = None
+                self.pos_exit_start_time = None
+                if self.control_mode != 'RETREAT':
+                    self.control_mode = 'ALIGN'
+            local_pose = self.local_pose_buffer.lookup(source_stamp.to_sec(), self.odom_interp_gap_max_sec)
+            previous_pose = getattr(self, 'latest_local_pose', None)
+            self.latest_local_speed = float('inf')
+            if previous_pose is not None and local_pose.stamp > previous_pose.stamp:
+                interval = local_pose.stamp - previous_pose.stamp
+                self.latest_local_speed = self.velocity_norm(tuple(
+                    (b-a)/interval for a, b in zip(previous_pose.position, local_pose.position)))
+            if (self.refiner is not None and self.latest_local_speed >=
+                    self.refinement_parameters['refine_speed_gate_mps']):
+                if self.refiner.mode in ('ALIGN', 'YAW_SAMPLING'):
+                    self.refiner.reset('local speed gate')
+            if (self.refiner is not None and self.refiner.mode == 'POSE_ALIGNING'
+                    and not self.refiner.actual_pose_within(local_pose, self.latest_local_speed)):
+                self.refiner.stable_since = None
+                self.refiner.clear_window('actual pose outside settle gate')
+            self.latest_local_pose = local_pose
             self.latest_odom_receive_time = now
             self.latest_odom_source_stamp = source_stamp
             self.last_odom_issue = ''
@@ -471,6 +527,8 @@ class FrontMarkerControlNode(object):
         )
 
     def clear_position_target(self):
+        if self.refiner is not None:
+            self.refiner.reset('position target cleared')
         self.position_target = None
         self.pos_exit_start_time = None
 
@@ -500,7 +558,7 @@ class FrontMarkerControlNode(object):
         ):
             return True
         return (
-            self.enable_yaw_control
+            self.refiner is None and self.enable_yaw_control
             and abs(float(self.latest_yaw_error)) > self.pos_exit_yaw_tolerance_rad
         )
 
@@ -532,8 +590,8 @@ class FrontMarkerControlNode(object):
 
     def try_lock_position_target(self):
         """Compute and lock the fixed XYZ/yaw target, or return None."""
-        # Marker 与定位都按接收时刻对齐（无外推，靠插值时间轴闭环）。
-        marker_stamp = self.latest_receive_time.to_sec()
+        # Legacy yaw-disabled lock also uses source-time interpolation.
+        marker_stamp = self.latest_source_stamp.to_sec()
         local_pose = self.local_pose_buffer.lookup(
             marker_stamp, self.odom_interp_gap_max_sec
         )
@@ -560,6 +618,8 @@ class FrontMarkerControlNode(object):
         return (p_target, yaw_target, marker_stamp)
 
     def invalidate_observation(self, reason):
+        if self.refiner is not None:
+            self.refiner.visual_interruption(reason)
         self.latest_position_error = None
         self.latest_yaw_error = 0.0
         self.latest_filtered_yaw_error = 0.0
@@ -662,6 +722,7 @@ class FrontMarkerControlNode(object):
                 self.latest_yaw_rate,
                 self.latest_filtered_yaw_error,
             ) = self.body_controller.update(error, yaw_error, dt)
+            previous_source_stamp = self.latest_source_stamp
             self.latest_position_error = error
             self.latest_yaw_error = yaw_error
             self.latest_source_stamp = message.header.stamp
@@ -669,6 +730,16 @@ class FrontMarkerControlNode(object):
             self.last_filter_stamp = message.header.stamp
             self.last_accepted_source_stamp = message.header.stamp
             self.last_observation_issue = ''
+            if self.refiner is not None:
+                # Detect inter-frame loss even if both callbacks precede the next timer.
+                if (previous_source_stamp is not None
+                        and (message.header.stamp-previous_source_stamp).to_sec()
+                        > self.pose_timeout_sec + 1e-9):
+                    self.refiner.visual_interruption('Marker source gap')
+                if not self.refiner.within(error) and self.refiner.mode in ('ALIGN', 'YAW_SAMPLING'):
+                    self.refiner.reset('sampling XYZ outside tolerance')
+                self.refiner.marker(message.header.stamp.to_sec(), now.to_sec(),
+                                    tuple(error[i]+self.target_xyz_body[i] for i in range(3)), yaw_error)
             publish_snapshot = (
                 message.header.stamp,
                 tuple(float(value) for value in error),
@@ -793,7 +864,7 @@ class FrontMarkerControlNode(object):
                 self.aligned_start_time = None
                 self.pos_exit_start_time = None
                 self._report_localization_lost(now)
-            elif pose_fresh:
+            elif pose_fresh and self.refiner is None:
                 # 有新鲜视觉时推进对齐判定（ALIGNED 状态与视觉误差门限共用）。
                 alignment_state = self.update_alignment_state(now)
                 if (
@@ -824,6 +895,23 @@ class FrontMarkerControlNode(object):
                     marker_x = None
                     near_wall = False
                 self.update_control_mode(now, pose_fresh, marker_x, near_wall)
+
+            fixed_yaw_snapshot = None
+            local_velocity_snapshot = None
+            if self.refiner is not None and self.control_mode != 'RETREAT':
+                if gate_reason is not None or not localization_ok:
+                    self.enter_align(gate_reason or 'localization unavailable')
+                else:
+                    generation = self.refiner.generation
+                    self.refiner.tick(now.to_sec(), dt, pose_fresh, self.latest_local_pose,
+                                      self.latest_local_speed, self.latest_position_error,
+                                      self.local_pose_buffer)
+                    self.control_mode = self.refiner.mode
+                    self.mode_reason = self.refiner.reason
+                    self.position_target = (self.refiner.target + (self.refiner.target_stamp,)
+                                            if self.refiner.target is not None else None)
+                    if self.refiner.generation != generation:
+                        fixed_yaw_snapshot = self.refiner.target[1]
 
             if gate_reason is not None:
                 # 非 OFFBOARD、未解锁或 FCU 失联：清除位置目标与计时，不累计。
@@ -865,6 +953,23 @@ class FrontMarkerControlNode(object):
                     motion_state = 'WAIT_LOCAL_POSITION'
                     actual_allowed = self.enable_setpoint_output
                     setpoint_snapshot = None
+                elif self.control_mode == 'YAW_SAMPLING':
+                    body_velocity = self.velocity_limiter.update(
+                        self.latest_body_velocity, self.max_accel, dt)
+                    local_velocity_snapshot = (
+                        rotate_vector_by_quaternion(self.latest_local_pose.quaternion, body_velocity),
+                        self.refiner.hold_yaw,
+                    )
+                    yaw_rate = 0.0
+                    motion_state = 'YAW_SAMPLING'
+                    actual_allowed = self.enable_setpoint_output
+                    setpoint_snapshot = None
+                elif self.control_mode == 'POSE_ALIGNING':
+                    setpoint_snapshot = self.refiner.transition.command
+                    body_velocity = self.velocity_limiter.reset()
+                    yaw_rate = 0.0
+                    motion_state = 'POSE_ALIGNING'
+                    actual_allowed = self.enable_setpoint_output
                 elif self.control_mode == 'POS_HOLD':
                     # 固定 XYZ + 绝对 yaw，目标不随每帧视觉变化。
                     setpoint_snapshot = (
@@ -903,6 +1008,8 @@ class FrontMarkerControlNode(object):
                 setpoint_snapshot,
                 alignment_state=locals().get('alignment_state'),
             )
+            if self.refiner is not None:
+                preview_text += ' | ' + self.refiner.status()
             if not self.enable_setpoint_output:
                 status_text = 'PREVIEW_ONLY | ' + preview_text
             elif gate_reason is not None:
@@ -934,8 +1041,11 @@ class FrontMarkerControlNode(object):
             )
 
         self.publish_commands(
-            *command_snapshot, position_target=setpoint_snapshot
+            *command_snapshot, position_target=setpoint_snapshot,
+            local_velocity_target=local_velocity_snapshot,
         )
+        if fixed_yaw_snapshot is not None:
+            self._publish_if_running(self.fixed_yaw_pub, Float64(data=fixed_yaw_snapshot))
         if status_to_publish is not None:
             self._publish_if_running(
                 self.status_pub, String(data=status_to_publish)
@@ -1053,9 +1163,18 @@ class FrontMarkerControlNode(object):
         message.yaw = float(yaw_target)
         return message
 
+    def make_local_velocity_setpoint(self, stamp, velocity, yaw):
+        message = PositionTarget()
+        message.header.stamp = stamp
+        message.coordinate_frame = PositionTarget.FRAME_LOCAL_NED
+        message.type_mask = velocity_absolute_yaw_type_mask()
+        message.velocity.x, message.velocity.y, message.velocity.z = velocity
+        message.yaw = yaw
+        return message
+
     def publish_commands(
         self, stamp, body_velocity, yaw_rate, actual_allowed,
-        position_target=None,
+        position_target=None, local_velocity_target=None,
     ):
         if not self.enable_yaw_control:
             yaw_rate = 0.0
@@ -1080,6 +1199,8 @@ class FrontMarkerControlNode(object):
             preview = self.make_position_setpoint(
                 stamp, position_target[0], position_target[1]
             )
+        elif local_velocity_target is not None:
+            preview = self.make_local_velocity_setpoint(stamp, *local_velocity_target)
         else:
             preview = self.make_setpoint(stamp, body_velocity, yaw_rate)
         self._publish_if_running(self.preview_pub, preview)

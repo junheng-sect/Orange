@@ -126,3 +126,55 @@ XYZ 位置误差在进入比例控制、速度限幅和速度滞回死区之前�
 
 状态 `/front_marker_control/status` 使用 `TRACKING`、`BRAKING_POSE_LOSS` 和
 `WAIT_POSE` 区分正常跟踪、视觉丢失刹车与完全停止。
+
+## 连续采样的最终 XYZ+yaw 对准
+
+当 `enable_position_hold=true` 且 `enable_yaw_control=true` 时，原单帧锁定由
+`ALIGN -> YAW_SAMPLING -> POSE_ALIGNING -> POS_HOLD` 替代。
+
+1. XYZ 进入现有容差且 local 位置差分速度 < 0.05 m/s，持续 1 秒后开始采样。
+   进入不依赖滤波 yaw 的旧 6° 门限；采样期间视觉 XYZ 速度控制继续，绝对 yaw
+   保持采样开始时的机头方向，停止使用视觉 yaw-rate。
+2. Marker 按源时间戳与 Odometry 插值配对（最大插值间隔 0.1 秒），必要时等待
+   后续 Odometry，最长 0.5 秒；禁止外推或接收时间降级。两路必须使用同一 ROS 时钟。
+   每帧计算 local 目标航向与 Marker local 位置，而非平均机体系误差。
+3. 连续 3 秒窗口：圆周中位数（样本 L1 medoid）剔除偏离 >15° 的样本；至少 60
+   个保留样本，保留率 >=80%，圆周标准差 <=6°；相对保持航向修正 <=20°。
+   同一保留样本集计算 Marker 平均位置和圆周平均 yaw，再按目标机头方向减去
+   `target_xyz_body`，原子生成最终 XYZ+yaw。失败重新稳位采样。
+4. `POSE_ALIGNING` 从实际位置和已命令的保持 yaw 开始过渡。位置 SP 使用
+   静止到静止梯形/三角速度轨迹（0.1 m/s、0.5 m/s²），yaw 最短方向限速 10°/s。
+   实际位置进入现有容差、yaw 距 SP <=2°、速度 <0.05 m/s 并稳定 1 秒后，
+   另采独立 3 秒视觉验收窗口，采用相同样本质量门限。残差圆周均值绝对值 <=3°
+   才标记 `POS_HOLD`；超限重新稳位采样。噪声超限时保持目标并重新验收，不能宣告对准。
+5. `POS_HOLD` 固定最终目标，以不重叠 3 秒窗口监测视觉 yaw；超过 3°重新采样。
+   位置仍按现有退出带宽与持续时间退出，新的 yaw 窗口监测替代单帧 9° yaw 退出。
+   丢标时有定位可继续位置控制，但验收窗口清空；定位失效清目标、输出零速度。
+   近墙后退优先，硬门控清目标。采样中 XYZ/速度越界、无效视觉或时间中断均重新计时。
+
+接口仍为 `/mavros/setpoint_raw/local`：采样用 local ENU 速度+绝对 yaw，最终过渡与保持
+用 local ENU 位置+绝对 yaw；屏蔽 yaw_rate，由 MAVROS 转换至 NED。`cmd_vel` 在采样时
+仍显示 FLU 视觉速度（yaw_rate=0），在位置控制时为零，不可用其推断实际位置 SP。
+`setpoint_preview` 给出完整实际模式与掩码。
+`/front_marker_control/fixed_yaw_target` 为最近一次接受的最终 ENU yaw（Float64，弧度，latch）；
+它是诊断值，当前是否有效应查看状态，禁止把滞留的诊断消息作为控制目标。
+状态包含当前窗口数量/跨度，以及最近完成窗口的 inliers/std/correction/residual 和原因。
+
+参数全部在 `config/front_marker_control.yaml` 的“连续源时间采样”段，保存后重启节点生效。
+关闭 yaw 时绕过精对准，关闭 position hold 时保留原视觉速度控制。多帧平均降低随机噪声，
+不能消除标定系统偏差，也不处理 pitch 安装偏角；3°是视觉测量标准，不是外部真值保证。
+
+隔离验证（不会连接默认 ROS master）：
+
+```bash
+cd /home/vslam/seeker
+source /opt/ros/noetic/setup.bash
+export ROS_MASTER_URI=http://127.0.0.1:11389 ROS_IP=127.0.0.1
+export ROS_HOME=/tmp/fmc-yaw-ros-test
+catkin build front_marker_control
+catkin run_tests front_marker_control
+catkin_test_results build/front_marker_control/test_results
+```
+
+集成测试使用 `/test_*` 输入输出话题和合成位置反馈，测试用短窗口由 test launch 显式覆盖；
+纯 Python 状态机测试使用完整默认 3 秒窗口。测试通过不代表 FCU/实飞验证。
