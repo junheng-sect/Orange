@@ -482,14 +482,8 @@ class FrontMarkerControlNode(object):
                 interval = local_pose.stamp - previous_pose.stamp
                 self.latest_local_speed = self.velocity_norm(tuple(
                     (b-a)/interval for a, b in zip(previous_pose.position, local_pose.position)))
-            if (self.refiner is not None and self.latest_local_speed >=
-                    self.refinement_parameters['refine_speed_gate_mps']):
-                if self.refiner.mode in ('ALIGN', 'YAW_SAMPLING'):
-                    self.refiner.reset('local speed gate')
-            if (self.refiner is not None and self.refiner.mode == 'POSE_ALIGNING'
-                    and not self.refiner.actual_pose_within(local_pose, self.latest_local_speed)):
-                self.refiner.stable_since = None
-                self.refiner.clear_window('actual pose outside settle gate')
+            # 采样期速度仅作状态展示，不再触发任何重置；
+            # POSE_ALIGNING 的过渡完成判定只看轨迹自身，不设速度/位姿门。
             self.latest_local_pose = local_pose
             self.latest_odom_receive_time = now
             self.latest_odom_source_stamp = source_stamp
@@ -549,7 +543,13 @@ class FrontMarkerControlNode(object):
         self.velocity_limiter.reset()
 
     def position_exit_exceeded(self):
-        """True when the live vision error exceeds the POS_HOLD exit band."""
+        """True when the live vision error exceeds the POS_HOLD exit band.
+
+        仅作用于未启用 yaw 精对准的旧路径（refiner=None）；启用精对准时
+        目标固定，不再按视觉误差退出，退出只来自近墙/VIO/FCU/显式重置。
+        """
+        if self.refiner is not None:
+            return False
         error = self.latest_position_error
         if (
             abs(float(error[0])) > self.pos_exit_distance_tolerance_m
@@ -618,8 +618,7 @@ class FrontMarkerControlNode(object):
         return (p_target, yaw_target, marker_stamp)
 
     def invalidate_observation(self, reason):
-        if self.refiner is not None:
-            self.refiner.visual_interruption(reason)
+        # 视觉失效不再重置采样器：固定窗口靠 VIO/FCU/近墙/显式重置打断。
         self.latest_position_error = None
         self.latest_yaw_error = 0.0
         self.latest_filtered_yaw_error = 0.0
@@ -722,7 +721,6 @@ class FrontMarkerControlNode(object):
                 self.latest_yaw_rate,
                 self.latest_filtered_yaw_error,
             ) = self.body_controller.update(error, yaw_error, dt)
-            previous_source_stamp = self.latest_source_stamp
             self.latest_position_error = error
             self.latest_yaw_error = yaw_error
             self.latest_source_stamp = message.header.stamp
@@ -731,13 +729,8 @@ class FrontMarkerControlNode(object):
             self.last_accepted_source_stamp = message.header.stamp
             self.last_observation_issue = ''
             if self.refiner is not None:
-                # Detect inter-frame loss even if both callbacks precede the next timer.
-                if (previous_source_stamp is not None
-                        and (message.header.stamp-previous_source_stamp).to_sec()
-                        > self.pose_timeout_sec + 1e-9):
-                    self.refiner.visual_interruption('Marker source gap')
-                if not self.refiner.within(error) and self.refiner.mode in ('ALIGN', 'YAW_SAMPLING'):
-                    self.refiner.reset('sampling XYZ outside tolerance')
+                # 固定 3 秒窗口：断帧/超速/XYZ 偏离均不重置采样，
+                # Marker 观测照常入队等待源时间配对。
                 self.refiner.marker(message.header.stamp.to_sec(), now.to_sec(),
                                     tuple(error[i]+self.target_xyz_body[i] for i in range(3)), yaw_error)
             publish_snapshot = (
@@ -954,17 +947,31 @@ class FrontMarkerControlNode(object):
                     actual_allowed = self.enable_setpoint_output
                     setpoint_snapshot = None
                 elif self.control_mode == 'YAW_SAMPLING':
+                    # 采样期间视觉新鲜时继续 XYZ 速度闭环；丢标则按丢标
+                    # 减速归零（不沿用旧视觉速度），采样计时照常推进。
+                    if pose_fresh:
+                        target_body_velocity = tuple(self.latest_body_velocity)
+                        rate_limit = self.max_accel
+                    else:
+                        target_body_velocity = (0.0, 0.0, 0.0)
+                        rate_limit = self.loss_decel
                     body_velocity = self.velocity_limiter.update(
-                        self.latest_body_velocity, self.max_accel, dt)
+                        target_body_velocity, rate_limit, dt)
                     local_velocity_snapshot = (
                         rotate_vector_by_quaternion(self.latest_local_pose.quaternion, body_velocity),
                         self.refiner.hold_yaw,
                     )
                     yaw_rate = 0.0
-                    motion_state = 'YAW_SAMPLING'
+                    if pose_fresh:
+                        motion_state = 'YAW_SAMPLING'
+                    elif self.velocity_norm(body_velocity) > 1e-9:
+                        motion_state = 'SAMPLING_BRAKING_POSE_LOSS'
+                    else:
+                        motion_state = 'SAMPLING_WAIT_POSE'
                     actual_allowed = self.enable_setpoint_output
                     setpoint_snapshot = None
                 elif self.control_mode == 'POSE_ALIGNING':
+                    # 截止周期起立即输出位置 setpoint（平滑过渡轨迹）。
                     setpoint_snapshot = self.refiner.transition.command
                     body_velocity = self.velocity_limiter.reset()
                     yaw_rate = 0.0
@@ -1017,12 +1024,15 @@ class FrontMarkerControlNode(object):
                     gate_reason,
                     preview_text,
                 )
-            elif motion_state == 'BRAKING_POSE_LOSS':
+            elif motion_state in ('BRAKING_POSE_LOSS',
+                                  'SAMPLING_BRAKING_POSE_LOSS'):
                 status_text = 'SETPOINT_BRAKING | ' + preview_text
             elif setpoint_snapshot is not None:
                 status_text = 'SETPOINT_POSITION | ' + preview_text
             elif motion_state == 'WAIT_LOCAL_POSITION':
                 status_text = 'WAIT_LOCAL_POSITION | actual=zero | ' + preview_text
+            elif motion_state == 'SAMPLING_WAIT_POSE':
+                status_text = 'WAIT_POSE | actual=zero | ' + preview_text
             elif motion_state == 'RETREAT':
                 status_text = 'SETPOINT_RETREAT | ' + preview_text
             elif motion_state == 'POS_HOLD':

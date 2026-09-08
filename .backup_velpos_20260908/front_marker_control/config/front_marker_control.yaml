@@ -1,0 +1,141 @@
+# front_marker_control 节点运行参数（日常调参唯一入口，修改后重启生效）。
+# launch 不再重复这些默认值；节点代码中的默认值仅作兜底。
+# 场景差异（RViz 可视化关闭 yaw 控制）见 config/front_marker_control_rviz.yaml，
+# 加载顺序固定为先本文件、后场景文件。
+
+# ---- 目标与坐标系 ----
+# Marker 锁定后机体坐标系下的悬停目标位置（m，前 x / 右 y / 下 z）
+target_xyz_body: [0.8, 0.0, 0.0]
+# TF 坐标系：机体
+base_frame: base_link
+
+# ---- 位置环增益（速度 = kp * 位置误差，1/s） ----
+kp_x: 1.50
+kp_y: 1.50
+kp_z: 1.00
+kp_yaw: 0.40
+yaw_lpf_tau: 0.20
+
+# ---- 位置低通时间常数（s；0 表示不滤波） ----
+position_lpf_tau_x: 0.05
+position_lpf_tau_y: 0.00
+position_lpf_tau_z: 0.00
+
+# ---- 速度限幅 ----
+# 合成 YZ 平面速度限幅：hypot(vy, vz) <= vyz_limit（m/s）
+vyz_limit: 0.80
+# 前向 x 速度限幅（m/s）
+vx_limit: 0.20
+yaw_rate_limit: 0.80
+# Velocity hysteresis deadbands on the commanded speed (m/s):
+#   off = stop producing, on = start producing (on >= off), one pair per axis.
+
+# ---- 速度滞环死区（m/s）：off = 停止输出阈值，on = 恢复输出阈值，on >= off ----
+velocity_deadband_off_x: 0.010
+velocity_deadband_on_x: 0.015
+velocity_deadband_off_y: 0.004
+velocity_deadband_on_y: 0.007
+velocity_deadband_off_z: 0.003
+velocity_deadband_on_z: 0.006
+yaw_error_deadband: 0.06
+
+# ---- 输出开关 ----
+# 是否启用 yaw 控制（RViz 场景在 front_marker_control_rviz.yaml 中关闭）
+enable_yaw_control: true
+# 是否向 MAVROS 发布 setpoint 输出（false 时仅计算不输出）
+enable_setpoint_output: true
+# 是否启用位置锁定（ALIGN -> POS_HOLD）与近墙后退（RETREAT）
+# （RViz 可视化场景无真实飞机/定位，在 front_marker_control_rviz.yaml 中显式关闭）
+enable_position_hold: true
+# setpoint 发布频率（Hz）
+setpoint_publish_rate_hz: 20.0
+
+# ---- 加速度限制与丢标减速 ----
+# 正常逼近加速度上限（m/s^2）
+max_accel: 0.50
+# 丢失目标后的减速加速度（m/s^2）
+loss_decel: 1.00
+
+# ---- 超时（s） ----
+# Marker 位姿超时视为丢失
+pose_timeout_sec: 0.1
+# 位姿时间戳过旧即拒绝（延迟上限）
+max_pose_latency_sec: 0.5
+# 位姿滤波最大积分步长
+filter_dt_max_sec: 0.5
+# MAVROS state 超时（/mavros/state 心跳约 1 Hz，预留抖动裕量）
+state_timeout_sec: 2.0
+# 允许的未来时间戳容差
+future_stamp_tolerance_sec: 0.1
+# TF 查询超时
+tf_lookup_timeout_sec: 0.05
+
+# ---- 输入/输出话题 ----
+pose_topic: /front_marker/pose
+state_topic: /mavros/state
+setpoint_raw_topic: /mavros/setpoint_raw/local
+position_error_topic: /front_marker_control/position_error
+yaw_error_topic: /front_marker_control/yaw_error
+command_topic: /front_marker_control/cmd_vel
+setpoint_preview_topic: /front_marker_control/setpoint_preview
+status_topic: /front_marker_control/status
+
+# ---- 对准判据 ----
+# 侧向/垂向/距离对准容差（m）
+lateral_tolerance_m: 0.08
+vertical_tolerance_m: 0.08
+distance_tolerance_m: 0.12
+# yaw 对准容差（deg）
+yaw_tolerance_deg: 6.0
+# 全部对准后的保持时长（s）
+aligned_hold_sec: 1.0
+
+# ---- 位置锁定与近墙保护（enable_position_hold=true 时生效）----
+# 定位输入话题（Odometry，body 在 local ENU 的位姿）
+odom_topic: /mavros/local_position/odom
+# 定位接收超时（s）：超过视为定位失效
+odom_timeout_sec: 0.20
+# 定位插值最大样本间隔（s）
+odom_interp_gap_max_sec: 0.10
+# 定位源时间戳最大允许年龄（s）：超龄/重放帧一律拒绝
+odom_source_max_age_sec: 0.50
+# POS_HOLD 退出带宽（m/deg，须 >= 对准进入带宽）
+pos_exit_distance_tolerance_m: 0.18
+pos_exit_lateral_tolerance_m: 0.12
+pos_exit_vertical_tolerance_m: 0.12
+pos_exit_yaw_tolerance_deg: 9.0
+# 视觉误差超限需连续保持的时间（s）才退出 POS_HOLD
+pos_exit_hold_sec: 1.0
+# 近墙保护：Marker 距离小于该值（m）即后退（须小于 target_xyz_body[0]）
+min_marker_distance_m: 0.60
+# 后退后重新对准的 Marker 距离（m，须大于 min_marker_distance_m）
+retreat_recover_distance_m: 0.70
+# 后退速度（m/s，须为负）
+retreat_velocity_x: -0.10
+
+# ---- 连续源时间采样与最终 XYZ+yaw 精对准 ----
+# 仅 enable_position_hold 与 enable_yaw_control 同时开启时生效。
+# 稳位进入不要求 yaw 已收敛；采样中视觉 XYZ 稳位并保持绝对 local yaw。
+yaw_sampling_duration_sec: 3.0
+# 剔除离群值后最少样本数；每个 Marker 源时间戳只使用一次。
+yaw_sampling_min_samples: 60
+# 相对圆周中位数的离群阈值（deg）、最小保留比例、圆周标准差上限（deg）。
+yaw_sampling_outlier_deg: 15.0
+yaw_sampling_min_inlier_ratio: 0.80
+yaw_sampling_max_std_deg: 6.0
+# 候选相对采样保持航向的最大修正（deg）；超限回到稳位重采样。
+yaw_refinement_max_correction_deg: 20.0
+# 等待源时间戳两侧 Odometry 的最长接收时间（s），不外推。
+yaw_sample_pending_timeout_sec: 0.50
+# local 位置差分速度门限（m/s），稳位与实际目标到位的持续时间（s）。
+refine_speed_gate_mps: 0.05
+refine_stable_hold_sec: 1.0
+# 最终位置 SP 使用静止到静止梯形速度轨迹，yaw 走圆周最短方向。
+pose_transition_speed_mps: 0.10
+pose_transition_accel_mps2: 0.50
+pose_transition_yaw_rate_deg_s: 10.0
+# 实际 yaw 距最终 SP 的到位阈值（deg），随后独立采集 3 秒视觉验收。
+pose_settle_yaw_tolerance_deg: 2.0
+# 验收/定点监测窗口的视觉 yaw 圆周均值绝对值上限（deg）。
+yaw_acceptance_tolerance_deg: 3.0
+fixed_yaw_target_topic: /front_marker_control/fixed_yaw_target

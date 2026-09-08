@@ -259,20 +259,19 @@ class PositionHoldTest(unittest.TestCase):
             ))
             self.assertTrue(math.isclose(message.yaw, 0.0, abs_tol=1e-6))
 
-        # ---- 4) 视觉误差超过退出阈值并持续 -> 返回 ALIGN。
+        # ---- 4) 视觉误差超过退出阈值：精对准路径目标固定、不按视觉误差
+        # 退出（0.5m 前向误差同时意味着 marker 很近，交由近墙保护处理）。
         exit_start = len(self.statuses)
-        # 0.5m 前向误差 > 0.18m 退出阈值。
-        self.publish_and_wait(
-            lambda: self.status_seen('mode=ALIGN', exit_start),
-            5.0, 'return to ALIGN after exit',
-            body_error=(0.5, 0.0, 0.0),
-        )
-        # ALIGN 输出速度型 setpoint。
-        velocity_previews = [
-            message for message in self.previews
-            if message.type_mask & PositionTarget.IGNORE_PX
-        ]
-        self.assertTrue(velocity_previews)
+        self.publish_aligned(0.6, body_error=(0.5, 0.0, 0.0))
+        self.assertTrue(self.status_seen('POS_HOLD', exit_start))
+        with self.lock:
+            fixed_previews = [
+                message for message in self.previews[exit_start:]
+                if not message.type_mask & PositionTarget.IGNORE_PX
+            ]
+        self.assertTrue(fixed_previews)
+        for message in fixed_previews:
+            self.assertTrue(math.isclose(message.position.x, 0.0, abs_tol=1e-6))
 
         # ---- 5) 近墙保护：marker x = 0.6 - 0.12 < 0.60 -> RETREAT。
         retreat_error = (self.marker_x_error(0.55), 0.0, 0.0)
@@ -311,8 +310,14 @@ class PositionHoldTest(unittest.TestCase):
         )
         recover_error = (self.marker_x_error(0.75), 0.0, 0.0)
         recover_start = len(self.statuses)
+        # 0.75m 恢复对齐：ALIGN 会立即因 XYZ 进容差而开启采样窗口，
+        # 因此 ALIGN 或其后的 YAW_SAMPLING 都视为已离开 RETREAT。
         self.publish_and_wait(
-            lambda: self.status_seen('mode=ALIGN', recover_start),
+            lambda: any(
+                marker in message.data
+                for message in self.statuses[recover_start:]
+                for marker in ('mode=ALIGN/', 'mode=YAW_SAMPLING/')
+            ),
             4.0, 'back to ALIGN at 0.75m',
             body_error=recover_error,
         )

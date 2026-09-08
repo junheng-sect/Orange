@@ -52,35 +52,62 @@ class RefinementNodeTest(unittest.TestCase):
                      PositionTarget.IGNORE_VZ, PositionTarget.IGNORE_YAW):
             self.assertFalse(message.type_mask & mask)
 
+    def test_sampling_survives_high_odom_speed(self):
+        # 采样中速度超限：odom 回调不再重置采样。
+        node = self.node()
+        node.refiner.mode = 'YAW_SAMPLING'
+        node.refiner.window_start = 100.0
+        with mock.patch.object(rospy.Time, 'now', return_value=rospy.Time.from_sec(100.05)):
+            node.odom_callback(odom_message(rospy.Time.from_sec(100.05), (0, 0, 0), 0))
+        self.assertEqual(node.refiner.mode, 'YAW_SAMPLING')
+        self.assertEqual(node.refiner.window_start, 100.0)
+
+    def test_odom_stream_gap_still_resets(self):
+        # VIO 断流（接收间隔 > odom_timeout）：仍废弃采样窗口（硬门控）。
+        node = self.node()
+        node.refiner.mode = 'YAW_SAMPLING'
+        node.refiner.window_start = 100.0
+        with mock.patch.object(rospy.Time, 'now', return_value=rospy.Time(100)):
+            node.odom_callback(odom_message(rospy.Time(100), (0, 0, 0), 0))
+        with mock.patch.object(rospy.Time, 'now', return_value=rospy.Time.from_sec(100.3)):
+            node.odom_callback(odom_message(rospy.Time.from_sec(100.3), (0, 0, 0), 0))
+        self.assertEqual(node.refiner.mode, 'ALIGN')
+
     def test_transient_offboard_exit_resets_before_next_control_tick(self):
         node = self.node()
         node.refiner.mode = 'YAW_SAMPLING'
-        node.refiner.stable_since = 90
-        node.refiner.samples = [(99, 0, (.8,0,0))]
+        node.refiner.window_start = 90.0
+        node.refiner.samples = [(99, 0, (.8, 0, 0))]
         with mock.patch.object(rospy.Time, 'now', return_value=rospy.Time(100)):
             node.state_callback(State(connected=True, armed=True, mode='MANUAL'))
             node.state_callback(State(connected=True, armed=True, mode='OFFBOARD'))
         self.assertEqual(node.refiner.mode, 'ALIGN')
-        self.assertIsNone(node.refiner.stable_since)
+        self.assertIsNone(node.refiner.window_start)
         self.assertFalse(node.refiner.samples)
 
-    def test_recovered_odom_cannot_hide_gap(self):
+    def test_pos_hold_vision_exit_disabled_with_refiner(self):
+        # 精对准路径：POS_HOLD 期间视觉误差再大也不触发退出。
         node = self.node()
-        with mock.patch.object(rospy.Time, 'now', return_value=rospy.Time(100)):
-            node.odom_callback(odom_message(rospy.Time(100), (0,0,0), 0))
-        node.refiner.mode = 'YAW_SAMPLING'
-        node.refiner.stable_since = 99
-        with mock.patch.object(rospy.Time, 'now', return_value=rospy.Time.from_sec(100.3)):
-            node.odom_callback(odom_message(rospy.Time.from_sec(100.3), (0,0,0), 0))
-        self.assertEqual(node.refiner.mode, 'ALIGN')
-        self.assertIsNone(node.refiner.stable_since)
+        node.refiner.mode = 'POS_HOLD'
+        node.position_target = ((0, 0, 0), 0.0, 100.0)
+        node.latest_position_error = (0.5, 0.2, 0.2)  # 远超退出带宽
+        self.assertFalse(node.position_exit_exceeded())
+
+    def test_pos_hold_vision_exit_kept_without_refiner(self):
+        # 旧路径（yaw 关闭）：视觉误差超限退出仍生效。
+        node = self.node(yaw=False)
+        node.position_target = ((0, 0, 0), 0.0, 100.0)
+        node.latest_position_error = (0.5, 0.0, 0.0)
+        node.pos_exit_start_time = rospy.Time(100)
+        with mock.patch.object(rospy.Time, 'now', return_value=rospy.Time(101)):
+            self.assertTrue(node.position_exit_exceeded())
 
     def test_yaw_disabled_position_lock_bypasses_sampling(self):
         node = self.node(yaw=False)
         with mock.patch.object(rospy.Time, 'now', return_value=rospy.Time(100)):
-            node.odom_callback(odom_message(rospy.Time(100), (1,2,3), .4))
+            node.odom_callback(odom_message(rospy.Time(100), (1, 2, 3), .4))
         node.latest_source_stamp = rospy.Time(100)
-        node.latest_position_error = (0,0,0)
+        node.latest_position_error = (0, 0, 0)
         node.latest_yaw_error = .2
         target = node.try_lock_position_target()
         self.assertIsNotNone(target)

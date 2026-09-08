@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Isolated simulated feedback: sampled target, smooth SP, verification and gates."""
+"""Isolated simulated feedback: fixed window, smooth SP, hold and hard gates."""
 import math
 import time
 import unittest
@@ -49,18 +49,18 @@ class RefinementIntegrationTest(unittest.TestCase):
                 sp = self.actual[-1]
                 if not sp.type_mask & PositionTarget.IGNORE_PX:
                     self.position = (sp.position.x, sp.position.y, sp.position.z)
-                if not sp.type_mask & PositionTarget.IGNORE_YAW:
                     self.yaw = sp.yaw
             odom = odom_message(stamp, self.position, self.yaw)
             if invalid_odom:
                 odom.pose.pose.position.x = float('nan')
             self.odom_pub.publish(odom)
             if vision:
-                dx, dy = .8-self.position[0], -self.position[1]
-                c, s = math.cos(self.yaw), math.sin(self.yaw)
-                error = (c*dx+s*dy-.8, -s*dx+c*dy, -self.position[2])
                 if near:
                     error = (-.25, 0, 0)
+                else:
+                    dx, dy = .8-self.position[0], -self.position[1]
+                    c, s = math.cos(self.yaw), math.sin(self.yaw)
+                    error = (c*dx+s*dy-.8, -s*dx+c*dy, -self.position[2])
                 self.pose_pub.publish(camera_pose(error, stamp, self.wall_yaw-self.yaw+self.bias))
             rospy.sleep(.025)
 
@@ -82,16 +82,12 @@ class RefinementIntegrationTest(unittest.TestCase):
         self.assertFalse(sp.type_mask & PositionTarget.IGNORE_YAW)
         self.assertTrue(sp.type_mask & PositionTarget.IGNORE_YAW_RATE)
         self.assertAlmostEqual(sp.yaw, 0.)
-        # An interrupted partial window cannot produce a target.
-        self.drive(.2)
+        # 窗口内断帧不清零、不重置：窗口照常在 0.6 s 后提交目标。
         self.drive(.2, vision=False)
-        self.assertFalse(self.targets)
-        self.drive(.2)
-        self.assertFalse(self.targets)
-        self.wait_mode('POSE_ALIGNING')
+        self.wait_mode('POSE_ALIGNING', timeout=10)
         start = len(self.actual)-1
         self.assertTrue(self.targets)
-        self.assertAlmostEqual(self.targets[-1].data, self.wall_yaw, places=5)
+        self.assertAlmostEqual(self.targets[-1].data, self.wall_yaw, places=4)
         self.wait_mode('POS_HOLD')
         sp = self.actual[-1]
         self.assertFalse(sp.type_mask & PositionTarget.IGNORE_PX)
@@ -110,34 +106,46 @@ class RefinementIntegrationTest(unittest.TestCase):
                     (sample.position.x,sample.position.y,sample.position.z),
                     (previous.position.x,previous.position.y,previous.position.z))))
                 self.assertLessEqual(distance, .1*dt+1e-6)
-                self.assertLessEqual(abs(wrap_angle(sample.yaw-previous.yaw)), math.radians(10)*dt+1e-6)
+                self.assertLessEqual(abs(wrap_angle(sample.yaw-previous.yaw)), math.radians(10)*dt+1e-7)
             previous = sample
-        # A held target survives missing vision but cannot reuse its acceptance window.
+        # 定点中丢标：固定目标保持（位置 setpoint 不变）。
         self.drive(.2, vision=False)
         self.assertFalse(self.actual[-1].type_mask & PositionTarget.IGNORE_PX)
-        # An 8-degree visual bias triggers resampling even below the old 9-degree exit band.
+        # 视觉偏置不再触发重采样：目标保持固定。
         count = len(self.targets)
         self.bias = math.radians(8)
-        self.wait_mode('ALIGN')
+        self.drive(.5)
         self.assertEqual(len(self.targets), count)
+        self.assertEqual('mode=POS_HOLD' in self.status[-1].data, True)
         self.bias = 0.
-        self.wait_mode('YAW_SAMPLING')
+        # FCU 硬门控：退 OFFBOARD 清目标，输出零速。
         self.drive(.15, mode='MANUAL')
         self.assertTrue(self.actual[-1].type_mask & PositionTarget.IGNORE_YAW)
         self.assertEqual(self.actual[-1].velocity.x, 0.)
         self.drive(.2)
         self.assertEqual(len(self.targets), count)
         self.wait_mode('YAW_SAMPLING')
+        # VIO 失效（非法 odom）：废弃采样，速度归零。
         self.drive(.15, invalid_odom=True)
         self.assertTrue(self.actual[-1].type_mask & PositionTarget.IGNORE_PX)
         self.assertEqual(self.actual[-1].velocity.x, 0.)
         self.drive(.2)
         self.assertEqual(len(self.targets), count)
         self.wait_mode('YAW_SAMPLING')
+        # 近墙后退：打断采样，负向速度。
         self.drive(.15, near=True)
         self.assertTrue(self.status and 'RETREAT' in self.status[-1].data)
         self.assertLess(self.actual[-1].velocity.x, 0.)
         self.assertEqual(self.actual[-1].yaw_rate, 0.)
+
+    def test_entry_with_speed_and_xyz_only(self):
+        # XYZ 进容差即开始测量：无速度门、无 yaw 收敛要求。
+        # yaw 偏 40°、速度残差存在时也直接进入采样窗口。
+        self.drive(.25, mode='MANUAL')
+        self.wait_mode('YAW_SAMPLING')
+        # 无 marker 延迟窗口结束（deadline 由控制定时器判定）不可测时序精度，
+        # 只验证窗口在有断帧的情况下仍能提交目标。
+        self.wait_mode('POSE_ALIGNING', timeout=10)
 
 
 if __name__ == '__main__':

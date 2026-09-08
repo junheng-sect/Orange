@@ -1,4 +1,18 @@
-"""Source-time paired final-pose refinement. Pure Python; caller serializes access."""
+"""Fixed-duration final-pose sampling. Pure Python; caller serializes access.
+
+The refiner runs ALIGN -> YAW_SAMPLING -> POSE_ALIGNING -> POS_HOLD:
+
+- ALIGN ends as soon as the vision XYZ error is inside tolerance. No speed
+  gate, no hold time and no yaw requirement.
+- YAW_SAMPLING is a fixed wall-clock window of ``yaw_sampling_duration_sec``
+  counted by the control timer. Missing frames, speed spikes and XYZ
+  deviations never pause, clear or restart it.
+- When the timer deadline is reached the first control tick after it
+  computes the fixed XYZ+yaw target from every pairable sample collected in
+  the window and immediately emits position setpoints (POSE_ALIGNING ->
+  POS_HOLD via the smooth transition). No visual acceptance, no
+  resampling while holding.
+"""
 import math
 from collections import deque
 
@@ -9,62 +23,46 @@ from front_marker_control.geometry import (
 
 DEFAULTS = {
     'yaw_sampling_duration_sec': 3.0,
-    'yaw_sampling_min_samples': 60,
-    'yaw_sampling_outlier_deg': 15.0,
-    'yaw_sampling_min_inlier_ratio': 0.80,
-    'yaw_sampling_max_std_deg': 6.0,
-    'yaw_refinement_max_correction_deg': 20.0,
     'yaw_sample_pending_timeout_sec': 0.50,
-    'refine_speed_gate_mps': 0.05,
-    'refine_stable_hold_sec': 1.0,
     'pose_transition_speed_mps': 0.10,
     'pose_transition_accel_mps2': 0.50,
     'pose_transition_yaw_rate_deg_s': 10.0,
-    'pose_settle_yaw_tolerance_deg': 2.0,
-    'yaw_acceptance_tolerance_deg': 3.0,
 }
 
 
 def validate_parameters(parameters):
     for name in DEFAULTS:
+        if name not in parameters:
+            continue
         value = parameters[name]
         if not math.isfinite(value) or value <= 0:
             raise ValueError('%s must be finite and positive' % name)
-    count = parameters['yaw_sampling_min_samples']
-    if count != int(count) or count < 2:
-        raise ValueError('yaw_sampling_min_samples must be an integer >= 2')
-    if parameters['yaw_sampling_min_inlier_ratio'] > 1:
-        raise ValueError('yaw_sampling_min_inlier_ratio must be <= 1')
-    for name in ('yaw_sampling_outlier_deg', 'yaw_sampling_max_std_deg',
-                 'yaw_refinement_max_correction_deg', 'yaw_acceptance_tolerance_deg',
-                 'pose_settle_yaw_tolerance_deg'):
-        if parameters[name] >= 180:
-            raise ValueError('%s must be below 180 degrees' % name)
 
 
-def robust_angles(angles, parameters):
-    """Circular L1 medoid, fixed-angle trimming, then circular mean/std.
+def circular_mean(angles, reference):
+    """Circular mean of ``angles`` unwrapped relative to ``reference``.
 
-    Return indices as well so position and heading use exactly the same samples.
+    The circular vector mean is ill-conditioned near the +/-180 wrap point
+    and undefined when the mean vector length collapses to zero. In both
+    cases fall back to the arithmetic mean of angles unwrapped relative to
+    ``reference`` so the result stays deterministic.
     """
+    cosine = sum(math.cos(a) for a in angles) / len(angles)
+    sine = sum(math.sin(a) for a in angles) / len(angles)
+    if math.hypot(cosine, sine) < 1e-6:
+        unwrapped = [reference + wrap_angle(a - reference) for a in angles]
+        return wrap_angle(sum(unwrapped) / len(unwrapped))
+    return math.atan2(sine, cosine)
+
+
+def circular_std(angles):
+    """Circular standard deviation in radians; observation only, no gate."""
     if not angles:
-        return None, float('inf'), [], 'empty window'
-    median = min(angles, key=lambda a: sum(abs(wrap_angle(b - a)) for b in angles))
-    limit = math.radians(parameters['yaw_sampling_outlier_deg'])
-    indices = [i for i, a in enumerate(angles) if abs(wrap_angle(a - median)) <= limit]
-    cosine = sum(math.cos(angles[i]) for i in indices) / len(indices)
-    sine = sum(math.sin(angles[i]) for i in indices) / len(indices)
+        return float('inf')
+    cosine = sum(math.cos(a) for a in angles) / len(angles)
+    sine = sum(math.sin(a) for a in angles) / len(angles)
     length = min(1.0, math.hypot(cosine, sine))
-    deviation = math.sqrt(-2 * math.log(max(length, 1e-15)))
-    mean = math.atan2(sine, cosine)
-    reason = ''
-    if len(indices) < parameters['yaw_sampling_min_samples']:
-        reason = 'insufficient inliers'
-    elif len(indices) / len(angles) < parameters['yaw_sampling_min_inlier_ratio']:
-        reason = 'inlier ratio'
-    elif deviation > math.radians(parameters['yaw_sampling_max_std_deg']):
-        reason = 'circular std'
-    return mean, deviation, indices, reason
+    return math.sqrt(-2 * math.log(max(length, 1e-15)))
 
 
 class PoseTransition:
@@ -114,7 +112,7 @@ class FinalPoseRefiner:
         self.max_gap = max_gap
         self.pose_timeout = pose_timeout
         self.reason = ''
-        self.stats = 'samples=0 span=0 std=n/a correction=n/a residual=n/a'
+        self.stats = 'samples=0 span=0 std=n/a target=n/a'
         self.generation = 0
         self.reset('initial')
 
@@ -124,26 +122,16 @@ class FinalPoseRefiner:
         self.target_stamp = None
         self.transition = None
         self.hold_yaw = None
-        self.stable_since = None
+        self.window_start = None
+        self.window_deadline = None
         self.last_tick = None
         self.clear_window(reason)
 
     def clear_window(self, reason='', epoch=float('inf')):
         self.pending = deque()
         self.samples = []
-        self.last_marker_stamp = None
-        self.last_pair_stamp = None
-        self.last_pair_receive = None
         self.epoch = epoch
         self.reason = reason
-
-    def visual_interruption(self, reason):
-        if self.mode in ('ALIGN', 'YAW_SAMPLING'):
-            self.reset(reason)
-        else:
-            # Local positioning remains valid, but vision has not verified it.
-            self.clear_window(reason)
-            self.stable_since = None
 
     def within(self, error):
         return all(abs(v) <= limit for v, limit in zip(error, self.tolerances))
@@ -151,135 +139,135 @@ class FinalPoseRefiner:
     def marker(self, stamp, received, position_body, yaw_error):
         if stamp < self.epoch or received < self.epoch:
             return
-        if self.last_marker_stamp is not None and stamp <= self.last_marker_stamp:
+        # 只接受源时间与接收时间均在本轮窗口内的观测：截止后先于控制
+        # 定时器到达的图像不得进入最终均值。
+        if self.window_deadline is not None and (
+                stamp > self.window_deadline + 1e-9
+                or received > self.window_deadline + 1e-9):
             return
-        self.last_marker_stamp = stamp
+        # 去重只对已入队的观测生效：乱序/未来时间戳不抬升水位，
+        # 后续正常时间戳的观测仍可入队。
+        queued = [s for s in self.pending if s[0] >= stamp]
+        if any(s[0] == stamp for s in queued):
+            return
         self.pending.append((stamp, received, tuple(position_body), yaw_error))
         # Bounded even with a stalled odometry producer / unusually high input rate.
         if len(self.pending) > 256:
-            self.visual_interruption('pending queue overflow')
+            self.pending.clear()
 
     def process_pairs(self, now, buffer):
+        """Pair queued Marker observations with interpolated local poses.
+
+        确定无法配对的样本（odom 已越过其时间戳但插值失败的历史间隙）
+        直接丢弃；尚待后续 VIO 覆盖的样本暂存队尾，不阻塞其后可配对的
+        样本。截止时不等待未完成配对（deadline tick 后由 clear_window
+        丢弃暂存项）。
+        """
+        remaining = deque()
         while self.pending:
-            stamp, received, body, error = self.pending[0]
+            stamp, received, body, error = self.pending.popleft()
             if now - received > self.p['yaw_sample_pending_timeout_sec']:
-                self.visual_interruption('pair timeout')
-                return
+                continue
             pose = buffer.lookup(stamp, self.max_gap)
             if pose is None:
-                if buffer.newest_stamp is not None and buffer.newest_stamp >= stamp:
-                    self.visual_interruption('source interpolation unavailable')
-                return
-            self.pending.popleft()
-            if self.last_pair_stamp is not None and stamp-self.last_pair_stamp > self.pose_timeout + 1e-9:
-                self.visual_interruption('source pair gap')
-                return
-            self.last_pair_stamp = stamp
-            self.last_pair_receive = now
-            if self.mode == 'YAW_SAMPLING':
-                angle = wrap_angle(yaw_from_quaternion(pose.quaternion) + error)
-                rotated = rotate_vector_by_quaternion(pose.quaternion, body)
-                marker_local = tuple(a+b for a, b in zip(pose.position, rotated))
-            else:
-                angle, marker_local = error, None
+                if buffer.newest_stamp is not None and stamp <= buffer.newest_stamp:
+                    # 历史间隙：VIO 单调前进，该时间戳永远不会可配对。
+                    continue
+                # 等待未来的 VIO 样本：暂存但不阻塞后续处理。
+                remaining.append((stamp, received, body, error))
+                continue
+            if stamp < self.window_start:
+                # Marker 到达于窗口内，但配对的 odom 早于窗口入场：不可用。
+                continue
+            angle = wrap_angle(yaw_from_quaternion(pose.quaternion) + error)
+            rotated = rotate_vector_by_quaternion(pose.quaternion, body)
+            marker_local = tuple(a+b for a, b in zip(pose.position, rotated))
+            if self.samples and stamp <= self.samples[-1][0]:
+                continue  # 重复/乱序源时间戳不参与计算
             self.samples.append((stamp, angle, marker_local))
-            if self.samples[-1][0] - self.samples[0][0] >= self.p['yaw_sampling_duration_sec'] - 1e-9:
-                self.evaluate(now)
-                return  # clear_window discards pre-epoch queued samples
+        self.pending = remaining
 
-    def evaluate(self, now):
+    def commit(self, now, local_pose):
+        """Build the fixed target from all collected samples at deadline.
+
+        The transition is created immediately so the committing control tick
+        already emits a position setpoint.
+        """
+        if not self.samples:
+            self.reset('empty_window')
+            return
         angles = [s[1] for s in self.samples]
-        mean, deviation, indices, reason = robust_angles(angles, self.p)
-        correction = (wrap_angle(mean-self.hold_yaw)
-                      if self.mode == 'YAW_SAMPLING' else mean)
-        self.stats = 'samples=%d inliers=%d span=%.3f std=%.2f correction=%s residual=%s' % (
-            len(angles), len(indices), self.samples[-1][0]-self.samples[0][0],
+        mean = circular_mean(angles, self.hold_yaw)
+        deviation = circular_std(angles)
+        marker = tuple(
+            sum(s[2][axis] for s in self.samples) / len(self.samples)
+            for axis in range(3)
+        )
+        offset = rotate_vector_by_yaw(self.offset, mean)
+        self.target = (tuple(a-b for a, b in zip(marker, offset)), mean)
+        self.target_stamp = self.samples[-1][0]
+        self.mode = 'POSE_ALIGNING'
+        self.transition = PoseTransition(
+            local_pose.position, self.hold_yaw, self.target, self.p
+        )
+        self.reason = 'target accepted'
+        self.generation += 1
+        self.stats = 'samples=%d span=%.3f std=%.2f target=(%.3f, %.3f, %.3f, %.2fdeg)' % (
+            len(angles),
+            self.samples[-1][0]-self.samples[0][0],
             math.degrees(deviation),
-            '%.2f' % math.degrees(correction) if self.mode == 'YAW_SAMPLING' else 'n/a',
-            '%.2f' % math.degrees(mean) if self.mode != 'YAW_SAMPLING' else 'n/a')
-        if self.mode == 'YAW_SAMPLING':
-            if not reason and abs(correction) > math.radians(self.p['yaw_refinement_max_correction_deg']):
-                reason = 'correction limit'
-            if reason:
-                self.reset(reason)
-                return
-            marker = tuple(sum(self.samples[i][2][axis] for i in indices)/len(indices)
-                           for axis in range(3))
-            offset = rotate_vector_by_yaw(self.offset, mean)
-            self.target = (tuple(a-b for a, b in zip(marker, offset)), mean)
-            self.target_stamp = self.samples[-1][0]
-            self.mode = 'POSE_ALIGNING'
-            self.stable_since = None
-            self.generation += 1
-            self.clear_window('target accepted')
-        elif reason:
-            # A noisy window is inconclusive, never a successful verification.
-            self.clear_window(reason, epoch=now)
-        elif abs(mean) > math.radians(self.p['yaw_acceptance_tolerance_deg']):
-            self.reset('visual yaw residual exceeds tolerance')
-        else:
-            self.mode = 'POS_HOLD'
-            self.clear_window('visual yaw verified', epoch=now)
-
-    def actual_pose_within(self, local_pose, speed):
-        position_error = tuple(a-b for a, b in zip(self.target[0], local_pose.position))
-        position_error = rotate_vector_by_yaw(position_error, -self.target[1])
-        return (self.within(position_error) and speed < self.p['refine_speed_gate_mps']
-                and abs(wrap_angle(self.target[1]-yaw_from_quaternion(local_pose.quaternion)))
-                <= math.radians(self.p['pose_settle_yaw_tolerance_deg']))
+            self.target[0][0], self.target[0][1], self.target[0][2],
+            math.degrees(mean),
+        )
+        self.clear_window('target accepted')
 
     def tick(self, now, dt, pose_fresh, local_pose, speed, error, buffer):
+        """Advance the refiner one control period.
+
+        ``error``/``speed``/``pose_fresh`` only gate ALIGN entry; once the
+        window starts they no longer reset anything. The window deadline is
+        evaluated here so it fires on the control timer even with no new
+        images.
+        """
         if self.last_tick is not None and now < self.last_tick:
             self.reset('clock reversal')
         self.last_tick = now
         if local_pose is None:
             self.reset('localization unavailable')
             return
-        if not pose_fresh:
-            self.visual_interruption('vision unavailable')
         if self.mode == 'ALIGN':
-            if not pose_fresh or not self.within(error) or speed >= self.p['refine_speed_gate_mps']:
-                self.stable_since = None
-                return
-            if self.stable_since is None:
-                self.stable_since = now
-            if now - self.stable_since >= self.p['refine_stable_hold_sec']:
+            # 入场要求新鲜视觉与 XYZ 容差同时满足：视觉已超时但旧误差
+            # 尚未清除时不得凭旧误差启动采样。
+            if pose_fresh and error is not None and self.within(error):
                 self.mode = 'YAW_SAMPLING'
                 self.hold_yaw = yaw_from_quaternion(local_pose.quaternion)
+                self.window_start = now
+                self.window_deadline = (
+                    now + self.p['yaw_sampling_duration_sec'])
                 self.clear_window('sampling', epoch=now)
             return
         if self.mode == 'YAW_SAMPLING':
-            if not self.within(error) or speed >= self.p['refine_speed_gate_mps']:
-                self.reset('sampling stability lost')
-                return
+            # 每个控制周期都消费队列：已入队样本的配对只取决于自身
+            # 时间戳、窗口范围和配对超时，不依赖当前视觉新鲜度。
+            # 视觉新鲜度仅用于入场判断与速度输出（节点侧）。
+            self.process_pairs(now, buffer)
+            if now - self.window_start >= self.p['yaw_sampling_duration_sec'] - 1e-9:
+                self.commit(now, local_pose)
+            return
         if self.mode == 'POSE_ALIGNING':
             if self.transition is None:
-                self.transition = PoseTransition(local_pose.position, self.hold_yaw, self.target, self.p)
+                self.transition = PoseTransition(
+                    local_pose.position, self.hold_yaw, self.target, self.p
+                )
             else:
                 self.transition.step(dt)
-            settled = (pose_fresh and self.transition.done
-                       and self.actual_pose_within(local_pose, speed))
-            if not settled:
-                self.stable_since = None
-                self.clear_window('waiting for actual pose')
-            else:
-                if self.stable_since is None:
-                    self.stable_since = now
-                if now-self.stable_since >= self.p['refine_stable_hold_sec'] and math.isinf(self.epoch):
-                    self.clear_window('verifying', epoch=now)
-        if self.mode == 'POS_HOLD' and pose_fresh and math.isinf(self.epoch):
-            self.clear_window('monitoring', epoch=now)
-        if pose_fresh:
-            if (self.last_pair_receive is not None and not self.pending
-                    and now-self.last_pair_receive > self.pose_timeout):
-                self.visual_interruption('pair stream interrupted')
-                return
-            self.process_pairs(now, buffer)
-            # The committing tick must already emit a position setpoint.
-            if self.mode == 'POSE_ALIGNING' and self.transition is None:
-                self.transition = PoseTransition(local_pose.position, self.hold_yaw, self.target, self.p)
+            if self.transition.done:
+                self.mode = 'POS_HOLD'
+                self.reason = 'transition complete'
+            return
+        # POS_HOLD: fixed target, nothing further to compute.
 
     def status(self):
         span = self.samples[-1][0]-self.samples[0][0] if self.samples else 0.0
-        return 'refine=%s n=%d span=%.3f | %s | reject=%s' % (
+        return 'refine=%s n=%d span=%.3f | %s | %s' % (
             self.mode, len(self.samples), span, self.stats, self.reason)

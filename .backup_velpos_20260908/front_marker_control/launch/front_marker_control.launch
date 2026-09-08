@@ -1,0 +1,16 @@
+<launch>
+  <!-- 控制参数统一在 YAML 中维护：先公共配置，后场景差异配置。
+       场景差异（如 RViz 可视化关闭 yaw 控制）见 front_marker_control_rviz.yaml。 -->
+  <arg name="config_file" default="$(find front_marker_control)/config/front_marker_control.yaml" />
+  <arg name="scene_config" default="" />
+
+  <node pkg="front_marker_control"
+        type="front_marker_control_node"
+        name="front_marker_control_node"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(arg config_file)" />
+    <rosparam if="$(eval arg('scene_config') != '')"
+              command="load" file="$(arg scene_config)" />
+  </node>
+</launch>
