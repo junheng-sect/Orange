@@ -63,8 +63,8 @@ pose_timeout_sec: 0.1
 max_pose_latency_sec: 0.5
 # 位姿滤波最大积分步长
 filter_dt_max_sec: 0.5
-# MAVROS state 超时
-state_timeout_sec: 1.0
+# MAVROS state 超时（/mavros/state 心跳约 1 Hz，预留抖动裕量）
+state_timeout_sec: 2.0
 # 允许的未来时间戳容差
 future_stamp_tolerance_sec: 0.1
 # TF 查询超时

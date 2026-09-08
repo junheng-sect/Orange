@@ -247,7 +247,7 @@ class FrontMarkerControlNode(object):
             'pose_timeout_sec': 0.1,
             'max_pose_latency_sec': 0.5,
             'filter_dt_max_sec': 0.5,
-            'state_timeout_sec': 1.0,
+            'state_timeout_sec': 2.0,
             'future_stamp_tolerance_sec': 0.1,
             'tf_lookup_timeout_sec': 0.05,
             'lateral_tolerance_m': 0.08,
