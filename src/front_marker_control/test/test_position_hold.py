@@ -56,6 +56,11 @@ class PositionHoldTest(unittest.TestCase):
 
     def setUp(self):
         self.lock = threading.Lock()
+        # 近墙门限须继承主 YAML（启动文件不再覆盖）：断言节点实际加载值。
+        self.assertEqual(
+            rospy.get_param('/pos_hold_front_marker_control/min_marker_distance_m'),
+            0.50,
+        )
         self.commands = []
         self.previews = []
         self.actual = []
@@ -273,8 +278,8 @@ class PositionHoldTest(unittest.TestCase):
         for message in fixed_previews:
             self.assertTrue(math.isclose(message.position.x, 0.0, abs_tol=1e-6))
 
-        # ---- 5) 近墙保护：marker x = 0.6 - 0.12 < 0.60 -> RETREAT。
-        retreat_error = (self.marker_x_error(0.55), 0.0, 0.0)
+        # ---- 5) 近墙保护：marker x = 0.45 < 0.50 -> RETREAT。
+        retreat_error = (self.marker_x_error(0.45), 0.0, 0.0)
         retreat_start = len(self.statuses)
         self.publish_and_wait(
             lambda: self.status_seen('RETREAT', retreat_start),
@@ -388,7 +393,7 @@ class PositionHoldTest(unittest.TestCase):
 
     def test_retreat_pose_loss_brakes(self):
         # 直接触发近墙。
-        retreat_error = (self.marker_x_error(0.55), 0.0, 0.0)
+        retreat_error = (self.marker_x_error(0.45), 0.0, 0.0)
         retreat_start = len(self.statuses)
         self.publish_and_wait(
             lambda: self.status_seen('RETREAT', retreat_start), 4.0,

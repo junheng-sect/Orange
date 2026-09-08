@@ -349,6 +349,38 @@ class PositionHoldRegressionTest(unittest.TestCase):
         command = node.command_pub.messages[-1]
         self.assertLessEqual(command.twist.linear.x, 0.0)
 
+    def test_near_wall_threshold_boundaries(self):
+        """min_marker_distance_m=0.50 的触发/恢复边界：
+        触发用严格小于门限，恢复用大于等于恢复距离。
+        marker_x = error_x + target_xyz_body[0]（0.8）。"""
+        def make_node(control_mode, error_x):
+            node = self.hold_node(control_mode=control_mode, error_x=error_x)
+            node.min_marker_distance_m = 0.5
+            node.retreat_recover_distance_m = 0.7
+            return node
+
+        # x = 0.49 m：当周期触发后退。
+        node = make_node('ALIGN', -0.31)
+        self.run_control_cycle(node)
+        self.assertEqual('RETREAT', node.control_mode)
+
+        # x = 0.50 / 0.51 m：不触发（严格小于门限）。
+        for error_x in (-0.30, -0.29):
+            node = make_node('ALIGN', error_x)
+            self.run_control_cycle(node)
+            self.assertEqual('ALIGN', node.control_mode)
+
+        # 后退中 x = 0.69 m：未达恢复距离，继续后退。
+        node = make_node('RETREAT', -0.11)
+        self.run_control_cycle(node)
+        self.assertEqual('RETREAT', node.control_mode)
+        self.assertLess(node.command_pub.messages[-1].twist.linear.x, 0.0)
+
+        # 后退中 x = 0.70 m：达到恢复距离，重新对准。
+        node = make_node('RETREAT', -0.10)
+        self.run_control_cycle(node)
+        self.assertEqual('ALIGN', node.control_mode)
+
     def test_localization_loss_is_reported(self):
         """A stale/unavailable localization surfaces a reason, not silence."""
         node = self.hold_node(control_mode='ALIGN', error_x=0.0)

@@ -106,8 +106,12 @@ pos_exit_vertical_tolerance_m: 0.12
 pos_exit_yaw_tolerance_deg: 9.0
 # 视觉误差超限需连续保持的时间（s）才退出 POS_HOLD
 pos_exit_hold_sec: 1.0
-# 近墙保护：Marker 距离小于该值（m）即后退（须小于 target_xyz_body[0]）
-min_marker_distance_m: 0.60
+# 近墙保护：机体坐标系前向 x（Marker 相对 base_link 的前向坐标，
+# 未低通滤波的位置观测）小于该值（m）即退出对准/位置保持并后退
+# （须小于 target_xyz_body[0]）。0.50 m 为初始调试门限而非硬限位：
+# 按机体中心到桨尖约 0.25 m 计，正对墙面触发时约剩 0.25 m 桨尖间隙，
+# 视觉延迟、惯性与制动响应仍会消耗该间隙。
+min_marker_distance_m: 0.50
 # 后退后重新对准的 Marker 距离（m，须大于 min_marker_distance_m）
 retreat_recover_distance_m: 0.70
 # 后退速度（m/s，须为负）

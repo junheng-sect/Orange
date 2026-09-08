@@ -283,7 +283,7 @@ class FrontMarkerControlNode(object):
             'pos_exit_vertical_tolerance_m': 0.12,
             'pos_exit_yaw_tolerance_deg': 9.0,
             'pos_exit_hold_sec': 1.0,
-            'min_marker_distance_m': 0.60,
+            'min_marker_distance_m': 0.50,
             'retreat_recover_distance_m': 0.70,
             'retreat_velocity_x': -0.10,
         }

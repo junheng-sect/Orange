@@ -17,6 +17,11 @@ from test_position_hold import camera_pose, odom_message
 class RefinementIntegrationTest(unittest.TestCase):
     def setUp(self):
         self.actual = []
+        # 近墙门限须继承主 YAML（启动文件不再覆盖）：断言节点实际加载值。
+        self.assertEqual(
+            rospy.get_param('/refine_front_marker_control/min_marker_distance_m'),
+            0.50,
+        )
         self.status = []
         self.targets = []
         self.pose_pub = rospy.Publisher('/test_refine/pose', PoseStamped, queue_size=10)
@@ -56,7 +61,7 @@ class RefinementIntegrationTest(unittest.TestCase):
             self.odom_pub.publish(odom)
             if vision:
                 if near:
-                    error = (-.25, 0, 0)
+                    error = (-.35, 0, 0)
                 else:
                     dx, dy = .8-self.position[0], -self.position[1]
                     c, s = math.cos(self.yaw), math.sin(self.yaw)
