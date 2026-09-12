@@ -29,5 +29,5 @@ camera_frame_id: usb_camera_optical_frame
 
 # CameraInfo 标定源（相机名须与 camera_info_url 内的标定一致）
 camera_name: ov9281_640x480
-# 标定文件地址（绝对路径；更换分辨率时同步替换）
-camera_info_url: file:///home/vslam/seeker/src/ov9281_usb_cam/config/ov9281_640x480.yaml
+# 标定文件地址（本包内 package:// 相对路径；更换分辨率时同步替换）
+camera_info_url: package://ov9281_usb_cam/config/ov9281_640x480.yaml
