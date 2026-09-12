@@ -1,37 +1,39 @@
-# seeker 工作说明
+# Orange Pi 工作说明
 
 ## 项目环境
 
-- 工作空间：`/home/zjh/project/seeker`
-- 当前模块：`SEEKER_OMNI`
-- 本机系统：Ubuntu 22.04
-- 本机sudo密码[REDACTED]
-- SEEKER 板端：RK3588，Ubuntu 20.04，ROS Noetic
-- 板端 seeker 工作空间：`/home/vslam/seeker`
+- 板端：Orange Pi 5 Max，RK3588，Ubuntu 20.04.6 LTS，主机名 `orangepi5max`。
+- 板端实际工作空间：`/home/orangepi/orange`。
+- 本机挂载后的工作空间：`/home/zjh/mnt/orange_home/orange`，与板端上述目录是同一份文件。
+- 本机独立仓库：`/home/zjh/orange`，不是板端挂载目录。
+- 本机系统：Ubuntu 24.04.4 LTS；本机 sudo 密码：`[REDACTED]`。
+- ROS1 项目按 ROS Noetic/catkin 环境部署；构建前确认板端已经安装相应环境，不假定系统自带 ROS。
 
 ## 两端分工与同步（必读）
 
-本仓库同时存在于两端，通过 GitHub (junheng-sect/Orange) 同步，同步方向固定为单向：
+项目通过 GitHub 仓库 `junheng-sect/Orange` 同步。区分板端工作空间、本机挂载入口和本机独立仓库：
 
-- **SEEKER 板端**（`/home/vslam/seeker`）：唯一开发端。代码修改、commit、push、catkin 构建、实机运行都在这里进行。
-- **laptop 端**（`/home/zjh/project/seeker`）：只读查看端。仅用于阅读代码和分析问题，不构建、不运行 ROS 节点、**不修改文件、不 commit、不 push**。
-- 更新方式：板端 push 后，laptop 执行 `git pull`。laptop 端任何改动都会造成两端分叉，一律不允许。
-- 涉及实机验证的结论，以板端代码为准；laptop 看到的可能落后于板端未提交的修改。
+- **Orange Pi 板端**（`/home/orangepi/orange`）：唯一代码开发与实机运行端。代码修改针对这份工作空间，commit、push、catkin 构建和 ROS 节点运行通过 SSH 在板端执行。
+- **本机挂载入口**（`/home/zjh/mnt/orange_home/orange`）：通过 SSHFS 访问板端文件，编辑会直接修改板端，无需 Git 同步。挂载前先确认 `orange-mount` 成功，避免将文件误写到未挂载的本机目录。
+- **本机独立仓库**（`/home/zjh/orange`）：默认只读查看与分析，不构建、不运行 ROS 节点、不修改代码、不 commit、不 push；用户明确要求的文档维护按该次指令执行。
+- 独立仓库的更新方向：板端 push 后，本机在对应分支执行 `git pull`；不要将独立仓库与挂载目录混为一谈。
+- 实机验证以板端实际文件和运行结果为准，不以本机独立仓库的状态替代。
 
-## SEEKER 连接与凭据
+## SSH、网络与挂载
 
-- 用户：`vslam`
-- SSH 密码：`[REDACTED]`
-- `su`/root 密码：`[REDACTED]`
-
-当前已验证的网络信息：
-
-- USB RNDIS：PC 通常为 `10.42.0.1`，SEEKER 为 `10.42.0.2`，作为默认调试链路
+- SSH 别名：`ssh orange`；完整登录方式：`ssh orangepi@192.168.31.32`。
+- 板端用户：`orangepi`；SSH 和 sudo 密码均为 `[REDACTED]`，日常优先免密登录。
+- 本机 SSH 配置：`~/.ssh/config` 的 `Host orange`；专用密钥：`~/.ssh/id_ed25519_orange`。
+- 默认调试网络：Wi-Fi `Xiaomi`，接口 `wlan0`，固定地址 `192.168.31.32/24`，网关和 DNS 均为 `192.168.31.1`。
+- NetworkManager 的 `Xiaomi` 连接开机自动连接，优先级 `100`，重试次数 `0`（持续重试）；SSH 服务开机启动。
+- `orange-mount`：将板端 `/home/orangepi` 挂载到本机 `/home/zjh/mnt/orange_home`，默认可读写。
+- `orange-umont`：正常卸载上述目录，命令名保留 `umont` 拼写；目录占用时先退出目录、关闭文件后重试。
+- 两个命令位于本机 `~/.local/bin`，由普通用户运行，不使用 sudo；挂载手动触发，不自动随本机开机挂载。
 
 ## 协作与日志
 
 - `AGENTS.md` 只保存长期有效的环境参数、连接凭据和协作规范，不记录每轮开发流水或操作命令清单。
-- 日志统一写入 Obsidian 笔记目录：`/home/zjh/note/Note/<月.日>/LOG.md`。
+- 日志统一写入本机 Obsidian 笔记目录：`/home/zjh/obsidian/note/<月.日>/LOG.md`。
 - 日期目录必须使用不补零格式，例如 `6.12`，不要写成 `06.12`。
 - 若当天目录或 `LOG.md` 不存在，先创建再记录。
 - 每轮对话如果修改了文件，写入“修改记录”；如果只是排查或回答问题，写入“问题记录”。
@@ -39,15 +41,8 @@
 
 ## 开发约定
 
-- 优先按教程和板端现有 ROS Noetic/catkin 环境调试。
-- 本机和 SEEKER 板端构建 catkin 工作空间时，统一使用 `catkin build`，不使用 `catkin_make`。
+- 优先按 Orange Pi 板端的实际系统、依赖和设备权限调试，不套用其他板卡的环境与服务配置。
+- 构建与运行前，先在板端确认并 source `/opt/ros/noetic/setup.bash`；需要工作空间环境时再 source `/home/orangepi/orange/devel/setup.bash`，文件不存在时先报告环境缺失。
+- catkin 工作空间统一在板端使用 `catkin build`，不使用 `catkin_make`，不在本机挂载目录中构建或运行 ROS 节点。
 - 涉及 launch 或 ROS 节点启动时，优先给出可直接复制执行的完整命令。
-- 板端相机相关功能通常需要 root 权限，普通调试优先使用 `vslam` 用户。
-
-### catkin_ws_vins 工作空间红线（只读，禁止重建）
-
-- /home/vslam/catkin_ws_vins 是 seeker.service 开机 bringup 依赖的 VINS/robot_upstart 工作空间，**按只读对待**：禁止在其中增删改文件，禁止任何会触发 configure/build 的命令（catkin_make、cmake、atomic_configure 等）。
-- 需要改 autostart 时只改 src/seeker_utils/ 下脚本，不要为"生效"而对该空间跑 catkin_make（脚本可从源码路径直接运行/被上层 launch 引用）。
-- 原因：catkin_make 会把生成时环境的 CMAKE_PREFIX_PATH 烤进 devel/_setup_util.py；若 shell 未先 source /opt/ros/noetic/setup.bash，生成脚本不再链接 /opt/ros/noetic，seeker.service 里 rosrun/roslaunch 找不到 → 整机 bringup 失败（2026-09-06 已发生）。
-- 万一确需重建（必须用户明确授权）：先 source /opt/ros/noetic/setup.bash 再执行；构建后自检 source ~/catkin_ws_vins/devel/setup.bash && command -v rosrun 命中 /opt/ros/noetic/bin/rosrun；并 sudo systemctl daemon-reload。
-- 若发现 devel/_setup_util.py 里 CMAKE_PREFIX_PATH = r''.split(';')（underlay 为空），说明工作空间被错误重建，立即报告，不要继续依赖其构建产物。
+- 普通调试使用 `orangepi` 用户；相机、串口等设备先检查实际权限，仅对确需管理员权限的操作使用 sudo。
