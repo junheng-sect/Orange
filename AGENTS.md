@@ -7,7 +7,8 @@
 - 本机挂载后的工作空间：`/home/zjh/mnt/orange_home/orange`，与板端上述目录是同一份文件。
 - 本机独立仓库：`/home/zjh/orange`，不是板端挂载目录。
 - 本机系统：Ubuntu 24.04.4 LTS；本机 sudo 密码：`[REDACTED]`。
-- ROS1 项目按 ROS Noetic/catkin 环境部署；构建前确认板端已经安装相应环境，不假定系统自带 ROS。
+- 板端已安装并验证 ROS Noetic（`desktop-full`）和 `catkin-tools 0.9.4`，`catkin build` 可用，无需重复安装。
+- ROS 安装目录：`/opt/ros/noetic`；catkin 命令：`/usr/bin/catkin`，使用板端 Python 3 环境。
 
 ## 两端分工与同步（必读）
 
@@ -42,7 +43,8 @@
 ## 开发约定
 
 - 优先按 Orange Pi 板端的实际系统、依赖和设备权限调试，不套用其他板卡的环境与服务配置。
-- 构建与运行前，先在板端确认并 source `/opt/ros/noetic/setup.bash`；需要工作空间环境时再 source `/home/orangepi/orange/devel/setup.bash`，文件不存在时先报告环境缺失。
+- 板端 `~/.bashrc` 已自动加载 `/opt/ros/noetic/setup.bash`；非交互 SSH 命令或脚本中仍需显式 source 该文件，再执行构建或 ROS 命令。
+- 工作空间构建完成后，使用其包前再 source `/home/orangepi/orange/devel/setup.bash`；首次构建前该文件不存在属于正常情况，不代表 ROS 未安装。
 - catkin 工作空间统一在板端使用 `catkin build`，不使用 `catkin_make`，不在本机挂载目录中构建或运行 ROS 节点。
 - 涉及 launch 或 ROS 节点启动时，优先给出可直接复制执行的完整命令。
 - 普通调试使用 `orangepi` 用户；相机、串口等设备先检查实际权限，仅对确需管理员权限的操作使用 sudo。
