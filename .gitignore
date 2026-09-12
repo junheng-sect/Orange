@@ -9,3 +9,4 @@ logs/
 .zcode/
 cam_test/
 .pclog/
+.backup_velpos_20260908/
