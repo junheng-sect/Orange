@@ -10,3 +10,6 @@ logs/
 cam_test/
 .pclog/
 .backup_velpos_20260908/
+.pi/
+.nomachine-dl/
+.commandcode/
