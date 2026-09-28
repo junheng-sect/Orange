@@ -1,0 +1,39 @@
+[33m[WARN] [1790061479.770446133]: Bundled reference calibration assumes 2560x1440; original JSON lacks calibration size metadata[0m
+[0m[INFO] [1790061479.728046919]: camera calibration URL: file:///home/orangepi/orange/src/ov13855_apriltag_vision/validation/performance_20260922_run3/08_1280x720_30_vision_calibration.yaml[0m
+[0m[INFO] [1790061479.773142549]: Requesting at least 4 V4L2 capture buffers; appsink queue remains 1[0m
+[0m[INFO] [1790061480.230281091]: Streaming 1280x720 @ 30 caps fps, mono8, frame=ov13855_optical_frame[0m
+... logging to /home/orangepi/.ros/log/085321b6-b655-11f1-a5c4-8ccdfe0903ce/roslaunch-orangepi5max-30999.log
+Checking log directory for disk usage. This may take a while.
+Press Ctrl-C to interrupt
+Done checking log file disk usage. Usage is <1GB.
+]2;/home/orangepi/orange/src/ov13855_cam/launch/ov13855.launch
+[1mstarted roslaunch server http://127.0.0.1:41937/[0m
+
+SUMMARY
+========
+
+PARAMETERS
+ * /ov13855_cam/camera_frame_id: ov13855_optical_f...
+ * /ov13855_cam/camera_info_topic: /ov13855/camera_info
+ * /ov13855_cam/camera_info_url: file:///home/oran...
+ * /ov13855_cam/camera_name: ov13855_2560x1440
+ * /ov13855_cam/frame_timeout_sec: 5.0
+ * /ov13855_cam/framerate: 30
+ * /ov13855_cam/image_height: 720
+ * /ov13855_cam/image_topic: /ov13855/image_raw
+ * /ov13855_cam/image_width: 1280
+ * /ov13855_cam/video_device: /dev/video11
+ * /rosdistro: noetic
+ * /rosversion: 1.17.4
+
+NODES
+  /
+    ov13855_cam (ov13855_cam/ov13855_cam_node)
+
+[1mROS_MASTER_URI=http://127.0.0.1:11456[0m
+]2;/home/orangepi/orange/src/ov13855_cam/launch/ov13855.launch http://127.0.0.1:11456
+[1mprocess[ov13855_cam-1]: started with pid [31031][0m
+[ov13855_cam-1] killing on exit
+shutting down processing monitor...
+... shutting down processing monitor complete
+[1mdone[0m

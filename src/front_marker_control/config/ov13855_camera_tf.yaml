@@ -1,0 +1,13 @@
+# 相机静态 TF（base_frame -> camera_frame）参数。
+# 由 front_camera_static_tf 节点读取，替换原 launch 命令行数值。
+
+# 父坐标系（机体）
+base_frame: base_link
+# 子坐标系（相机光轴系）
+camera_frame: ov13855_optical_frame
+
+# 相机原点在 base_frame 下的平移（m）：相机位于 base_link 前方 0.18 m，光轴朝前
+translation: [0.18, 0.0, 0.0]
+
+# 旋转四元数（x, y, z, w）：base_link -> 光学系（z 前变 x 前）旋转
+rotation_quaternion: [-0.5, 0.5, -0.5, 0.5]

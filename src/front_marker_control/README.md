@@ -178,3 +178,18 @@ catkin_test_results build/front_marker_control/test_results
 
 集成测试使用 `/test_*` 输入输出话题和合成位置反馈，测试用短窗口由 test launch 显式覆盖；
 纯 Python 状态机测试使用完整默认 3 秒窗口。测试通过不代表 FCU/实飞验证。
+
+## OV13855 + AprilTag 独立链路
+
+新入口使用 `ov13855_cam` 和 `ov13855_apriltag_vision`，外参入口为
+`config/ov13855_camera_tf.yaml`（安装数值沿用旧相机，光学系为 `ov13855_optical_frame`）。
+
+```bash
+source /opt/ros/noetic/setup.bash
+source /home/orangepi/orange/devel/setup.bash
+roslaunch front_marker_control ov13855_marker_tracking.launch
+```
+
+旧 `front_marker_tracking.launch` 保持不变。退出新入口后可用旧入口回退；
+两者不能同时运行，因为共用 `/front_marker/pose` 和 `front_marker` TF。
+新相机标定采用参考配置，分辨率暂假定为 2560×1440，尺度实测见新视觉包 `VALIDATION.md`。

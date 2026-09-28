@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="2">
+ <name>ov13855_cam</name><version>0.1.0</version>
+ <description>OV13855 RKISP GStreamer camera for ROS Noetic.</description>
+ <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer><license>Apache-2.0</license>
+ <buildtool_depend>catkin</buildtool_depend>
+ <depend>roscpp</depend><depend>sensor_msgs</depend><depend>camera_info_manager</depend>
+ <depend>libgstreamer1.0-dev</depend><depend>libgstreamer-plugins-base1.0-dev</depend>
+ <exec_depend>gstreamer1.0-plugins-good</exec_depend><exec_depend>gstreamer1.0-plugins-base</exec_depend>
+ <test_depend>rostest</test_depend><test_depend>rospy</test_depend><test_depend>rosbash</test_depend>
+ <export/>
+</package>

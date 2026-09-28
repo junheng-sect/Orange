@@ -1,0 +1,21 @@
+<launch>
+ <!-- 与旧 front_marker_tracking.launch 二选一，不能同时启动。 -->
+ <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml" />
+ <arg name="vision_config" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml" />
+ <arg name="camera_tf_config" default="$(find front_marker_control)/config/ov13855_camera_tf.yaml" />
+ <arg name="control_config" default="$(find front_marker_control)/config/front_marker_control.yaml" />
+ <arg name="control_scene_config" default="" />
+ <include file="$(find ov13855_cam)/launch/ov13855.launch">
+  <arg name="config_file" value="$(arg camera_config)" />
+ </include>
+ <include file="$(find ov13855_apriltag_vision)/launch/ov13855_apriltag_vision.launch">
+  <arg name="config_file" value="$(arg vision_config)" />
+ </include>
+ <include file="$(find front_marker_control)/launch/front_camera_tf.launch">
+  <arg name="config_file" value="$(arg camera_tf_config)" />
+ </include>
+ <include file="$(find front_marker_control)/launch/front_marker_control.launch">
+  <arg name="config_file" value="$(arg control_config)" />
+  <arg name="scene_config" value="$(arg control_scene_config)" />
+ </include>
+</launch>

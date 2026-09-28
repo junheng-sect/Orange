@@ -1,0 +1,11 @@
+<launch>
+  <!-- 视觉参数统一在 YAML 中维护。 -->
+  <arg name="config_file" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml" />
+
+  <node pkg="ov13855_apriltag_vision"
+        type="ov13855_apriltag_vision_node"
+        name="ov13855_apriltag_vision_node"
+        output="screen">
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+</launch>

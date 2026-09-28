@@ -1,0 +1,12 @@
+# OV13855 经 RKISP 主通路采集；不设置 UVC 曝光/增益。
+video_device: /dev/video11
+image_width: 2560
+image_height: 1440
+framerate: 15
+camera_name: ov13855_2560x1440
+camera_frame_id: ov13855_optical_frame
+camera_info_url: package://ov13855_cam/config/ov13855_2560x1440.yaml
+image_topic: /ov13855/image_raw
+camera_info_topic: /ov13855/camera_info
+# 检测使用亮度 mono8；不翻转，不缩放采集图像。
+frame_timeout_sec: 5.0

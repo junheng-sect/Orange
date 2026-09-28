@@ -20,9 +20,13 @@
   <!-- Used only by the optional full-pipeline launch, never imported by the controller. -->
   <exec_depend>front_marker_vision</exec_depend>
   <exec_depend>ov9281_usb_cam</exec_depend>
+  <exec_depend>ov13855_cam</exec_depend>
+  <exec_depend>ov13855_apriltag_vision</exec_depend>
 
   <test_depend>python3-nose</test_depend>
   <test_depend>rostest</test_depend>
+  <test_depend>python3-opencv</test_depend>
+  <test_depend>python3-numpy</test_depend>
 
   <export/>
 </package>

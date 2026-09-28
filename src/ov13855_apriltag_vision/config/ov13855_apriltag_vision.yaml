@@ -1,0 +1,39 @@
+# ov13855_apriltag_vision 节点运行参数（日常调参唯一入口，修改后重启生效）。
+# 节点代码中的默认值仅作兜底。
+
+# ---- 输入/输出话题 ----
+# 输入：解码后的相机原图像 / 相机标定
+image_topic: /ov13855/image_raw
+camera_info_topic: /ov13855/camera_info
+# 输出：Marker 位姿 / 调试 / 标注图像 / 状态
+pose_topic: /front_marker/pose
+transform_debug_topic: /ov13855_apriltag_vision/debug/homogeneous_transform
+processing_time_topic: /ov13855_apriltag_vision/debug/processing_time_ms
+annotated_image_topic: /ov13855_apriltag_vision/image_annotated
+status_topic: /ov13855_apriltag_vision/status
+
+# ---- 检测目标 ----
+# AprilTag 检测参数（原生 AprilTag 库）
+tag_family: tag36h11
+selection_mode: largest # largest 或 fixed
+quad_decimate: 1.5
+nthreads: 4
+refine_edges: true
+detection_max_dimension: 1280
+# 目标 Marker ID
+target_marker_id: 0 # 仅 fixed 模式使用
+# 目标 Marker 实际边长（m）
+target_marker_size_m: 0.012
+
+# 位姿直接采用 Drone-Vision 的默认 solvePnP（ITERATIVE，无历史初值）。
+# 无额外轮廓/重投影门禁、双解筛选或连续确认参数。
+
+# ---- 发布 ----
+# 是否发布 Marker TF
+publish_marker_tf: true
+# Marker TF 坐标系名称
+marker_frame: front_marker
+# 是否发布标注图像
+publish_annotated: true
+# 标注图像发布频率（Hz）
+annotated_rate_hz: 5.0

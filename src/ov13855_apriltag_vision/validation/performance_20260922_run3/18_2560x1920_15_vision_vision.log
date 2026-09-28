@@ -1,0 +1,45 @@
+[0m[INFO] [1790061857.695612143]: ov13855_apriltag_vision | image=/ov13855/image_raw | family=tag36h11 | selection=largest | tag_size=0.012m | solver=SOLVEPNP_ITERATIVE (Drone-Vision) | pose=/front_marker/pose[0m
+... logging to /home/orangepi/.ros/log/085321b6-b655-11f1-a5c4-8ccdfe0903ce/roslaunch-orangepi5max-32139.log
+Checking log directory for disk usage. This may take a while.
+Press Ctrl-C to interrupt
+Done checking log file disk usage. Usage is <1GB.
+]2;/home/orangepi/orange/src/ov13855_apriltag_vision/launch/ov13855_apriltag_vision.launch
+[1mstarted roslaunch server http://127.0.0.1:37469/[0m
+
+SUMMARY
+========
+
+PARAMETERS
+ * /ov13855_apriltag_vision_node/annotated_image_topic: /ov13855_apriltag...
+ * /ov13855_apriltag_vision_node/annotated_rate_hz: 5.0
+ * /ov13855_apriltag_vision_node/camera_info_topic: /ov13855/camera_info
+ * /ov13855_apriltag_vision_node/detection_max_dimension: 1280
+ * /ov13855_apriltag_vision_node/image_topic: /ov13855/image_raw
+ * /ov13855_apriltag_vision_node/marker_frame: front_marker
+ * /ov13855_apriltag_vision_node/nthreads: 4
+ * /ov13855_apriltag_vision_node/pose_topic: /front_marker/pose
+ * /ov13855_apriltag_vision_node/processing_time_topic: /ov13855_apriltag...
+ * /ov13855_apriltag_vision_node/publish_annotated: True
+ * /ov13855_apriltag_vision_node/publish_marker_tf: True
+ * /ov13855_apriltag_vision_node/quad_decimate: 1.5
+ * /ov13855_apriltag_vision_node/refine_edges: True
+ * /ov13855_apriltag_vision_node/selection_mode: largest
+ * /ov13855_apriltag_vision_node/status_topic: /ov13855_apriltag...
+ * /ov13855_apriltag_vision_node/tag_family: tag36h11
+ * /ov13855_apriltag_vision_node/target_marker_id: 0
+ * /ov13855_apriltag_vision_node/target_marker_size_m: 0.012
+ * /ov13855_apriltag_vision_node/transform_debug_topic: /ov13855_apriltag...
+ * /rosdistro: noetic
+ * /rosversion: 1.17.4
+
+NODES
+  /
+    ov13855_apriltag_vision_node (ov13855_apriltag_vision/ov13855_apriltag_vision_node)
+
+[1mROS_MASTER_URI=http://127.0.0.1:11456[0m
+]2;/home/orangepi/orange/src/ov13855_apriltag_vision/launch/ov13855_apriltag_vision.launch http://127.0.0.1:11456
+[1mprocess[ov13855_apriltag_vision_node-1]: started with pid [32170][0m
+[ov13855_apriltag_vision_node-1] killing on exit
+shutting down processing monitor...
+... shutting down processing monitor complete
+[1mdone[0m

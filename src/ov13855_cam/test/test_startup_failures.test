@@ -1,0 +1,3 @@
+<launch>
+ <test test-name="ov13855_startup_failures" pkg="ov13855_cam" type="test_startup_failures.py" time-limit="30" />
+</launch>

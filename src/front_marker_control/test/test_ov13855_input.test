@@ -1,0 +1,12 @@
+<launch>
+ <!-- Synthetic camera input only. No FCU state is supplied and setpoint output is disabled. -->
+ <include file="$(find front_marker_control)/launch/front_camera_tf.launch">
+  <arg name="config_file" value="$(find front_marker_control)/config/ov13855_camera_tf.yaml" />
+ </include>
+ <include file="$(find ov13855_apriltag_vision)/launch/ov13855_apriltag_vision.launch" />
+ <node pkg="front_marker_control" type="front_marker_control_node" name="ov13855_input_control" output="screen">
+  <rosparam command="load" file="$(find front_marker_control)/config/front_marker_control.yaml" />
+  <param name="enable_setpoint_output" value="false" />
+ </node>
+ <test test-name="ov13855_control_input" pkg="front_marker_control" type="test_ov13855_input.py" time-limit="30" />
+</launch>
