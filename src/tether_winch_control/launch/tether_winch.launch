@@ -1,0 +1,8 @@
+<launch>
+  <arg name="simulation_values" default="false" />
+  <arg name="config" default="$(find tether_winch_control)/config/winch.yaml" />
+  <node pkg="tether_winch_control" type="tether_winch_node" name="tether_winch_control" output="screen">
+    <rosparam command="load" file="$(arg config)" />
+    <rosparam if="$(arg simulation_values)" command="load" file="$(find tether_winch_control)/config/simulation.yaml" />
+  </node>
+</launch>

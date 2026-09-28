@@ -1,0 +1,4 @@
+# Load AFTER winch.yaml. EXAMPLES ONLY; not approved motor settings.
+controller:
+  low_duty: 0.2
+  high_duty: 0.4

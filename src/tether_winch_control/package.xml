@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>tether_winch_control</name>
+  <version>0.1.0</version>
+  <description>Offline-first two-level tether winch PWM controller with mock transport.</description>
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <depend>nav_msgs</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <exec_depend>message_runtime</exec_depend>
+  <test_depend>python3-nose</test_depend>
+  <export/>
+</package>

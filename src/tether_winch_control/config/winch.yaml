@@ -1,0 +1,26 @@
+# MOCK ONLY. No network traffic is generated; no real PWM or fail-safe is implemented.
+transport: mock
+odom_topic: /mavros/local_position/odom
+status_rate_hz: 20.0
+controller:
+  frame_id: map
+  child_frame_id: base_link
+  # Fixed ground cable exit in frame_id. Must be measured before handheld use.
+  anchor: [0.0, 0.0, 0.0]
+  # Cable attachment relative to the odometry child-frame origin, in child axes.
+  attachment_offset: [0.0, 0.0, 0.0]
+  # String sentinel because ROS parameters cannot represent null/None.
+  low_duty: unset
+  high_duty: unset
+  window_sec: 0.2
+  min_samples: 3
+  enter_speed_mps: -0.05
+  exit_speed_mps: -0.02
+  enter_hold_sec: 0.15
+  timeout_sec: 0.5
+  future_tolerance_sec: 0.05
+  near_anchor_m: 0.1
+  # Handheld-test plausibility envelope, not a universal flight limit.
+  max_position_speed_mps: 3.0
+  position_jump_slack_m: 0.05
+  max_samples: 1000

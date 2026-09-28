@@ -1,0 +1,5 @@
+#!/usr/bin/env python3
+from tether_winch_control.simulation import main
+
+if __name__ == '__main__':
+    main()
