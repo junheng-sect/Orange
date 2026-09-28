@@ -12,4 +12,6 @@ cam_test/
 .backup_velpos_20260908/
 build/
 devel/
-.catkin_tools/
+.pi/
+.nomachine-dl/
+.commandcode/
