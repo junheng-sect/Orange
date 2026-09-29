@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>barcode_reader_serial</name>
+  <version>0.1.0</version>
+  <description>Serial barcode reader trigger/read service ported from DroneVision BarcodeReaderSerial.</description>
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <exec_depend>message_runtime</exec_depend>
+  <exec_depend>python3-serial</exec_depend>
+  <test_depend>python3-nose</test_depend>
+  <test_depend>rostest</test_depend>
+  <export/>
+</package>

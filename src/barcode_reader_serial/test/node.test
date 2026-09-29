@@ -1,0 +1,12 @@
+<launch>
+  <!-- Isolated rostest master; a unique pty link replaces /dev/ttyS1, never touches hardware.
+       Resolve $(anon) once here: inside <node>/<test> each child scope gets its own value. -->
+  <arg name="tty_link" value="/tmp/$(anon barcode_reader_tty)" />
+  <node pkg="barcode_reader_serial" type="barcode_reader_node" name="barcode_reader_serial" output="screen">
+    <rosparam command="load" file="$(find barcode_reader_serial)/config/barcode_reader.yaml" />
+    <param name="port" value="$(arg tty_link)" />
+  </node>
+  <test test-name="barcode_reader_node" pkg="barcode_reader_serial" type="integration_node.py" time-limit="60">
+    <param name="tty_link" value="$(arg tty_link)" />
+  </test>
+</launch>

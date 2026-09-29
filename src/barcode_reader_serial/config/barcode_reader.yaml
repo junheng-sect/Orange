@@ -1,0 +1,21 @@
+# 串口读码器参数（日常调参入口，修改后重启节点生效）。
+# 默认值取自 Drone-Vision/publish/config.json 的 barcode_decoder.serial_reader。
+
+# 40pin UART1_M1（板卡 RX=27 / TX=28），需启用 uart1-m1 覆盖。
+port: /dev/ttyS1
+baud: 115200
+data_bits: 8
+parity: None      # None/Even/Odd/Mark/Space
+stop_bits: One    # One/OnePointFive/Two
+
+# 触发 / 释放指令（HEX）。trigger_hex 置空时改用文本指令 trigger_command。
+trigger_hex: "02 F4 03"
+trigger_command: ""
+release_hex: "02 F5 03"
+
+# 回复帧起止符（HEX）。两者都置空 = 纯文本模式，按 CR/LF 判帧（当前读码器返回 "NEXT9017324\r"）。
+reply_start_hex: ""
+reply_end_hex: ""
+
+# 单次读码超时（毫秒）。实测从触发到回码约 0.6~0.9 s。
+read_timeout_ms: 1500

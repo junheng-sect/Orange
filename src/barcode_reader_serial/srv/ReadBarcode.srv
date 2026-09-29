@@ -1,0 +1,11 @@
+# Trigger the reader once and wait for one frame. timeout_s <= 0 uses read_timeout_ms.
+float32 timeout_s
+---
+bool success
+string code
+# Empty on success; otherwise serial_unavailable/busy/not_configured/timeout/
+# empty_frame/cancelled/write_failed/io_error/invalid_timeout.
+string error
+float32 elapsed_s
+uint32 request_seq
+string raw_hex

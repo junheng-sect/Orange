@@ -1,0 +1,6 @@
+<launch>
+  <arg name="config_file" default="$(find barcode_reader_serial)/config/barcode_reader.yaml" />
+  <node pkg="barcode_reader_serial" type="barcode_reader_node" name="barcode_reader_serial" output="screen">
+    <rosparam command="load" file="$(arg config_file)" />
+  </node>
+</launch>
