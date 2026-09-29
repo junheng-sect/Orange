@@ -17,6 +17,12 @@ def finite_number(value, name):
     return float(value)
 
 
+def validate_duty(value, name='duty'):
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 500:
+        raise ValueError('%s must be an integer in [0, 500]' % name)
+    return value
+
+
 def vector(values, size, name):
     if not isinstance(values, (list, tuple)) or len(values) != size:
         raise ValueError('%s must contain %d numbers' % (name, size))
@@ -27,10 +33,11 @@ def vector(values, size, name):
 class Config:
     anchor: tuple = (0.0, 0.0, 0.0)
     attachment_offset: tuple = (0.0, 0.0, 0.0)
-    frame_id: str = 'map'
+    frame_id: str = 'world'
     child_frame_id: str = 'base_link'
-    low_duty: Optional[float] = None
-    high_duty: Optional[float] = None
+    low_duty: int = 100
+    high_duty: int = 300
+    fallback_duty: int = 100
     window_sec: float = 0.2
     min_samples: int = 3
     enter_speed_mps: float = -0.05
@@ -70,13 +77,11 @@ class Config:
         leave = finite_number(self.exit_speed_mps, 'exit_speed_mps')
         if not enter < leave <= 0:
             raise ValueError('require enter_speed_mps < exit_speed_mps <= 0')
-        if (self.low_duty is None) != (self.high_duty is None):
-            raise ValueError('both duties must be set, or both left uncalibrated')
-        if self.low_duty is not None:
-            low = finite_number(self.low_duty, 'low_duty')
-            high = finite_number(self.high_duty, 'high_duty')
-            if not 0 <= low < high <= 1:
-                raise ValueError('require 0 <= low_duty < high_duty <= 1')
+        for name in ('low_duty', 'high_duty', 'fallback_duty'):
+            validate_duty(getattr(self, name), name)
+        if self.low_duty >= self.high_duty:
+            raise ValueError('require low_duty < high_duty')
+
 
 
 @dataclass(frozen=True)
@@ -127,6 +132,10 @@ class Controller:
         self._candidate_since = None
         self._distance = None
         self._velocity = None
+
+    def trip(self, reason):
+        self._trip(reason)
+        return self.status()
 
     def _trip(self, reason):
         self.mode = 'FAULT'
@@ -242,8 +251,6 @@ class Controller:
         self.tick(now, source_now)
         if self.mode in ('LOW', 'HIGH'):
             return True, 'already enabled'
-        if self.config.low_duty is None:
-            return False, 'PWM duties are uncalibrated/unset'
         if self._velocity is None or not self._is_fresh(now, source_now):
             return False, 'need enough fresh localization samples'
         self._fault = False

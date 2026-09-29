@@ -15,29 +15,53 @@ from .transport import make_transport
 class WinchNode:
     def __init__(self):
         params = dict(rospy.get_param('~controller', {}))
-        # ROS parameter server cannot represent None; YAML uses the string unset.
-        for key in ('low_duty', 'high_duty'):
-            if params.get(key) == 'unset':
-                params[key] = None
         self.controller = Controller(Config(**params))
-        self.transport = make_transport(rospy.get_param('~transport', 'mock'))
+        auto_enable = rospy.get_param('~auto_enable', True)
+        if not isinstance(auto_enable, bool):
+            raise ValueError('auto_enable must be a boolean')
+        # One startup attempt, retried until inputs and TCP are ready. Once enabled
+        # (or explicitly disabled), runtime faults must never re-arm automatically.
+        self.auto_enable_pending = auto_enable
+        self.lock = threading.RLock()
+        self.stop_event = threading.Event()
+        self.transport = make_transport(
+            rospy.get_param('~transport', 'tcp'),
+            fallback_duty=self.controller.config.fallback_duty,
+            on_error=self.on_transport_error, **dict(rospy.get_param('~tcp', {})))
         rate = finite_number(rospy.get_param('~status_rate_hz', 20.0), 'status_rate_hz')
         if not 1 <= rate <= 100:
             raise ValueError('status_rate_hz must be between 1 and 100')
         self.period = 1.0 / rate
-        self.lock = threading.RLock()
-        self.stop_event = threading.Event()
         self.last_mode = None
         self.publisher = rospy.Publisher('~status', WinchStatus, queue_size=1)
         self.subscriber = rospy.Subscriber(
-            rospy.get_param('~odom_topic', '/mavros/local_position/odom'),
+            rospy.get_param('~odom_topic', '/fastlio/odom_world'),
             Odometry, self.on_odometry, queue_size=1, tcp_nodelay=True)
         self.service = rospy.Service('~set_enabled', SetBool, self.on_enabled)
         self.thread = threading.Thread(target=self.watchdog, name='winch-watchdog', daemon=True)
         rospy.on_shutdown(self.shutdown)
+        self.transport.start()
         self.thread.start()
-        rospy.logwarn('Winch MOCK ONLY: no ESP32 connection or applied PWM feedback; '
-                      'automatic control starts disabled.')
+        rospy.loginfo('Winch %s: auto_enable=%s; waiting output DUTY=%d; '
+                      'no hardware feedback.', self.transport.name, auto_enable,
+                      self.controller.config.fallback_duty)
+
+    def try_startup_enable(self, now, source_now):
+        if not self.auto_enable_pending or not self.controller.status().input_valid:
+            return
+        if not self.transport.prepare_enable():
+            return
+        success, reason = self.controller.enable(now, source_now)
+        if success:
+            self.auto_enable_pending = False
+            rospy.loginfo('Winch startup automatic control enabled: %s', reason)
+
+    def on_transport_error(self, reason):
+        with self.lock:
+            if not self.stop_event.is_set():
+                self.controller.trip(reason)
+                self.transport.update(self.controller.status(), time.monotonic())
+                rospy.logerr('%s; automatic control latched FAULT', reason)
 
     def on_odometry(self, message):
         with self.lock:
@@ -56,10 +80,16 @@ class WinchNode:
                 return SetBoolResponse(success=False, message='node is shutting down')
             now, source_now = time.monotonic(), rospy.get_time()
             if request.data:
+                if not self.transport.prepare_enable():
+                    return SetBoolResponse(success=False,
+                                           message='need successful TCP fallback send before enable')
                 success, reason = self.controller.enable(now, source_now)
+                if success:
+                    self.auto_enable_pending = False
             else:
+                self.auto_enable_pending = False
                 self.controller.disable()
-                success, reason = True, 'disabled; no hardware stop is implemented in mock mode'
+                success, reason = True, 'disabled; fallback queued, hardware execution unconfirmed'
             self.transport.update(self.controller.status(), now)
             self.publish_status()
             return SetBoolResponse(success=success, message=reason)
@@ -79,6 +109,10 @@ class WinchNode:
         message.transport = self.transport.name
         message.hardware_feedback_valid = False
         message.applied_duty = math.nan
+        network = self.transport.snapshot()
+        message.last_sent_duty = network['last_sent_duty']
+        message.last_send_time = rospy.Time.from_sec(network['last_send_time'])
+        message.communication_error = network['communication_error']
         self.publisher.publish(message)
         if state.mode != self.last_mode:
             rospy.loginfo('Winch %s: %s (target duty: %s)', state.mode, state.reason,
@@ -91,15 +125,21 @@ class WinchNode:
                 return
             with self.lock:
                 now = time.monotonic()
-                state = self.controller.tick(now, rospy.get_time())
-                self.transport.update(state, now)
+                source_now = rospy.get_time()
+                self.controller.tick(now, source_now)
+                self.try_startup_enable(now, source_now)
+                self.transport.update(self.controller.status(), now)
                 self.publish_status()
 
     def shutdown(self):
-        self.stop_event.set()
+        with self.lock:
+            if self.stop_event.is_set():
+                return
+            self.stop_event.set()
         with self.lock:
             self.controller.disable()
             self.transport.update(self.controller.status(), time.monotonic())
+        self.transport.close()
         if threading.current_thread() is not self.thread:
             self.thread.join(timeout=1.0)
 

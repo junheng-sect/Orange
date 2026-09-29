@@ -10,7 +10,7 @@ from .transport import make_transport
 
 def run_scenario(config=None):
     # EXAMPLE ONLY: these numbers have no hardware calibration or force meaning.
-    config = config or Config(low_duty=0.2, high_duty=0.4)
+    config = config or Config(low_duty=100, high_duty=300)
     controller = Controller(config)
     transport = make_transport('mock')
     rows = []
@@ -40,7 +40,7 @@ def run_scenario(config=None):
             angle += angular_speed * 0.02
             if available:
                 controller.observe(stamp, (radius * math.cos(angle), radius * math.sin(angle), 0),
-                                   (0, 0, 0, 1), 'map', 'base_link', now, stamp)
+                                   (0, 0, 0, 1), config.frame_id, config.child_frame_id, now, stamp)
             controller.tick(now, stamp)
             event = ''
             if ((phase == 'warmup' and index == round(duration / 0.02) - 1)
@@ -56,8 +56,8 @@ def run_scenario(config=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Offline MOCK ONLY winch simulation; no ROS or ESP32.')
-    parser.add_argument('--low-duty', type=float, default=0.2, help='simulation example, not calibrated')
-    parser.add_argument('--high-duty', type=float, default=0.4, help='simulation example, not calibrated')
+    parser.add_argument('--low-duty', type=int, default=100, help='integer DUTY, 0..500')
+    parser.add_argument('--high-duty', type=int, default=300, help='integer DUTY, 0..500')
     parser.add_argument('--window-sec', type=float, default=0.2)
     parser.add_argument('--enter-speed-mps', type=float, default=-0.05)
     parser.add_argument('--exit-speed-mps', type=float, default=-0.02)

@@ -1,18 +1,25 @@
-# MOCK ONLY. No network traffic is generated; no real PWM or fail-safe is implemented.
-transport: mock
-odom_topic: /mavros/local_position/odom
+transport: tcp
+# Automatically enable once localization and TCP are ready after startup.
+auto_enable: true
+tcp:
+  host: 192.168.31.87
+  port: 8080
+  timeout_sec: 0.5
+  resend_sec: 1.0
+odom_topic: /fastlio/odom_world
 status_rate_hz: 20.0
 controller:
-  frame_id: map
+  frame_id: world
   child_frame_id: base_link
   # Fixed ground cable exit in frame_id. Must be measured before handheld use.
   anchor: [0.0, 0.0, 0.0]
-  # Cable attachment relative to the odometry child-frame origin, in child axes.
+  # Cable attachment relative to the lidar IMU position origin, in body axes.
   attachment_offset: [0.0, 0.0, 0.0]
-  # String sentinel because ROS parameters cannot represent null/None.
-  low_duty: unset
-  high_duty: unset
-  window_sec: 0.2
+  # Integer device units, inclusive range 0..500. Restart node after edits.
+  low_duty: 10
+  high_duty: 220
+  fallback_duty: 100
+  window_sec: 0.3
   min_samples: 3
   enter_speed_mps: -0.05
   exit_speed_mps: -0.02

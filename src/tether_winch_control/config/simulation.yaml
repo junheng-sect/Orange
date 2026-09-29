@@ -1,4 +1,6 @@
-# Load AFTER winch.yaml. EXAMPLES ONLY; not approved motor settings.
+# Explicitly disable hardware traffic when using simulation values.
+transport: mock
 controller:
-  low_duty: 0.2
-  high_duty: 0.4
+  low_duty: 100
+  high_duty: 300
+  fallback_duty: 100

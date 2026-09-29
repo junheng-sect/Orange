@@ -1,123 +1,90 @@
-# 两档系留绕线器控制（离线版）
+# 两档系留绕线器控制
 
-本包根据定位自动选择放线低档 / 收线高档 PWM。电机始终向收线方向施力，
-放线由飞机或手持人员拉动卷筒完成。目标是先通过手持地面试验确定两档值和适用范围，
-后续再考虑连续调节。本包不控制飞机、不切换飞行模式、不发送飞行设定值。
+根据 MID360S 定位判断无人机与固定出线点的距离变化，通过 TCP 向绕线器发送
+`DUTY=<整数>#`。电机始终向收线方向施力，DUTY 越大力矩越大；放线由无人机拉动。
+本包不控制飞机，不发送飞行设定值。
 
-**目前仅实现 mock 通信端，不连接 ESP32，不输出实际 PWM，也没有实际电机回报。**
-曾使用的地址 `192.168.31.87` 只作为接入线索；协议、端口、指令、占空比分辨率、
-回报和失联行为均未确认。任何非 `mock` 通信模式都会拒绝启动。
+## 参数
 
-## 功能和限制
+日常修改 `config/winch.yaml`，保存后重启绕线器节点生效；没有运行时热更新。
 
-| 状态 | 行为 |
-| --- | --- |
-| `DISABLED` | 默认状态，没有有效控制命令，仍积累定位历史 |
-| `LOW` | 远离、静止、等距离横移，以及靠近尚未满足进入条件时输出低档 |
-| `HIGH` | 持续明确靠近时输出高档 |
-| `FAULT` | 定位异常后锁定，清空历史、撤销 mock 命令，等待人工重新启用 |
-
-`DISABLED` / `FAULT` 的目标占空比为空，**不是 0% 命令，也不是已执行的停车或刹车**。
-本版无法处理真实驱动器失联；真实适配器、ESP32 看门狗和实测降级 PWM 必须一起完成后，
-才可接实际电机。停止 ROS 节点同样不等于停止真实电机。
-
-本包只有位置前馈，没有张力、放线长度或电流反馈。两端直线距离是几何间距，
-不能视为实际放线长度，不能识别全部松线、打滑、卡线。模拟占空比 0.2 / 0.4
-只是展示数值，不是实机推荐值；PWM 也不能直接当作力矩或张力。
-
-## 本机离线验证（不需要 ROS）
-
-使用系统 Python 3.8 及以上版本和标准库，不需要 pip 安装依赖。
-从任意目录运行：
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=/home/zjh/orange/src/tether_winch_control/src \
-python3 -m unittest discover \
-  -s /home/zjh/orange/src/tether_winch_control/test -v
-```
-
-运行内置手持轨迹模拟，可将全部样本保存到 CSV：
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=/home/zjh/orange/src/tether_winch_control/src \
-python3 /home/zjh/orange/src/tether_winch_control/scripts/simulate_winch \
-  --csv /tmp/tether_winch_trace.csv
-```
-
-替换模拟用的两档数值和判定参数：
-
-```bash
-PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=/home/zjh/orange/src/tether_winch_control/src \
-python3 /home/zjh/orange/src/tether_winch_control/scripts/simulate_winch \
-  --low-duty 0.15 --high-duty 0.35 \
-  --window-sec 0.2 --enter-speed-mps -0.05 \
-  --exit-speed-mps -0.02 --enter-hold-sec 0.15
-```
-
-模拟程序覆盖静止预热、远离、靠近、停止、等距离圆弧横移、收放换向、
-高档时定位中断、定位恢复但不启用、人工重新启用。它直接使用纯控制核心和 mock 端，
-不导入 ROS，也不发送网络数据。命令行参数独立于 ROS YAML，修改 YAML 不影响此模拟。
-CSV 包含每个样本的阶段、距离、径向速度、状态、目标占空比、有效性、原因和启用事件；
-默认只在终端打印阶段或档位变化。
-
-## 坐标、时序和判定
-
-默认接入 `/mavros/local_position/odom`，要求 `frame_id=map`、`child_frame_id=base_link`。
-默认值仅与现有仓库接入习惯一致，实机必须检查。其他定位源需显式修改话题及坐标系配置，
-不能自动切换坐标系，也不应只改帧名而不转换数据。
-
-挂线点位置为 `p_attach = p_odom + R(orientation) * attachment_offset`，
-距离为 `norm(p_attach - anchor)`。`anchor` 是固定地面出线点在父坐标系中的三维坐标，
-`attachment_offset` 是挂线点相对定位 child 原点、按 child 轴表达的偏移（米）。
-起飞原点未必等于出线点；默认零偏移必须在手持验证前确认或测量替换。
-不读取 `Odometry.twist`；定位姿态用于旋转挂线点偏移。
-
-在源时间戳覆盖的滑动窗口内，以距离做最小二乘直线拟合，斜率就是径向速度。
-算法先减去窗口首时间戳，避免大 epoch 时间造成精度丢失。以下参数均在 `config/winch.yaml`：
-
-| 参数 | 默认 | 含义 |
+| 参数 | 默认值 | 含义 |
 | --- | --- | --- |
-| `low_duty` / `high_duty` | `unset` / `unset` | 未标定时不允许启用；内部约束 `0 <= low < high <= 1` |
-| `window_sec` / `min_samples` | 0.2 秒 / 3 | 斜率拟合窗口及最低样本数 |
-| `enter_speed_mps` | −0.05 m/s | 低于此值才开始统计连续靠近时间 |
-| `enter_hold_sec` | 0.15 秒 | 满足连续靠近后进入高档；中途不满足则重新计时 |
-| `exit_speed_mps` | −0.02 m/s | 达到或高于此值时返回低档 |
-| `near_anchor_m` | 0.1 米 | 距离不大于此值时禁止高档 |
-| `timeout_sec` | 0.5 秒 | 源数据年龄、接收间隔和样本间隔上限 |
-| `future_tolerance_sec` | 0.05 秒 | 允许源时间戳略超前当前源时钟的上限 |
-| `max_position_speed_mps` | 3 m/s | 手持验证时的定位位移合理性检查值 |
-| `position_jump_slack_m` | 0.05 米 | 跳变检查的固定位置容差 |
-| `max_samples` | 1000 | 防止异常高频数据无限积累 |
+| `auto_enable` | `true` | 启动后定位与通信就绪时自动启用；设为 false 恢复手动启用 |
+| `transport` | `tcp` | 实机 TCP；`mock` 不产生网络流量 |
+| `controller.low_duty` | 100 | 放线、静止、等距离横移时的低档 |
+| `controller.high_duty` | 300 | 持续明确靠近出线点时的收线档 |
+| `controller.fallback_duty` | 100 | 启动禁用、故障、停用和正常退出时的输出 |
+| `tcp.host` / `tcp.port` | `192.168.31.87` / 8080 | 设备 IPv4 地址、端口 |
+| `tcp.timeout_sec` | 0.2 秒 | 分别限制连接和发送；允许大于 0、不超过 5 秒 |
+| `tcp.resend_sec` | 1 秒 | 稳定档位的重发间隔，最小 0.05 秒 |
+| `odom_topic` | `/fastlio/odom_world` | `nav_msgs/Odometry` |
+| `controller.frame_id` / `child_frame_id` | `world` / `base_link` | 严格检查消息坐标系 |
+| `controller.anchor` | `[0, 0, 0]` | 固定出线点在当次 world 坐标系中的坐标（米） |
+| `controller.attachment_offset` | `[0, 0, 0]` | 雷达 IMU 到挂线点的偏移，按机体轴表达（米） |
 
-跳变判定上限为 `position_jump_slack_m + max_position_speed_mps * dt`，其中 `dt`
-是相邻源时间戳之差。该检查作用于定位原点位置；它不能识别所有小幅定位重置。
-过慢靠近可能落入死区而保持低档，这是设计取舍，需纳入地面标定。
+三个 DUTY 均必须是 **0～500 的整数**，拒绝浮点数、布尔值、越界值，且要求
+`low_duty < high_duty`。这是设备原始指令值，不是 0～1 比例，也不是测量力矩。
+允许配置 0 不代表本包已验证设备 DUTY=0 时的机械行为。
 
-窗口及进入确认会带来切换延迟；停止后也要等拟合速度回到退出阈值，
-不能把程序输出理解为零延迟电机响应。高档期间若窗口内样本不足，直接故障退出，
-不会继续保持高档。启用要求至少 3 个新鲜有效样本，启用初始输出为低档。
+MID360S 的重力对齐桥接输出姿态对应机体，但位置基点仍是雷达 IMU。
+`anchor` 必须按本次定位原点填写，不能默认 FAST-LIO 原点就在绕线器出线点。
+FAST-LIO 重启或重定位后，需要核对坐标再启用；零偏移仅适用于实际几何关系符合时。
+挂线点位置计算为 `p_odom + R(orientation) * attachment_offset`。
 
-源时间戳及 `source_now` 使用同一定位时钟；接收和看门狗使用独立单调时钟。
-源时间戳零值、非有限数据、无效四元数、重复/乱序、帧不符、数据超时、
-源时钟回退、异常位移都会导致故障。故障后有效数据可以重新积累，
-`input_valid=true` 只表示输入恢复，并不清除 `FAULT` 或恢复输出。
-必须再次调用启用服务。ROS 适配器用墙钟线程运行看门狗，`/clock` 停止时也检查接收超时。
+## 判定与异常行为
 
-## ROS 接口（待板端验证）
+使用源时间戳窗口内的距离最小二乘拟合计算径向速度，不读取 `Odometry.twist`。
+现有判定参数保留：窗口 0.2 秒、至少 3 个样本；速度小于 -0.05 m/s 连续 0.15 秒
+进入 HIGH，回到 -0.02 m/s 及以上退出 HIGH；距离出线点不超过 0.1 米禁止 HIGH。
+定位超时默认 0.5 秒；时间戳异常、帧错误、位置跳变、无效四元数和样本不足均锁定故障。
+跳变上限为 `position_jump_slack_m + max_position_speed_mps * dt`，默认 0.05 米和 3 m/s。
+源数据和接收年龄都被检查；看门狗使用墙钟线程，ROS `/clock` 停止也会检测接收超时。
+拟合窗口及迟滞会产生切换延迟，距离是几何间距，不是实际放线长度或张力。
 
-节点名：`tether_winch_control`，配置由 launch 加载为私有参数。
+| 状态 | 自动目标 | TCP 行为 |
+| --- | --- | --- |
+| DISABLED | 无 | 发送 fallback_duty |
+| LOW | low_duty | 发送低档 |
+| HIGH | high_duty | 发送高档 |
+| FAULT | 无，保持锁定 | 尝试发送 fallback_duty |
 
-- 输入：可配置 `odom_topic`，类型 `nav_msgs/Odometry`。
-- 启停：`/tether_winch_control/set_enabled`，类型 `std_srvs/SetBool`。
-- 状态：`/tether_winch_control/status`，类型 `tether_winch_control/WinchStatus`，默认 20 Hz。
-- 状态包含档位、距离、径向速度、目标占空比、定位有效性和原因。
-  `command_valid=false` 时 `target_duty=NaN`；无可用距离/速度时对应值也是 `NaN`。
-  `hardware_feedback_valid` 始终为 false，`applied_duty` 始终为 NaN，不能把目标值当成实际输出。
+默认 `auto_enable: true`：**TCP 模式启动即发送 fallback_duty**，等待足够新鲜定位及
+TCP 写入成功后，自动进入 LOW，随后按距离变化切换，无需调用启用服务。
+首次启用前若定位或网络暂未就绪，会持续等待恢复；首次自动启用后不再自动重试启用。
+运行期间故障仍保持锁定，可排查后重启节点或调用启用服务恢复。
+显式调用停用服务会取消尚未完成的启动自动启用，也不会立即被自动打开。
+通信失败锁定故障，即使里程计继续到达，也只重试低档，直到通信恢复并人工重新启用。
+正常退出在发送线程结束前进行一次有超时限制的 fallback 发送；强制杀进程、断电或
+网络中断时无法保证低档送达，设备可能保持上一条指令。设备端看门狗不在本次实现范围内。
 
-先将功能包同步到板端实际工作空间，再在**板端**运行以下命令。本次不在本机执行：
+## TCP 协议和状态
+
+等价发送示例（会驱动真实设备，只在准备好时执行）：
+
+```bash
+printf '%s' 'DUTY=270#' | nc -N 192.168.31.87 8080
+```
+
+使用 Python 标准库 socket，无需运行 shell 或安装 nc。每条命令新建连接，发送 ASCII
+文本，不带换行，随后关闭写端并关闭连接。不等待或解释设备应答。
+独立线程只保留最新目标，变化时立即唤醒，稳定时周期重发；连接期间目标被替换则放弃
+旧值，不积压历史指令。已开始发送的单条指令无法撤回，后续发送使用最新值。
+退出低档与在途发送串行执行，不会在最终低档之后补发高档。
+
+- 启停服务：`/tether_winch_control/set_enabled`，`std_srvs/SetBool`。
+- 状态话题：`/tether_winch_control/status`，`WinchStatus`，默认 20 Hz。
+- `target_duty` 表示自动控制目标；DISABLED/FAULT 时 `command_valid=false`、目标为 NaN，
+  此时实际发送策略由 `fallback_duty` 决定。
+- `last_sent_duty`、`last_send_time` 是最近成功 socket 写入值及 Unix 墙钟时间，初始为 NaN/0。
+  `communication_error` 是最新通信错误，成功写入后清空；清空不解除 FAULT。
+- 没有设备执行回报：`hardware_feedback_valid=false`，`applied_duty=NaN`。
+  服务返回成功只代表接受启停请求，不代表电机已执行。mock 的发送状态始终 NaN/0。
+
+## 板端运行
+
+先确认 MID360S 正常发布定位。本 launch 只启动绕线器，不启动或重启雷达。
+首次启动前修改 anchor 和 attachment_offset。以下实机命令启动即发送低档：
 
 ```bash
 ssh orange
@@ -125,52 +92,57 @@ source /opt/ros/noetic/setup.bash
 cd /home/orangepi/orange
 catkin build tether_winch_control
 source /home/orangepi/orange/devel/setup.bash
+export ROS_MASTER_URI=http://192.168.31.32:11311
+export ROS_IP=192.168.31.32
+roslaunch tether_winch_control tether_winch.launch
+```
+
+另一个板端终端：
+
+```bash
+source /opt/ros/noetic/setup.bash
+source /home/orangepi/orange/devel/setup.bash
+export ROS_MASTER_URI=http://192.168.31.32:11311
+export ROS_IP=192.168.31.32
+rostopic echo /tether_winch_control/status
+# 默认自动启用，无需以下启用命令；它保留用于故障恢复或 auto_enable=false：
+rosservice call /tether_winch_control/set_enabled 'data: true'
+rosservice call /tether_winch_control/set_enabled 'data: false'
+```
+
+观察定位判断而不发送网络命令：
+
+```bash
 roslaunch tether_winch_control tether_winch.launch simulation_values:=true
 ```
 
-此启动方式仍是 mock，只加载示例两档数值；它不生成定位，需要另有定位节点发布。
-实际几何参数仍须修改 `winch.yaml` 或通过 launch 的 `config` 参数选择配置文件。
-去掉 `simulation_values:=true` 则采用未标定默认值，拒绝启用。
+`simulation_values:=true` 明确覆盖 transport 为 mock；仍需外部定位。
 
-另一个**板端终端**观察状态、启用和停用：
+## 自动验证（不连接真实绕线器）
 
-```bash
-source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
-rostopic echo /tether_winch_control/status
-```
+板端执行：
 
 ```bash
 source /opt/ros/noetic/setup.bash
 source /home/orangepi/orange/devel/setup.bash
-rosservice call /tether_winch_control/set_enabled "data: true"
-# 结束验证时执行；mock 停用不代表真实驱动器停车。
-rosservice call /tether_winch_control/set_enabled "data: false"
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
+  -s /home/orangepi/orange/src/tether_winch_control/test -v
+cd /home/orangepi/orange
+catkin run_tests tether_winch_control
+catkin_test_results build/tether_winch_control/test_results
 ```
 
-板端后续验证还包括消息生成、launch 参数合并、服务行为、节点关闭、时钟暂停、
-定位恢复与重启行为。纯 Python 测试通过不能替代这些集成检查。
+单元测试使用 localhost 随机端口。rostest 使用隔离的 ROS Master 和 localhost:18080，
+注入 world/base_link 里程计，验证实际 YAML、状态、服务、掉定位、错误帧、TCP 中断恢复、
+人工重新启用和正常退出。测试不使用硬件 IP；请保持本机测试端口 18080 空闲。
 
-## 手持地面标定顺序
+无需 ROS 的轨迹模拟：
 
-1. 旋翼动力禁用，定位正常运行；先以 mock 观察远离/靠近/静止/横移是否判定正确。
-   记录实际出线点、挂线点偏移以及定位坐标原点；不要依赖开机位置正好重合。
-2. 真实通信及失联处理验证完成后，从小输出开始找放线低档：阻力低、不明显顿挫，
-   卷筒无失控空转；检查静止时少量余线能否缓慢收完。
-3. 从接近低档的值逐步增加收线高档，选择能跟上预期最大靠近速度的最小输出。
-   优先检查“靠近→停止→重新拉紧”时是否明显拽手。
-4. 重复慢速靠近、快速靠近、突然停止、换向、横移和不同卷筒层数/线长；
-   检查持续堵转输出能力和温升。可临时串接测力计记录拉力峰值与波动。
-5. 接受标准是在明确测试范围内余线不持续增加、停止后可收完且无明显拉拽，
-   静止不反复切档。若低档收不完或高档有冲击，记录两档方案的边界，不盲目加大输出。
-6. 地面通过后才做低速飞行对照。手持感觉与模拟轨迹都不能证明“对飞行无影响”。
+```bash
+PYTHONPATH=/home/orangepi/orange/src/tether_winch_control/src \
+python3 /home/orangepi/orange/src/tether_winch_control/scripts/simulate_winch \
+  --low-duty 100 --high-duty 300 --csv /tmp/tether_winch_trace.csv
+```
 
-## ESP32 接入前需要补齐
-
-- 固件/驱动器型号、可读取的接口说明或源码；确认占空比方向和真实力矩关系。
-- IP 是否仍为 `192.168.31.87`、实际协议和端口、PWM 频率/分辨率/取值范围。
-- 命令确认、实际应用值回报、重复或过期命令处理、连接恢复是否需重新启用。
-- 台架验证的停用/故障输出与恢复流程；ESP32 本地超时看门狗，不能依赖 ROS 进程发送最后一帧。
-- 两档 PWM、最大手持靠近速度、适用线长/卷筒层数和允许张力的实测记录。
-
-本版没有假设 UDP/HTTP，也没有编造 ESP32 指令；不修改或刷写未知固件。
+模拟只使用 mock，命令行参数独立于 YAML。构建和自动测试不能替代设备通信、实际力矩、
+温升及飞行测试。本包没有张力、电流或放线长度反馈。

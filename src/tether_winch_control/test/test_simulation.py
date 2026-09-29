@@ -23,13 +23,13 @@ class ScenarioTests(unittest.TestCase):
         for row in rows:
             if row['mode'] in ('DISABLED', 'FAULT'):
                 self.assertIsNone(row['target_duty'])
-        self.assertEqual({r['target_duty'] for r in rows if r['enabled']}, {0.2, 0.4})
+        self.assertEqual({r['target_duty'] for r in rows if r['enabled']}, {100, 300})
 
     def test_configurable_duties_do_not_change_classification(self):
         original = run_scenario()
-        changed = run_scenario(Config(low_duty=0.1, high_duty=0.3))
+        changed = run_scenario(Config(low_duty=50, high_duty=250))
         self.assertEqual([r['mode'] for r in original], [r['mode'] for r in changed])
-        self.assertEqual({r['target_duty'] for r in changed if r['enabled']}, {0.1, 0.3})
+        self.assertEqual({r['target_duty'] for r in changed if r['enabled']}, {50, 250})
 
 
 if __name__ == '__main__':

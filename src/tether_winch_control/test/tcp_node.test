@@ -1,0 +1,12 @@
+<launch>
+  <arg name="auto_enable" default="true" />
+  <!-- Isolated rostest master; never use the hardware IP in this test. -->
+  <node pkg="tether_winch_control" type="tether_winch_node" name="tether_winch_control" output="screen">
+    <rosparam command="load" file="$(find tether_winch_control)/config/winch.yaml" />
+    <param name="auto_enable" value="$(arg auto_enable)" type="bool" />
+    <param name="tcp/host" value="127.0.0.1" />
+    <param name="tcp/port" value="18080" type="int" />
+    <param name="tcp/resend_sec" value="0.1" />
+  </node>
+  <test test-name="tcp_node" pkg="tether_winch_control" type="integration_tcp.py" time-limit="60" />
+</launch>

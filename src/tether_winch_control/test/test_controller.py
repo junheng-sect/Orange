@@ -9,7 +9,7 @@ from tether_winch_control.transport import make_transport
 
 class Harness:
     def __init__(self, config=None, radius=2.0):
-        self.controller = Controller(config or Config(low_duty=0.2, high_duty=0.4))
+        self.controller = Controller(config or Config(low_duty=100, high_duty=300))
         self.now = 1.0
         self.radius = radius
 
@@ -17,7 +17,7 @@ class Harness:
         self.now += dt
         self.radius += speed * dt
         values = dict(stamp=1000 + self.now, position=(self.radius, 0, 0),
-                      orientation=(0, 0, 0, 1), frame_id='map', child_frame_id='base_link',
+                      orientation=(0, 0, 0, 1), frame_id='world', child_frame_id='base_link',
                       now=self.now, source_now=1000 + self.now)
         values.update(overrides)
         return self.controller.observe(**values)
@@ -35,11 +35,17 @@ class Harness:
 
 
 class ConfigTests(unittest.TestCase):
-    def test_uncalibrated_default_cannot_enable(self):
-        h = Harness(Config())
-        h.samples()
-        self.assertFalse(h.enable()[0])
-        self.assertIsNone(h.controller.status().target_duty)
+    def test_default_and_integer_boundaries(self):
+        h = Harness(Config()).ready()
+        self.assertEqual(h.controller.status().target_duty, 100)
+        self.assertEqual(Config(low_duty=0, high_duty=500, fallback_duty=0).high_duty, 500)
+        for field in ('low_duty', 'high_duty', 'fallback_duty'):
+            for value in (-1, 501, 0.5, 100.0, True, False, None, '100'):
+                with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                    Config(**{field: value})
+        for low, high in ((100, 100), (300, 100)):
+            with self.assertRaises(ValueError):
+                Config(low_duty=low, high_duty=high)
 
     def test_invalid_configuration(self):
         for parameters in [dict(low_duty=0.2), dict(low_duty=-0.1, high_duty=0.3),
@@ -82,13 +88,13 @@ class MotionTests(unittest.TestCase):
         h = Harness().ready()
         for state in h.samples(60) + h.samples(60, speed=0.3):
             self.assertEqual(state.mode, 'LOW')
-            self.assertEqual(state.target_duty, 0.2)
+            self.assertEqual(state.target_duty, 100)
 
     def test_approach_high_then_stop_and_reverse_low(self):
         h = Harness().ready()
         states = h.samples(50, speed=-0.3)
         self.assertEqual(states[-1].mode, 'HIGH')
-        self.assertEqual(states[-1].target_duty, 0.4)
+        self.assertEqual(states[-1].target_duty, 300)
         self.assertAlmostEqual(states[-1].radial_velocity_mps, -0.3, places=8)
         stopped = h.samples(20)
         first_low = next(index for index, state in enumerate(stopped) if state.mode == 'LOW')
@@ -152,7 +158,7 @@ class MotionTests(unittest.TestCase):
         for i in range(30):
             stamp = 1800000000.0 + i * 0.02
             state = c.observe(stamp, (2 - 0.1 * i * 0.02, 0, 0),
-                              (0, 0, 0, 1), 'map', 'base_link', 1 + i * 0.02, stamp)
+                              (0, 0, 0, 1), 'world', 'base_link', 1 + i * 0.02, stamp)
         self.assertAlmostEqual(state.radial_velocity_mps, -0.1, places=5)
 
 
@@ -207,7 +213,7 @@ class FaultTests(unittest.TestCase):
         for i in range(20):
             source = 500 + 0.02 * (i + 1)
             state = h.controller.observe(source, (2, 0, 0), (0, 0, 0, 1),
-                                         'map', 'base_link', h.now + 0.02 * (i + 1), source)
+                                         'world', 'base_link', h.now + 0.02 * (i + 1), source)
         self.assertTrue(state.input_valid)
         self.assertEqual(state.mode, 'FAULT')
         self.assertTrue(h.controller.enable(h.now + 0.4, 500.4)[0])
@@ -238,16 +244,16 @@ class TransportTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 make_transport(name)
 
-    def test_mock_does_not_report_applied_output_and_invalidates_on_fault(self):
+    def test_mock_does_not_report_applied_output_and_falls_back_on_fault(self):
         transport = make_transport('mock')
         h = Harness().ready()
         transport.update(h.controller.status(), h.now)
-        self.assertEqual(transport.last_command.duty, 0.2)
+        self.assertEqual(transport.last_command.duty, 100)
         self.assertFalse(transport.hardware_feedback_valid)
         h.sample(frame_id='wrong')
         transport.update(h.controller.status(), h.now)
-        self.assertIsNone(transport.last_command)
-        self.assertEqual(len(transport.commands), 1)
+        self.assertEqual(transport.last_command.duty, 100)
+        self.assertEqual(len(transport.commands), 2)
 
     def test_bounded_mock_history_and_invalid_duty(self):
         transport = make_transport('mock')
