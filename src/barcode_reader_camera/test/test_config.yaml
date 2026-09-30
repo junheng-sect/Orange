@@ -1,0 +1,9 @@
+# Synthetic-label test config: QR + Code128 only (the installed ZXing cannot generate DataMatrix).
+tag:
+  label_width_meters: 0.10
+  label_height_meters: 0.15
+  tag_position: center
+  roi_scale: 1.25
+barcode_decoder:
+  formats: {QRCode: true, DataMatrix: false, Code128: true}
+  expected_codes: {QRCode: 2, DataMatrix: 0, Code128: 2}

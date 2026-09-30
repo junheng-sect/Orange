@@ -1,0 +1,50 @@
+# 相机读码参数（decode_image 和 ROS 节点共用，修改后重启节点生效）。
+# 结构与 Drone-Vision config.json 的 tag / detector / barcode_decoder 一致，默认值取自板端 publish/config.json。
+
+tag:
+  family: tag36h11
+  size_meters: 0.012           # AprilTag 黑框边长；只在 decode_image 自己检测 tag 时使用
+  label_width_meters: 0.10     # 整张标签纸宽（米）
+  label_height_meters: 0.15    # 整张标签纸高（米）
+  tag_position: center         # tag 在标签上的位置：center/top_left/top_right/bottom_left/bottom_right
+  roi_scale: 1.25              # ROI 边长 = 标签尺寸 × roi_scale
+
+detector:                      # 只在 decode_image 自己检测 tag 时使用；ROS 节点用 /front_marker/pose
+  quad_decimate: 1.5
+  nthreads: 4
+  refine_edges: true
+
+barcode_decoder:
+  enabled: true
+  roi_2d_scale: 512            # ROI 2D 小图通道目标边长（px），DM 对模块像素数敏感
+  formats:
+    QRCode: true
+    DataMatrix: true
+    Code128: true
+    Code39: false
+    EAN13: false
+    PDF417: false
+    Aztec: false
+    ITF: false
+  expected_codes:              # 每种码制的预期数量；0 = 不强制（顺带解出），达到全部预期后提前结束
+    QRCode: 1
+    DataMatrix: 1
+    Code128: 2
+    Code39: 0
+    EAN13: 0
+    PDF417: 0
+    Aztec: 0
+    ITF: 0
+  preprocess:
+    enabled: true
+    clahe:
+      enabled: true
+      clip_limit: 2.0
+      grid_size: 8
+  decoder:
+    try_rotate: true
+  retry:                       # 仍缺码时换新帧重试；总解码时间超过 1500 ms 不再重试
+    count: 2
+    interval_ms: 100
+  undistort:
+    enabled: true              # 2D 没读齐时，去畸变后再扫一次（需要 CameraInfo）

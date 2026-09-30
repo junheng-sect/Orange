@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Trigger one ~decode call and print the result in decode_image's format.
+
+Waits for the service, and while the chain is still starting (no_image / no_camera_info /
+no_tag) keeps retrying until --timeout. Exit code 0 only when success is true.
+"""
+import argparse
+import sys
+import time
+
+import rospy
+
+from barcode_reader_camera.srv import DecodeBarcodes
+
+NOT_READY = ('no_image', 'no_camera_info', 'no_tag')
+
+
+def escape(s):
+    out = []
+    for ch in s:
+        if ch in '"\\':
+            out.append('\\' + ch)
+        elif ord(ch) < 0x20:
+            out.append('\\x%02x' % ord(ch))
+        else:
+            out.append(ch)
+    return ''.join(out)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Trigger barcode_reader_camera ~decode once.')
+    parser.add_argument('--service', default='/barcode_reader_camera/decode')
+    parser.add_argument('--timeout', type=float, default=5.0,
+                        help='seconds to wait for the service and for no_image/no_camera_info/no_tag to clear')
+    args = parser.parse_args(rospy.myargv()[1:])
+
+    rospy.init_node('trigger_decode', anonymous=True, disable_signals=True)
+    deadline = time.monotonic() + args.timeout
+    try:
+        rospy.wait_for_service(args.service, timeout=args.timeout)
+    except rospy.ROSException:
+        print('service %s not available after %.1f s (is bringup.launch running?)' % (args.service, args.timeout),
+              file=sys.stderr)
+        return 2
+    decode = rospy.ServiceProxy(args.service, DecodeBarcodes)
+
+    waiting_for = None
+    while True:
+        try:
+            res = decode()
+        except rospy.ServiceException as e:
+            print('service call failed: %s' % e, file=sys.stderr)
+            return 2
+        if res.error not in NOT_READY or time.monotonic() >= deadline:
+            break
+        if res.error != waiting_for:
+            waiting_for = res.error
+            print('waiting: %s' % res.error, file=sys.stderr)
+        time.sleep(0.5)
+
+    print('result: success=%d partial=%d error="%s" elapsed=%.0fms tag_roi=%d report="%s"' %
+          (res.success, res.partial, res.error, res.elapsed_s * 1000.0, res.used_tag_roi, res.report))
+    for i, c in enumerate(res.codes, 1):
+        print('#%d [%s] code="%s" raw_hex="%s" symbology=%s center=(%.0f,%.0f) source=%s' %
+              (i, c.format, escape(c.code), c.raw_hex, c.symbology_id, c.center_x, c.center_y, c.source))
+    return 0 if res.success else 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

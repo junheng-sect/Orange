@@ -1,0 +1,10 @@
+# Decode the latest camera frame. The label ROI is used when a pose with the same stamp exists.
+---
+bool success
+bool partial
+# "" on success; no_image/no_camera_info/no_tag/busy/disabled/no_formats/decode_fail/partial/cancelled
+string error
+float32 elapsed_s
+bool used_tag_roi
+string report
+Barcode[] codes

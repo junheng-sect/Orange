@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>barcode_reader_camera</name>
+  <version>0.1.0</version>
+  <description>Camera barcode decoding (ZXing-C++) ported from Drone-Vision decode_barcodes, with AprilTag label ROI.</description>
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <depend>cv_bridge</depend>
+  <depend>geometry_msgs</depend>
+  <depend>ov13855_apriltag_vision</depend>
+  <depend>roscpp</depend>
+  <depend>roslib</depend>
+  <depend>rospy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>yaml-cpp</depend>
+  <exec_depend>message_runtime</exec_depend>
+  <test_depend>rostest</test_depend>
+  <export/>
+</package>

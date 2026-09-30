@@ -1,0 +1,21 @@
+<launch>
+  <!-- 读码全链路：相机 + AprilTag 位姿 + 读码节点，一条命令启动；之后用 trigger_decode 触发读码。
+       与 front_marker_control/ov13855_marker_tracking.launch 二选一（都会打开相机）；
+       已有相机和 AprilTag 在跑时，只启动 barcode_reader_camera.launch。 -->
+  <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml" />
+  <arg name="vision_config" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml" />
+  <arg name="config_file" default="$(find barcode_reader_camera)/config/barcode_reader_camera.yaml" />
+  <arg name="require_tag" default="true" />
+  <arg name="log_strategies" default="false" />
+  <include file="$(find ov13855_cam)/launch/ov13855.launch">
+    <arg name="config_file" value="$(arg camera_config)" />
+  </include>
+  <include file="$(find ov13855_apriltag_vision)/launch/ov13855_apriltag_vision.launch">
+    <arg name="config_file" value="$(arg vision_config)" />
+  </include>
+  <include file="$(find barcode_reader_camera)/launch/barcode_reader_camera.launch">
+    <arg name="config_file" value="$(arg config_file)" />
+    <arg name="require_tag" value="$(arg require_tag)" />
+    <arg name="log_strategies" value="$(arg log_strategies)" />
+  </include>
+</launch>

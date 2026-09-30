@@ -1,0 +1,10 @@
+<launch>
+  <!-- Isolated rostest master; synthetic image/camera_info/pose only, never opens the camera. -->
+  <node pkg="barcode_reader_camera" type="barcode_reader_camera_node" name="barcode_reader_camera" output="screen">
+    <param name="config_file" value="$(find barcode_reader_camera)/test/test_config.yaml" />
+    <param name="image_topic" value="/test/image_raw" />
+    <param name="camera_info_topic" value="/test/camera_info" />
+    <param name="pose_topic" value="/test/pose" />
+  </node>
+  <test test-name="barcode_reader_camera_node" pkg="barcode_reader_camera" type="test_barcode_reader_camera_node" time-limit="120" />
+</launch>
