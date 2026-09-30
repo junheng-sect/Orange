@@ -1,0 +1,16 @@
+# 遥控器开关触发读码（日常调参入口，修改后重启节点生效）。
+# 触发判据沿用 9.1 CH9 弹簧开关拍照：低于 arm_below 布防，高于 trigger_above 持续 hold_s 触发一次。
+
+rc_topic: /mavros/rc/in
+rc_channel: 9          # 1-based：9 = 遥控器 CH9（/mavros/rc/in 的 channels[8]）
+arm_below: 1600        # us
+trigger_above: 1700    # us
+hold_s: 0.05           # 高位持续多久才算一次拨杆（去抖）
+rc_timeout_s: 1.0      # 超过这么久收不到有效 CH9 视为 RC 丢失并撤防
+
+# camera: 只相机解码；serial: 只串口读码器；both: 先相机后读码器，两个都跑
+mode: both
+camera_service: /barcode_reader_camera/decode
+serial_service: /barcode_reader_serial/read
+serial_timeout_s: 0.0  # <=0 用读码器节点自己的 read_timeout_ms
+service_wait_s: 0.5    # 服务不在线时最多等多久，超时跳过该读码器

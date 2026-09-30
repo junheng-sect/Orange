@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>barcode_rc_trigger</name>
+  <version>0.1.0</version>
+  <description>RC switch (default CH9) triggers one camera decode and/or serial barcode read.</description>
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>barcode_reader_camera</depend>
+  <depend>barcode_reader_serial</depend>
+  <depend>mavros_msgs</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <test_depend>python3-nose</test_depend>
+  <test_depend>rostest</test_depend>
+  <export/>
+</package>

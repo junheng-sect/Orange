@@ -1,0 +1,11 @@
+<launch>
+  <!-- Isolated rostest master: fake RC topic and fake reader services, never touches MAVROS or hardware. -->
+  <node pkg="barcode_rc_trigger" type="barcode_rc_trigger_node" name="barcode_rc_trigger" output="screen">
+    <rosparam command="load" file="$(find barcode_rc_trigger)/config/barcode_rc_trigger.yaml" />
+    <param name="rc_topic" value="/test_rc/in" />
+    <param name="rc_timeout_s" value="0.5" />
+    <param name="camera_service" value="/fake_camera/decode" />
+    <param name="serial_service" value="/fake_serial/read" />
+  </node>
+  <test test-name="barcode_rc_trigger_node" pkg="barcode_rc_trigger" type="integration_node.py" time-limit="90" />
+</launch>
