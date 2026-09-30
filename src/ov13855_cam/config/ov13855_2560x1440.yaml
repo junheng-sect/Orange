@@ -1,12 +1,15 @@
 # 来源: /home/orangepi/Drone-Vision/vision_core/config.json
-# 原文件没有标定尺寸记录；暂按其 camera=2560x1440 使用，需实测尺度核验。
+# 原文件没有标定尺寸记录；其主点 (964.044, 533.7901) 位于 1920x1080 中心，
+# 且换算到 4224x3136 全幅后 fx≈fy，判断为 1920x1080（全幅非等比缩放）下的标定。
+# 此处 fx、cx、fy、cy 均按 2560/1920=1440/1080=4/3 缩放，畸变系数不变。
+# 2026-09-30 用 10.5 mm 标签粗验：解算深度约 17 cm，尺量 15-18 cm；未经棋盘格重新标定。
 image_width: 2560
 image_height: 1440
 camera_name: ov13855_2560x1440
 camera_matrix:
   rows: 3
   cols: 3
-  data: [1416.6551, 0, 964.044, 0, 1064.7061, 533.7901, 0, 0, 1]
+  data: [1888.8735, 0, 1285.3920, 0, 1419.6081, 711.7201, 0, 0, 1]
 distortion_model: plumb_bob
 distortion_coefficients:
   rows: 1
@@ -19,4 +22,4 @@ rectification_matrix:
 projection_matrix:
   rows: 3
   cols: 4
-  data: [1416.6551, 0, 964.044, 0, 0, 1064.7061, 533.7901, 0, 0, 0, 1, 0]
+  data: [1888.8735, 0, 1285.3920, 0, 0, 1419.6081, 711.7201, 0, 0, 0, 1, 0]

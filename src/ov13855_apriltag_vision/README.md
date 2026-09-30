@@ -30,7 +30,8 @@ CameraInfo 必须有效，图像尺寸和 frame 必须与其匹配；无目标�
 
 参数入口：`config/ov13855_apriltag_vision.yaml`，可通过 `config_file:=/absolute/path/vision.yaml` 覆盖。
 
-- 原生 AprilTag `tag36h11`，有效黑框边长默认 **0.012 m**，不含外侧白边/标签纸。
+- 原生 AprilTag `tag36h11`，配置的有效黑框边长为 **0.0105 m**（2026-09-30 实物测量），不含外侧白边/标签纸；
+  节点代码中的兜底默认值仍为 0.012 m。
 - `selection_mode: largest`：全图最大面积；同面积选择较小 ID。
   `selection_mode: fixed`：仅使用 `target_marker_id`，默认值 0。
 - 检测器默认最长边 1280、quad_decimate=1.5、4 线程、refine_edges=true。
