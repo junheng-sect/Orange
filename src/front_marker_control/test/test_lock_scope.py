@@ -122,7 +122,8 @@ class LockScopeTest(unittest.TestCase):
         node.yaw_error_pub = RecordingPublisher()
         return node
 
-    def control_node(self, command_publisher=None, status_publisher=None):
+    def control_node(self, command_publisher=None, status_publisher=None,
+                     control_mode_publisher=None):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
         node.refiner = None
         node.lock = threading.RLock()
@@ -162,6 +163,8 @@ class LockScopeTest(unittest.TestCase):
         node.last_control_mode = None
         node.last_mode_reason = None
         node.status_pub = status_publisher or RecordingPublisher()
+        node.control_mode_pub = control_mode_publisher or RecordingPublisher()
+        node.last_published_control_mode = None
         return node
 
     def assert_lock_available_during_call(self, node, call, target):
@@ -244,6 +247,17 @@ class LockScopeTest(unittest.TestCase):
                 lambda: node.control_loop(None),
             )
 
+    def test_control_mode_publish_does_not_hold_shared_state_lock(self):
+        # last_published_control_mode=None：首个周期就会发布当前模式 ALIGN。
+        blocking_publisher = BlockingPublisher()
+        node = self.control_node(control_mode_publisher=blocking_publisher)
+        with mock.patch.object(rospy.Time, 'now', return_value=self.now):
+            self.assert_lock_available_during_call(
+                node,
+                blocking_publisher,
+                lambda: node.control_loop(None),
+            )
+
     def test_shutdown_publish_race_is_ignored(self):
         publisher = RosExceptionPublisher()
         with mock.patch.object(rospy, 'is_shutdown', return_value=False):
@@ -313,6 +327,8 @@ class PositionHoldRegressionTest(unittest.TestCase):
         node.last_motion_state = None
         node.last_control_mode = None
         node.last_mode_reason = None
+        node.control_mode_pub = RecordingPublisher()
+        node.last_published_control_mode = None
         node.status_pub = RecordingPublisher()
         return node
 
@@ -398,6 +414,20 @@ class PositionHoldRegressionTest(unittest.TestCase):
         self.assertTrue(warnings, 'expected a throttled localization warning')
         self.assertEqual('ALIGN', node.control_mode)
         self.assertEqual(0.0, node.command_pub.messages[-1].twist.linear.x)
+
+    def test_legacy_lock_publishes_pos_hold_mode(self):
+        """旧单帧锁定路径（refiner=None、yaw 关）进入 POS_HOLD 也要发到 control_mode，
+        到位自动读码（barcode_arrival_trigger）靠它触发。"""
+        node = self.hold_node(control_mode='ALIGN', error_x=0.0)
+        node.localization_is_fresh = lambda _now: True
+        node.try_lock_position_target = lambda: ((1.0, 2.0, 3.0), 0.5, 100.0)
+        self.run_control_cycle(node)  # 尚未对齐：发布 ALIGN
+        node.update_alignment_state = lambda _now: 'ALIGNED'
+        self.run_control_cycle(node)  # 对齐锁定：发布 POS_HOLD
+        self.assertEqual('POS_HOLD', node.control_mode)
+        self.run_control_cycle(node)  # 停在 POS_HOLD：不重复发布
+        self.assertEqual(['ALIGN', 'POS_HOLD'],
+                         [message.data for message in node.control_mode_pub.messages])
 
 
 class LocalizationRejectRegressionTest(unittest.TestCase):

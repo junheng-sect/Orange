@@ -8,3 +8,5 @@ float32 elapsed_s
 bool used_tag_roi
 string report
 Barcode[] codes
+# Stamp/frame of the decoded image, same as ~result; empty when no frame was used (no_image/busy).
+std_msgs/Header header

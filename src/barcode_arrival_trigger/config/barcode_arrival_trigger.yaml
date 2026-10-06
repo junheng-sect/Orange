@@ -1,0 +1,22 @@
+# 到位（front_marker_control 进入 POS_HOLD）自动读码（日常调参入口，修改后重启节点生效）。
+# 本节点只做「进入 POS_HOLD -> 按 mode 读一次 -> 发布 ~result」，
+# 到位判定、失败重试、兜底策略都不在这里。
+
+# ---- 输入 ----
+# 到位信号：front_marker_control 的模式话题（std_msgs/String，latch，只在模式变化时发布）
+control_mode_topic: /front_marker_control/control_mode
+# 飞行门控状态（connected + armed + OFFBOARD 且新鲜才读码）
+state_topic: /mavros/state
+state_timeout_s: 2.0    # 超过这么久收不到 /mavros/state 视为状态不新鲜，放弃本次到位
+# marker id 来源：到位时刻该话题上最新的一条消息
+transform_topic: /ov13855_apriltag_vision/debug/homogeneous_transform
+# marker 消息最大年龄（s）：跳变时刻 0.5 s 内没有新消息就写 -1
+marker_timeout_s: 0.5
+
+# ---- 读码 ----
+# camera: 只相机解码；serial: 只串口读码器；both: 先相机后读码器，两个都跑
+mode: both
+camera_service: /barcode_reader_camera/decode
+serial_service: /barcode_reader_serial/read
+serial_timeout_s: 0.0  # <=0 用读码器节点自己的 read_timeout_ms
+service_wait_s: 0.5    # 服务不在线时最多等多久，超时跳过该读码器

@@ -37,7 +37,7 @@ rosrun barcode_reader_camera trigger_decode           # 触发一次读码（另
 - 订阅 `/ov13855/image_raw`、`/ov13855/camera_info`、`/front_marker/pose`。位姿沿用源图像时间戳，节点按时间戳精确配对，
   转回 rvec/tvec 投影 ROI。
 - `~decode`（`DecodeBarcodes.srv`）：解码最新一帧；重试时等待之后的新帧。返回 `success / partial / error / elapsed_s /
-  used_tag_roi / report / codes[]`，每个码是 `Barcode.msg`：`format, code, raw_hex, symbology_id, center_x/y, corners, source`。
+  used_tag_roi / report / codes[] / header`（`header` 为所解图像的时间戳和坐标系，与 `~result` 相同；没取到图像时为空），每个码是 `Barcode.msg`：`format, code, raw_hex, symbology_id, center_x/y, corners, source`。
 - `~cancel`（`std_srvs/Trigger`）：中止正在进行的解码，`~decode` 返回 `cancelled`；空闲时 `success=false`。
 - `~result`（`BarcodeArray.msg`）：每次 `~decode` 结束都发布；`~image_annotated` 有订阅者时发布标注图。
 - `error`：`no_image`（没有 1 s 内的新图）、`no_camera_info`、`no_tag`（最新帧没有对应位姿）、`busy`、`disabled`、

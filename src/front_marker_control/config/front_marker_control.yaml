@@ -79,6 +79,9 @@ yaw_error_topic: /front_marker_control/yaw_error
 command_topic: /front_marker_control/cmd_vel
 setpoint_preview_topic: /front_marker_control/setpoint_preview
 status_topic: /front_marker_control/status
+# 控制模式（std_msgs/String，latch，仅在模式变化时发布）：ALIGN / YAW_SAMPLING /
+# POSE_ALIGNING / POS_HOLD / RETREAT，供到位自动读码等下游按跳变触发。
+control_mode_topic: /front_marker_control/control_mode
 
 # ---- 对准判据 ----
 # 侧向/垂向/距离对准容差（m）

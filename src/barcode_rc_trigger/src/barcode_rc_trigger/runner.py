@@ -12,7 +12,9 @@ MODES = {
     'both': ('camera', 'serial'),
 }
 
-StepResult = collections.namedtuple('StepResult', ['name', 'response', 'error'])
+# started：该步发起调用的时刻（run_sequence 给了 clock 才有，否则为 None）。
+StepResult = collections.namedtuple('StepResult', ['name', 'response', 'error', 'started'],
+                                    defaults=(None,))
 
 
 def parse_mode(mode):
@@ -22,14 +24,18 @@ def parse_mode(mode):
         raise ValueError('mode must be one of %s, got %r' % ('/'.join(sorted(MODES)), mode))
 
 
-def run_sequence(steps, calls):
-    """按 steps 顺序调用 calls[name]()；单步抛异常只记录，不影响后续步骤。"""
+def run_sequence(steps, calls, clock=None):
+    """按 steps 顺序调用 calls[name]()；单步抛异常只记录，不影响后续步骤。
+
+    给了 clock 时每步发起前取一次时间记入 started（both 模式下读码器要等相机读完才开始）。
+    """
     results = []
     for name in steps:
+        started = clock() if clock is not None else None
         try:
-            results.append(StepResult(name, calls[name](), ''))
+            results.append(StepResult(name, calls[name](), '', started))
         except Exception as error:  # 服务不在线 / 调用失败
-            results.append(StepResult(name, None, str(error) or type(error).__name__))
+            results.append(StepResult(name, None, str(error) or type(error).__name__, started))
     return results
 
 

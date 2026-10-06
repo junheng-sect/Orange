@@ -127,6 +127,13 @@ XYZ 位置误差在进入比例控制、速度限幅和速度滞回死区之前�
 状态 `/front_marker_control/status` 使用 `TRACKING`、`BRAKING_POSE_LOSS` 和
 `WAIT_POSE` 区分正常跟踪、视觉丢失刹车与完全停止。
 
+`/front_marker_control/control_mode` 发布当前控制模式（`std_msgs/String`，latch），
+话题名由公共 YAML 话题段（`status_topic` 下方）的 `control_mode_topic` 配置。取值
+`ALIGN` / `YAW_SAMPLING` / `POSE_ALIGNING` / `POS_HOLD` / `RETREAT`，只在模式变化时发布；
+控制循环每周期检查一次，最迟晚一个控制周期（20 Hz）发出。不论是否启用 yaw 精对准都会
+发布：到位自动读码（`barcode_arrival_trigger`）按它的 `POS_HOLD` 跳变触发，精对准与
+旧的单帧锁定（`enable_yaw_control=false`）两条到位路径共用这一条话题。
+
 ## 连续采样的最终 XYZ+yaw 对准
 
 当 `enable_position_hold=true` 且 `enable_yaw_control=true` 时，原单帧锁定由

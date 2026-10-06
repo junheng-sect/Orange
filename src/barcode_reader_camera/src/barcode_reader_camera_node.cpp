@@ -199,6 +199,7 @@ class BarcodeReaderCameraNode {
     res.used_tag_roi = result.used_tag_roi;
     res.report = result.report;
     res.codes = result.codes;
+    res.header = result.header;
     return true;
   }
 

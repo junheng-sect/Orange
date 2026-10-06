@@ -126,6 +126,11 @@ class FrontMarkerControlNode(object):
             self.status_topic, String, queue_size=10, latch=True
         )
 
+        self.control_mode_pub = rospy.Publisher(
+            self.control_mode_topic, String, queue_size=10, latch=True
+        )
+        self.last_published_control_mode = None
+
         self.setpoint_pub = None
         if self.enable_setpoint_output:
             self.setpoint_pub = rospy.Publisher(
@@ -176,7 +181,7 @@ class FrontMarkerControlNode(object):
             'max_pose_latency=%.3fs | filter_dt_max=%.3fs | setpoint_output=%s | '
             'position_hold=%s | odom=%s | odom_timeout=%.3fs | '
             'pos_exit=(%.2f, %.2f, %.2f)m %.1fdeg %.2fs | '
-            'near_wall=%.2fm->%.2fm retreat_vx=%.2fm/s',
+            'near_wall=%.2fm->%.2fm retreat_vx=%.2fm/s | control_mode=%s',
             self.pose_topic,
             self.base_frame,
             self.target_xyz_body[0],
@@ -205,6 +210,7 @@ class FrontMarkerControlNode(object):
             self.min_marker_distance_m,
             self.retreat_recover_distance_m,
             self.retreat_velocity_x,
+            self.control_mode_topic,
         )
 
     def _read_parameters(self):
@@ -228,6 +234,9 @@ class FrontMarkerControlNode(object):
         )
         self.status_topic = str(
             get('~status_topic', '/front_marker_control/status')
+        )
+        self.control_mode_topic = str(
+            get('~control_mode_topic', '/front_marker_control/control_mode')
         )
         self.fixed_yaw_target_topic = str(get(
             '~fixed_yaw_target_topic', '/front_marker_control/fixed_yaw_target'))
@@ -1010,6 +1019,12 @@ class FrontMarkerControlNode(object):
                     actual_allowed = self.enable_setpoint_output
                     setpoint_snapshot = None
 
+            control_mode_to_publish = None
+            if self.control_mode != self.last_published_control_mode:
+                # 模式话题只在变化时发布（latch）：到位自动读码等下游按跳变触发。
+                self.last_published_control_mode = self.control_mode
+                control_mode_to_publish = self.control_mode
+
             preview_text = self.build_preview_text(
                 pose_fresh, body_velocity, yaw_rate, motion_state,
                 setpoint_snapshot,
@@ -1059,6 +1074,10 @@ class FrontMarkerControlNode(object):
         if status_to_publish is not None:
             self._publish_if_running(
                 self.status_pub, String(data=status_to_publish)
+            )
+        if control_mode_to_publish is not None:
+            self._publish_if_running(
+                self.control_mode_pub, String(data=control_mode_to_publish)
             )
 
     def enter_align_if_needed(self, reason):

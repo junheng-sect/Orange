@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>barcode_arrival_trigger</name>
+  <version>0.1.0</version>
+  <description>POS_HOLD arrival (front_marker_control) triggers one camera decode and/or serial barcode read.</description>
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
+  <license>Apache-2.0</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <depend>barcode_rc_trigger</depend>
+  <depend>barcode_reader_camera</depend>
+  <depend>barcode_reader_serial</depend>
+  <depend>mavros_msgs</depend>
+  <depend>ov13855_apriltag_vision</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <exec_depend>message_runtime</exec_depend>
+  <test_depend>python3-nose</test_depend>
+  <test_depend>rostest</test_depend>
+  <export/>
+</package>

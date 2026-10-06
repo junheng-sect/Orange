@@ -23,6 +23,7 @@ class RefinementIntegrationTest(unittest.TestCase):
             0.50,
         )
         self.status = []
+        self.modes = []
         self.targets = []
         self.pose_pub = rospy.Publisher('/test_refine/pose', PoseStamped, queue_size=10)
         self.odom_pub = rospy.Publisher('/test_refine/odom', Odometry, queue_size=10)
@@ -31,6 +32,8 @@ class RefinementIntegrationTest(unittest.TestCase):
             rospy.Subscriber('/test_refine/actual', PositionTarget, self.actual.append, queue_size=1000),
             rospy.Subscriber('/test_refine/status', String, self.status.append, queue_size=1000),
             rospy.Subscriber('/test_refine/fixed_yaw', Float64, self.targets.append, queue_size=10),
+            rospy.Subscriber('/test_refine/control_mode', String,
+                             lambda message: self.modes.append(message.data), queue_size=100),
         ]
         self.position = (0., 0., 0.)
         self.yaw = 0.
@@ -94,6 +97,13 @@ class RefinementIntegrationTest(unittest.TestCase):
         self.assertTrue(self.targets)
         self.assertAlmostEqual(self.targets[-1].data, self.wall_yaw, places=4)
         self.wait_mode('POS_HOLD')
+        # 新话题：到位（进入 POS_HOLD）在 control_mode 上出现一次跳变，
+        # 到位自动读码（barcode_arrival_trigger）就按它触发。
+        deadline = time.monotonic()+2
+        while 'POS_HOLD' not in self.modes and time.monotonic() < deadline:
+            self.drive(.06)
+        self.assertEqual(self.modes[-1] if self.modes else None, 'POS_HOLD')
+        self.assertNotIn('POS_HOLD', self.modes[:-1])
         sp = self.actual[-1]
         self.assertFalse(sp.type_mask & PositionTarget.IGNORE_PX)
         self.assertTrue(sp.type_mask & PositionTarget.IGNORE_VX)

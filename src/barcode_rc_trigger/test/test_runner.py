@@ -32,6 +32,13 @@ class RunSequenceTest(unittest.TestCase):
         self.assertEqual(results, [StepResult('camera', 'cam', ''),
                                    StepResult('serial', 'ser', '')])
 
+    def test_clock_records_each_step_start(self):
+        ticks = iter([10.0, 11.5])
+        results = run_sequence(parse_mode('both'), self.calls, clock=lambda: next(ticks))
+        self.assertEqual([result.started for result in results], [10.0, 11.5])
+        # 不给 clock 时为 None（CH9 节点不需要）。
+        self.assertIsNone(run_sequence(parse_mode('camera'), self.calls)[0].started)
+
     def test_single_modes_call_only_one(self):
         run_sequence(parse_mode('camera'), self.calls)
         self.assertEqual(self.order, ['camera'])

@@ -1,0 +1,14 @@
+<launch>
+  <!-- 隔离 rostest：假 control_mode / state / transform 话题和假读码服务，
+       不碰 MAVROS、相机、读码器硬件，也不依赖 front_marker_control 运行。 -->
+  <node pkg="barcode_arrival_trigger" type="barcode_arrival_trigger_node" name="barcode_arrival_trigger" output="screen">
+    <rosparam command="load" file="$(find barcode_arrival_trigger)/config/barcode_arrival_trigger.yaml" />
+    <param name="control_mode_topic" value="/test_arrival/control_mode" />
+    <param name="state_topic" value="/test_arrival/state" />
+    <param name="transform_topic" value="/test_arrival/transform" />
+    <param name="state_timeout_s" value="0.5" />
+    <param name="camera_service" value="/fake_camera/decode" />
+    <param name="serial_service" value="/fake_serial/read" />
+  </node>
+  <test test-name="barcode_arrival_trigger_node" pkg="barcode_arrival_trigger" type="integration_node.py" time-limit="120" />
+</launch>

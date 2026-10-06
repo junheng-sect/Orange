@@ -20,6 +20,7 @@
     <param name="command_topic" value="/test_refine/cmd_vel" />
     <param name="setpoint_preview_topic" value="/test_refine/preview" />
     <param name="status_topic" value="/test_refine/status" />
+    <param name="control_mode_topic" value="/test_refine/control_mode" />
     <param name="base_frame" value="base_link" />
     <param name="kp_x" value="0.5" />
     <param name="kp_y" value="0.5" />

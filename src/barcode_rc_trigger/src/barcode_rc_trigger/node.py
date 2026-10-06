@@ -5,11 +5,10 @@ import time
 import rospy
 from mavros_msgs.msg import RCIn
 from std_msgs.msg import UInt32
-from barcode_reader_camera.srv import DecodeBarcodes
-from barcode_reader_serial.srv import ReadBarcode
 
 from .policy import RcPulseTrigger
-from .runner import format_step, parse_mode, run_sequence, step_ok
+from .readers import ReaderCalls, log_summary
+from .runner import parse_mode, run_sequence
 
 # PWM outside this band is treated as RC invalid (PX4 reports unused channels as 0/65535).
 PWM_VALID_MIN = 800
@@ -28,13 +27,10 @@ class BarcodeRcTriggerNode:
         self.steps = parse_mode(rospy.get_param('~mode', 'both'))
         self.camera_service = rospy.get_param('~camera_service', '/barcode_reader_camera/decode')
         self.serial_service = rospy.get_param('~serial_service', '/barcode_reader_serial/read')
-        self.serial_timeout_s = float(rospy.get_param('~serial_timeout_s', 0.0))
-        self.service_wait_s = float(rospy.get_param('~service_wait_s', 0.5))
+        self.readers = ReaderCalls(self.camera_service, self.serial_service,
+                                   float(rospy.get_param('~serial_timeout_s', 0.0)),
+                                   float(rospy.get_param('~service_wait_s', 0.5)))
         rc_topic = rospy.get_param('~rc_topic', '/mavros/rc/in')
-
-        self.camera_proxy = rospy.ServiceProxy(self.camera_service, DecodeBarcodes)
-        self.serial_proxy = rospy.ServiceProxy(self.serial_service, ReadBarcode)
-        self.calls = {'camera': self._call_camera, 'serial': self._call_serial}
 
         self.lock = threading.Lock()
         self.busy = False
@@ -98,23 +94,10 @@ class BarcodeRcTriggerNode:
 
     def _run(self, seq):
         try:
-            results = run_sequence(self.steps, self.calls)
-            summary = 'pulse#%d %s' % (seq, ' | '.join(format_step(r) for r in results))
-            if all(step_ok(r) for r in results):
-                rospy.loginfo(summary)
-            else:
-                rospy.logwarn(summary)
+            log_summary('pulse#%d' % seq, run_sequence(self.steps, self.readers.calls))
         finally:
             with self.lock:
                 self.busy = False
-
-    def _call_camera(self):
-        rospy.wait_for_service(self.camera_service, self.service_wait_s)
-        return self.camera_proxy()
-
-    def _call_serial(self):
-        rospy.wait_for_service(self.serial_service, self.service_wait_s)
-        return self.serial_proxy(self.serial_timeout_s)
 
 
 def main():
