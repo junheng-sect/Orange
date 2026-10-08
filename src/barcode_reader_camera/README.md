@@ -38,17 +38,19 @@ rosrun barcode_reader_camera trigger_decode           # 触发一次读码（另
   也可以直接 `rosservice call /barcode_reader_camera/decode "{}"`。
 
 - 订阅 `/ov13855/image_raw`、`/ov13855/camera_info`、`/front_marker/pose`。位姿沿用源图像时间戳，节点按时间戳精确配对，
-  转回 rvec/tvec 投影 ROI。
+  转回 rvec/tvec 投影 ROI。视觉节点要算 AprilTag，位姿比图像晚约 30–50 ms；`~decode` 先等最新帧的位姿（最多
+  `~pose_wait_s`，收到更新帧的位姿说明这帧被视觉节点跳过，提前停止等待），再选最近一帧有位姿的图像（最多比最新帧早
+  `~pose_fallback_s`），都没有才返回 `no_tag`。
 - `~decode`（`DecodeBarcodes.srv`）：解码最新一帧；重试时等待之后的新帧。返回 `success / partial / error / elapsed_s /
   used_tag_roi / report / codes[] / header`（`header` 为所解图像的时间戳和坐标系，与 `~result` 相同；没取到图像时为空），每个码是 `Barcode.msg`：`format, code, raw_hex, symbology_id, center_x/y, corners, source`。
 - `~cancel`（`std_srvs/Trigger`）：中止正在进行的解码，`~decode` 返回 `cancelled`；空闲时 `success=false`。
 - `~result`（`BarcodeArray.msg`）：每次 `~decode` 结束都发布；`~image_annotated` 有订阅者时发布标注图。
-- `error`：`no_image`（没有 1 s 内的新图）、`no_camera_info`、`no_tag`（最新帧没有对应位姿）、`busy`、`disabled`、
+- `error`：`no_image`（没有 1 s 内的新图）、`no_camera_info`、`no_tag`（等待后最近几帧都没有对应位姿）、`busy`、`disabled`、
   `no_formats`、`decode_fail`、`partial`（读到了但没达到 expected_codes）、`cancelled`。
 - 参数：`~config_file`（默认 `config/barcode_reader_camera.yaml`）、`~layout_file`（标签版式，launch 默认
   `config/layouts/qr_top_tag_bottom.yaml`；为空时用代码默认值并警告）、`~vision_tag_size_param`（默认
   `/ov13855_apriltag_vision_node/target_marker_size_m`，与版式 tag 边长不一致时每 10 s 警告一次，不阻断解码）、`~require_tag`（默认 true，与原实现一样没有 tag 不解码；
-  false 时没有 tag 就走全图）、`~max_frame_age_s`（1.0）、`~log_strategies`（false；true 时每个策略的日志打成 INFO）。
+  false 时没有 tag 就走全图）、`~max_frame_age_s`（1.0）、`~pose_wait_s`（0.2）、`~pose_fallback_s`（0.2）、`~log_strategies`（false；true 时每个策略的日志打成 INFO）。
 
 ## 参数文件
 

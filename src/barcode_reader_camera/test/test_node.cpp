@@ -81,6 +81,7 @@ class Publisher {
     thread_.join();
   }
   std::atomic<bool> publish_pose{true};
+  std::atomic<int> pose_delay_ms{0};  // > 0: pose after its image, like the real vision node
 
  private:
   void run() {
@@ -96,13 +97,16 @@ class Publisher {
       for (int i = 0; i < 9; ++i) info.K[i] = scene_.camera.camera_matrix.at<double>(i / 3, i % 3);
       info.D.assign(5, 0.0);
       info_pub_.publish(info);
-      if (publish_pose) {  // pose first so it is buffered before its image arrives
-        geometry_msgs::PoseStamped pose;
-        pose.header = header;
-        pose.pose = pose_;
+      geometry_msgs::PoseStamped pose;
+      pose.header = header;
+      pose.pose = pose_;
+      const int delay_ms = pose_delay_ms;
+      if (publish_pose && delay_ms <= 0) pose_pub_.publish(pose);  // pose buffered before its image
+      image_pub_.publish(cv_bridge::CvImage(header, "mono8", scene_.gray).toImageMsg());
+      if (publish_pose && delay_ms > 0) {
+        ros::Duration(delay_ms / 1000.0).sleep();
         pose_pub_.publish(pose);
       }
-      image_pub_.publish(cv_bridge::CvImage(header, "mono8", scene_.gray).toImageMsg());
       rate.sleep();
     }
   }
@@ -161,6 +165,21 @@ TEST(BarcodeReaderCameraNode, DecodeWithTagRoiThenNoTag) {
   EXPECT_TRUE(results[0].success);
   EXPECT_EQ(results[0].codes.size(), 4u);
   EXPECT_EQ(results[1].error, "no_tag");
+}
+
+TEST(BarcodeReaderCameraNode, WaitsForPoseThatArrivesAfterImage) {
+  const auto scene = synthetic::makeScene();
+  ASSERT_TRUE(ros::service::waitForService("/barcode_reader_camera/decode", 20000));
+  Publisher publisher(scene);
+  publisher.pose_delay_ms = 60;  // > half the 100 ms frame period: the latest frame usually has no pose yet
+  ros::Duration(1.0).sleep();
+  for (int i = 0; i < 6; ++i) {
+    barcode_reader_camera::DecodeBarcodes srv;
+    ASSERT_TRUE(ros::service::call("/barcode_reader_camera/decode", srv));
+    EXPECT_TRUE(srv.response.success) << i << ": " << srv.response.error << " " << srv.response.report;
+    EXPECT_TRUE(srv.response.used_tag_roi) << i;
+    ros::Duration(0.037 * (i + 1)).sleep();  // vary the phase against the frame period
+  }
 }
 
 int main(int argc, char** argv) {
