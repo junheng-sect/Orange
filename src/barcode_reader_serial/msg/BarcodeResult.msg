@@ -5,7 +5,7 @@ bool success
 # Decoded text (UTF-8, delimiters and surrounding whitespace removed); empty on failure.
 string code
 # Empty on success; otherwise serial_unavailable/busy/not_configured/timeout/
-# empty_frame/cancelled/write_failed/io_error.
+# empty_frame/no_read/cancelled/write_failed/io_error.
 string error
 float32 elapsed_s
 # Raw frame bytes as hex, for debugging.

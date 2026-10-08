@@ -10,7 +10,7 @@ from .reader import BarcodeReader, config_from_params
 
 PARAM_KEYS = ('port', 'baud', 'data_bits', 'parity', 'stop_bits', 'trigger_hex',
               'trigger_command', 'release_hex', 'reply_start_hex', 'reply_end_hex',
-              'read_timeout_ms')
+              'read_timeout_ms', 'no_read_reply')
 INVALID_TIMEOUT = 'invalid_timeout'
 MAX_TIMEOUT_S = 30.0
 

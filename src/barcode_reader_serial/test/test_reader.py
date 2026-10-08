@@ -75,6 +75,7 @@ class Config(unittest.TestCase):
                          ('/dev/ttyS1', 115200, TRIGGER, RELEASE))
         self.assertEqual((config.reply_start, config.reply_end, config.read_timeout_s),
                          (b'', b'', 1.5))
+        self.assertEqual(config.no_read_reply, b'NR')
 
     def test_text_trigger(self):
         config = config_from_params({'trigger_hex': '', 'trigger_command': 'T\r'})
@@ -82,7 +83,8 @@ class Config(unittest.TestCase):
 
     def test_invalid(self):
         for params in ({'baud': 0}, {'parity': 'x'}, {'stop_bits': 3},
-                       {'read_timeout_ms': 0}, {'reply_start_hex': '02'}, {'bogus': 1}):
+                       {'read_timeout_ms': 0}, {'reply_start_hex': '02'}, {'bogus': 1},
+                       {'no_read_reply': 1}):
             with self.assertRaises(ValueError, msg=params):
                 config_from_params(params)
 
@@ -151,6 +153,31 @@ class Reader(unittest.TestCase):
             result = self.reader.read()
             self.assertEqual(result.error, rd.EMPTY_FRAME)
             self.assertEqual(port.writes, [TRIGGER, RELEASE])
+            self.reader.close()
+
+    def test_no_read_reply_is_failure(self):
+        for params, reply, raw in (({}, b'NR\r', b'NR'),
+                                   ({'no_read_reply': 'NOREAD'}, b' NOREAD \r\n', b' NOREAD '),
+                                   ({'reply_start_hex': '02', 'reply_end_hex': '03'},
+                                    b'\x02NR\x03', b'NR')):
+            port = FakePort(reply)
+            self.reader = make_reader(port, **params)
+            result = self.reader.read()
+            self.assertFalse(result.success, params)
+            self.assertEqual((result.code, result.error), ('', rd.NO_READ), params)
+            self.assertEqual(result.raw, raw)
+            self.assertEqual(port.writes, [TRIGGER, RELEASE])
+            self.reader.close()
+
+    def test_no_read_only_matches_whole_payload(self):
+        for params, reply, code in (({}, b'NR123\r', 'NR123'),
+                                    ({}, b'nr\r', 'nr'),
+                                    ({'no_read_reply': ''}, b'NR\r', 'NR')):
+            port = FakePort(reply)
+            self.reader = make_reader(port, **params)
+            result = self.reader.read()
+            self.assertTrue(result.success, (params, result))
+            self.assertEqual(result.code, code)
             self.reader.close()
 
     def test_not_configured(self):

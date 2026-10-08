@@ -17,5 +17,9 @@ release_hex: "02 F5 03"
 reply_start_hex: ""
 reply_end_hex: ""
 
-# 单次读码超时（毫秒）。实测从触发到回码约 0.6~0.9 s。
+# 读不到码时读码器的回复，去掉首尾空白后完全相同即判为 no_read（读码失败）；置空则不识别。
+# 实测读码器自身约 3 s 读不到才回 "NR\r"。
+no_read_reply: "NR"
+
+# 单次读码超时（毫秒）。实测从触发到回码约 0.1~0.9 s；小于 3000 时读不到码通常先报 timeout 而不是 no_read。
 read_timeout_ms: 1500

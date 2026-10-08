@@ -2,8 +2,8 @@
 
 Behaviour follows DroneVision BarcodeReaderSerial: one request at a time,
 stale/unsolicited bytes are dropped, and the release command is sent after
-success, timeout, empty frame and cancel. The port object is injected so the
-logic can be tested without hardware.
+success, timeout, empty frame, no-read reply and cancel. The port object is
+injected so the logic can be tested without hardware.
 """
 import collections
 import logging
@@ -18,6 +18,7 @@ BUSY = 'busy'
 NOT_CONFIGURED = 'not_configured'
 TIMEOUT = 'timeout'
 EMPTY_FRAME = 'empty_frame'
+NO_READ = 'no_read'
 CANCELLED = 'cancelled'
 WRITE_FAILED = 'write_failed'
 IO_ERROR = 'io_error'
@@ -28,7 +29,7 @@ PAYLOAD_STRIP = b' \t\r\n\x00'
 
 ReaderConfig = collections.namedtuple('ReaderConfig', [
     'port', 'baud', 'data_bits', 'parity', 'stop_bits', 'trigger', 'release',
-    'reply_start', 'reply_end', 'read_timeout_s'])
+    'reply_start', 'reply_end', 'read_timeout_s', 'no_read_reply'])
 
 ReadResult = collections.namedtuple('ReadResult', [
     'success', 'code', 'error', 'elapsed_s', 'request_seq', 'raw'])
@@ -38,7 +39,7 @@ def config_from_params(params):
     """Build ReaderConfig from DroneVision-style serial_reader keys."""
     known = {'port', 'baud', 'data_bits', 'parity', 'stop_bits', 'trigger_hex',
              'trigger_command', 'release_hex', 'reply_start_hex', 'reply_end_hex',
-             'read_timeout_ms'}
+             'read_timeout_ms', 'no_read_reply'}
     unknown = set(params) - known
     if unknown:
         raise ValueError('unknown reader parameters: %s' % ', '.join(sorted(unknown)))
@@ -70,9 +71,13 @@ def config_from_params(params):
     reply_start = parse_hex(params.get('reply_start_hex', ''))
     reply_end = parse_hex(params.get('reply_end_hex', ''))
     FrameParser(reply_start, reply_end)  # validates the delimiter pair
+    no_read_reply = params.get('no_read_reply', 'NR')
+    if not isinstance(no_read_reply, str):
+        raise ValueError('no_read_reply must be a string')
     return ReaderConfig(port, baud, data_bits, parity, stop_bits, trigger,
                         parse_hex(params.get('release_hex', '02 F5 03')),
-                        reply_start, reply_end, timeout_ms / 1000.0)
+                        reply_start, reply_end, timeout_ms / 1000.0,
+                        no_read_reply.encode('utf-8').strip(PAYLOAD_STRIP))
 
 
 def open_serial(config):
@@ -206,7 +211,13 @@ class BarcodeReader:
             self.log.debug('Dropped %d noise bytes before frame', dropped)
         if frames:
             payload = frames[0].strip(PAYLOAD_STRIP)
-            self._complete_locked(self.pending, '' if payload else EMPTY_FRAME, frames[0])
+            if not payload:
+                error = EMPTY_FRAME
+            elif payload == self.config.no_read_reply:
+                error = NO_READ  # the reader's own "nothing decoded" answer, e.g. NR
+            else:
+                error = ''
+            self._complete_locked(self.pending, error, frames[0])
 
     def _complete_locked(self, request, error, raw=b''):
         if request.result is None:

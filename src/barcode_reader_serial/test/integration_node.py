@@ -37,6 +37,12 @@ class Integration(unittest.TestCase):
         self.assertEqual(response.code, 'NEXT9017324')
         self.assertEqual(response.raw_hex, b'NEXT9017324'.hex(' '))
 
+        self.device.reply = b'NR\r'  # no_read_reply comes from config/barcode_reader.yaml
+        response = self.read(0.0)
+        self.assertFalse(response.success, response)
+        self.assertEqual((response.code, response.error), ('', 'no_read'))
+        self.assertEqual(response.raw_hex, b'NR'.hex(' '))
+
         self.device.reply = None
         response = self.read(0.3)
         self.assertEqual(response.error, 'timeout')
@@ -53,14 +59,14 @@ class Integration(unittest.TestCase):
         self.assertFalse(self.cancel().success)
 
         deadline = time.monotonic() + 2
-        while len(self.results) < 4 and time.monotonic() < deadline:
+        while len(self.results) < 5 and time.monotonic() < deadline:
             time.sleep(0.05)
         self.assertEqual(sorted(m.error for m in self.results),
-                         ['', 'busy', 'cancelled', 'timeout'])
+                         ['', 'busy', 'cancelled', 'no_read', 'timeout'])
         deadline = time.monotonic() + 2
-        while self.device.counts() != (3, 3) and time.monotonic() < deadline:
+        while self.device.counts() != (4, 4) and time.monotonic() < deadline:
             time.sleep(0.05)
-        self.assertEqual(self.device.counts(), (3, 3))  # (triggers, releases); busy sends nothing
+        self.assertEqual(self.device.counts(), (4, 4))  # (triggers, releases); busy sends nothing
 
 
 if __name__ == '__main__':
