@@ -15,3 +15,7 @@ devel/
 .pi/
 .nomachine-dl/
 .commandcode/
+
+# Python bytecode caches, regenerated on every run.
+__pycache__/
+*.pyc
