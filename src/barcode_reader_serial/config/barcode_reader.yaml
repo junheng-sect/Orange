@@ -21,5 +21,6 @@ reply_end_hex: ""
 # 实测读码器自身约 3 s 读不到才回 "NR\r"。
 no_read_reply: "NR"
 
-# 单次读码超时（毫秒）。实测从触发到回码约 0.1~0.9 s；小于 3000 时读不到码通常先报 timeout 而不是 no_read。
-read_timeout_ms: 1500
+# 单次读码超时（毫秒）。2026-10-08 实测：读到时 0.5~2.7 s 回码，读不到时读码器自己约 3.02~3.05 s 回 NR。
+# 取 3500：慢一点的成功不会被判 timeout，读不到时能拿到 no_read 而不是 timeout。
+read_timeout_ms: 3500

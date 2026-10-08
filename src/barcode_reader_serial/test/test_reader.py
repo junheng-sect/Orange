@@ -73,8 +73,9 @@ class Config(unittest.TestCase):
         config = config_from_params({})
         self.assertEqual((config.port, config.baud, config.trigger, config.release),
                          ('/dev/ttyS1', 115200, TRIGGER, RELEASE))
+        # read_timeout raised from Drone-Vision's 1500 ms: the reader itself answers NR after ~3 s.
         self.assertEqual((config.reply_start, config.reply_end, config.read_timeout_s),
-                         (b'', b'', 1.5))
+                         (b'', b'', 3.5))
         self.assertEqual(config.no_read_reply, b'NR')
 
     def test_text_trigger(self):

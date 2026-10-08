@@ -27,6 +27,9 @@ rostopic echo /barcode_reader_serial/result
 `no_read` 读码器回复“读不到码”（即 `no_read_reply`，默认 `NR`），原始回复仍见 `raw_hex`；`cancelled` 被取消或节点退出；
 `write_failed` / `io_error` 串口读写出错（会关闭串口，下次 `~read` 时重新打开）；`invalid_timeout` 请求的超时非法。
 
+连续 `no_read`（每次约 3 s 回 `NR`）时先看读码器的瞄准光/补光是否落在码上：2026-10-08 现场读码器装反，光斑在 QR 下方约
+84 mm，62 次全部 `NR`；装正后 105 次全部读到，触发到回码 0.2~0.5 s。
+
 ## 行为（与 C# 版一致）
 
 - 同一时间只允许一个请求；触发前清空串口接收缓冲，并丢弃上次请求的残留字节。
@@ -48,7 +51,7 @@ rostopic echo /barcode_reader_serial/result
 | `release_hex` | `02 F5 03` | 释放指令；置空则不下发 |
 | `reply_start_hex` / `reply_end_hex` | 空 / 空 | 两者都置空为纯文本模式，按 CR/LF 判帧，空行跳过；两者都设置时取起止符之间的内容，起始符前的字节视为噪声丢弃 |
 | `no_read_reply` | `NR` | 读码器读不到码时的回复；帧内容去掉首尾空白后与之完全相同即返回 `no_read`（不算成功）；置空则不识别，按普通条码返回 |
-| `read_timeout_ms` | 1500 | 单次读码超时，范围 (0, 30000]；实测从触发到回码约 0.1~0.9 s。读码器约 3 s 读不到才回 `NR`，超时小于 3000 时读不到码通常先报 `timeout` |
+| `read_timeout_ms` | 3500 | 单次读码超时，范围 (0, 30000]。实测读到时 0.5~2.7 s 回码，读不到时读码器约 3.02~3.05 s 回 `NR`；超时要大于这个时间，否则慢的成功会判 `timeout`、读不到时也只能拿到 `timeout` 而不是 `no_read` |
 
 ## 构建和测试
 

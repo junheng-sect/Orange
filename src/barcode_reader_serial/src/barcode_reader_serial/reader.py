@@ -64,7 +64,7 @@ def config_from_params(params):
         if not isinstance(command, str):
             raise ValueError('trigger_command must be a string')
         trigger = command.encode('utf-8')
-    timeout_ms = params.get('read_timeout_ms', 1500)
+    timeout_ms = params.get('read_timeout_ms', 3500)
     if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)) \
             or not math.isfinite(timeout_ms) or not 0 < timeout_ms <= 30000:
         raise ValueError('read_timeout_ms must be in (0, 30000]')
