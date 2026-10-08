@@ -5,6 +5,9 @@
   <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml" />
   <arg name="vision_config" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml" />
   <arg name="config_file" default="$(find barcode_reader_camera)/config/barcode_reader_camera.yaml" />
+  <!-- 标签版式：config/layouts/<layout>.yaml（tag 边长、标签几何、expected_codes），视觉和读码共用 -->
+  <arg name="layout" default="qr_top_tag_bottom" />
+  <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
   <arg name="require_tag" default="true" />
   <arg name="log_strategies" default="false" />
   <include file="$(find ov13855_cam)/launch/ov13855.launch">
@@ -12,9 +15,11 @@
   </include>
   <include file="$(find ov13855_apriltag_vision)/launch/ov13855_apriltag_vision.launch">
     <arg name="config_file" value="$(arg vision_config)" />
+    <arg name="layout_file" value="$(arg layout_file)" />
   </include>
   <include file="$(find barcode_reader_camera)/launch/barcode_reader_camera.launch">
     <arg name="config_file" value="$(arg config_file)" />
+    <arg name="layout_file" value="$(arg layout_file)" />
     <arg name="require_tag" value="$(arg require_tag)" />
     <arg name="log_strategies" value="$(arg log_strategies)" />
   </include>

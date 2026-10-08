@@ -1,0 +1,34 @@
+# 标签版式：Drone-Vision 原版（publish/config.json）——100×150 mm，tag 居中，QR×1 + DM×1 + Code128×2。
+# 启动时用 layout:=drone_vision_default 选择。坐标约定见 qr_top_tag_bottom.yaml。
+
+# tag 黑框外沿边长（米）；Drone-Vision 原配置值，实物未在本机复核
+target_marker_size_m: 0.012
+
+label:
+  width_meters: 0.10
+  height_meters: 0.15
+  tag_position: center
+  tag_offset_x_meters: 0.0
+  tag_offset_y_meters: 0.0
+
+# 标签上有哪些码制；没有的码制要关掉：启用但预期为 0 的码制按"顺带扫描"处理，永远不算读齐，会跑满 1.5 s 并判 partial
+formats:
+  QRCode: true
+  DataMatrix: true
+  Code128: true
+  Code39: false
+  EAN13: false
+  PDF417: false
+  Aztec: false
+  ITF: false
+
+# 每种码制的预期数量（只对启用的码制有效）；达到全部预期后提前结束
+expected_codes:
+  QRCode: 1
+  DataMatrix: 1
+  Code128: 2
+  Code39: 0
+  EAN13: 0
+  PDF417: 0
+  Aztec: 0
+  ITF: 0

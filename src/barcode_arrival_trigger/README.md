@@ -67,6 +67,9 @@ roslaunch barcode_arrival_trigger auto_read.launch
 roslaunch barcode_arrival_trigger auto_read.launch mode:=serial     # 只要读码器
 ```
 
+两个终端默认都用 `layout:=qr_top_tag_bottom` 标签版式；换标签时两边传同一个 `layout:=<名字>`（见
+`barcode_reader_camera` README 的「标签版式」），不一致时读码节点会警告 tag 边长不符。
+
 只起触发节点（读码节点另起，例如飞行中已经在跑 `ov13855_marker_tracking.launch` 时
 不能重复起 `barcode_reader_camera/bringup.launch`）：
 

@@ -64,6 +64,7 @@ struct LegacyCfg {
   bool bc_undistort_enabled;
   double label_width_meters, label_height_meters;
   const char* tag_position;
+  double tag_offset_x_meters, tag_offset_y_meters;
   double roi_scale;
   cv::Mat camera_matrix, dist_coeffs;
 };
@@ -89,6 +90,8 @@ LegacyCfg make_legacy(const DecoderConfig& c, const CameraModel& camera) {
   l.label_width_meters = c.label_width_m;
   l.label_height_meters = c.label_height_m;
   l.tag_position = c.tag_position.c_str();
+  l.tag_offset_x_meters = c.tag_offset_x_m;
+  l.tag_offset_y_meters = c.tag_offset_y_m;
   l.roi_scale = c.roi_scale;
   l.camera_matrix = camera.camera_matrix;
   l.dist_coeffs = camera.dist_coeffs;
@@ -729,6 +732,10 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
       } else if (std::strcmp(cfg.tag_position, "bottom_right") == 0 ||
                  std::strcmp(cfg.tag_position, "右下") == 0) {
         off_x = -lw / 2.0; off_y =  lh / 2.0;
+      } else if (std::strcmp(cfg.tag_position, "custom") == 0 ||
+                 std::strcmp(cfg.tag_position, "自定义") == 0) {
+        // tag_offset = tag 中心相对标签中心；标签中心相对 tag 中心取反。
+        off_x = -cfg.tag_offset_x_meters; off_y = -cfg.tag_offset_y_meters;
       }
       std::vector<cv::Point3f> roi_3d = {
           cv::Point3f(-half_roi_w + off_x, -half_roi_h + off_y, 0),

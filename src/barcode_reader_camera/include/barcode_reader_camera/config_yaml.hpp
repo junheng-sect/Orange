@@ -22,6 +22,12 @@ struct TagConfig {
 // Throws std::runtime_error with the offending key on invalid values.
 DecoderConfig loadDecoderConfig(const YAML::Node& root);
 TagConfig loadTagConfig(const YAML::Node& root);
+void validateDecoderConfig(const DecoderConfig& c);
+
+// Label layout file (config/layouts/*.yaml) overlaid on the main config: label.* geometry,
+// formats, expected_codes and target_marker_size_m (same key the vision node reads). Missing keys keep
+// the current values; tag_size_m may be null.
+void applyLayout(const YAML::Node& layout, DecoderConfig& c, double* tag_size_m);
 
 // ROS camera_info YAML (camera_matrix/distortion_coefficients, image_width/height).
 CameraModel loadCameraYaml(const std::string& path, int* width = nullptr, int* height = nullptr);

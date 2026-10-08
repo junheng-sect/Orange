@@ -5,11 +5,16 @@
  <arg name="camera_tf_config" default="$(find front_marker_control)/config/ov13855_camera_tf.yaml" />
  <arg name="control_config" default="$(find front_marker_control)/config/front_marker_control.yaml" />
  <arg name="control_scene_config" default="" />
+ <!-- 标签版式（决定 tag 边长）：barcode_reader_camera/config/layouts/<layout>.yaml；
+      与同时运行的 auto_read.launch 用同一个 layout -->
+ <arg name="layout" default="qr_top_tag_bottom" />
+ <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
  <include file="$(find ov13855_cam)/launch/ov13855.launch">
   <arg name="config_file" value="$(arg camera_config)" />
  </include>
  <include file="$(find ov13855_apriltag_vision)/launch/ov13855_apriltag_vision.launch">
   <arg name="config_file" value="$(arg vision_config)" />
+  <arg name="layout_file" value="$(arg layout_file)" />
  </include>
  <include file="$(find front_marker_control)/launch/front_camera_tf.launch">
   <arg name="config_file" value="$(arg camera_tf_config)" />

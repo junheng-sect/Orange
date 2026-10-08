@@ -1,9 +1,13 @@
 <launch>
   <arg name="config_file" default="$(find barcode_reader_camera)/config/barcode_reader_camera.yaml" />
+  <!-- 标签版式：config/layouts/<layout>.yaml（tag 边长、标签几何、expected_codes），视觉和读码共用 -->
+  <arg name="layout" default="qr_top_tag_bottom" />
+  <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
   <arg name="require_tag" default="true" />
   <arg name="log_strategies" default="false" />
   <node pkg="barcode_reader_camera" type="barcode_reader_camera_node" name="barcode_reader_camera" output="screen">
     <param name="config_file" value="$(arg config_file)" />
+    <param name="layout_file" value="$(arg layout_file)" />
     <param name="require_tag" value="$(arg require_tag)" />
     <param name="log_strategies" value="$(arg log_strategies)" />
     <param name="image_topic" value="/ov13855/image_raw" />

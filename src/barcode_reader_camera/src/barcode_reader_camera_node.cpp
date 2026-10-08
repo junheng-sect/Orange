@@ -1,6 +1,7 @@
 // ROS adapter for decodeBarcodes(): ~decode decodes the latest camera frame, using the label ROI
 // when ov13855_apriltag_vision published a pose with the same stamp; ~cancel interrupts it.
 #include <atomic>
+#include <cmath>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -29,6 +30,27 @@ class BarcodeReaderCameraNode {
     const std::string config_file = pnh.param<std::string>(
         "config_file", ros::package::getPath("barcode_reader_camera") + "/config/barcode_reader_camera.yaml");
     config_ = loadDecoderConfig(YAML::LoadFile(config_file));
+    const std::string layout_file = pnh.param<std::string>("layout_file", "");
+    if (!layout_file.empty()) {
+      applyLayout(YAML::LoadFile(layout_file), config_, &layout_tag_size_m_);
+      const FormatSwitches& f = config_.formats;
+      const ExpectedCounts& e = config_.expected;
+      std::string codes;
+      auto add = [&codes](bool on, const char* name, int n) {
+        if (on) codes += std::string(codes.empty() ? "" : " ") + name + "x" + std::to_string(n);
+      };
+      add(f.qr, "QR", e.qr); add(f.dm, "DM", e.dm); add(f.c128, "C128", e.c128); add(f.c39, "C39", e.c39);
+      add(f.ean13, "EAN13", e.ean13); add(f.pdf417, "PDF417", e.pdf417); add(f.aztec, "Aztec", e.aztec);
+      add(f.itf, "ITF", e.itf);
+      ROS_INFO("barcode_reader_camera: layout=%s tag=%.4fm label=%.3fx%.3fm tag_position=%s "
+               "offset=(%.4f,%.4f)m codes=[%s]",
+               layout_file.c_str(), layout_tag_size_m_, config_.label_width_m, config_.label_height_m,
+               config_.tag_position.c_str(), config_.tag_offset_x_m, config_.tag_offset_y_m, codes.c_str());
+    } else {
+      ROS_WARN("barcode_reader_camera: no ~layout_file, label geometry and expected_codes use built-in defaults");
+    }
+    vision_tag_size_param_ = pnh.param<std::string>(
+        "vision_tag_size_param", "/ov13855_apriltag_vision_node/target_marker_size_m");
     require_tag_ = pnh.param("require_tag", true);
     max_frame_age_s_ = pnh.param("max_frame_age_s", 1.0);
     log_strategies_ = pnh.param("log_strategies", false);
@@ -134,6 +156,7 @@ class BarcodeReaderCameraNode {
     }
     if (result.error.empty() && require_tag_ && !camera.valid()) result.error = "no_camera_info";
     if (result.error.empty() && require_tag_ && !have_pose) result.error = "no_tag";
+    checkVisionTagSize();
 
     DecodeOutput out;
     if (result.error.empty()) {
@@ -203,6 +226,18 @@ class BarcodeReaderCameraNode {
     return true;
   }
 
+  // The pose (and so the ROI) is scaled by the vision node's tag size; warn if it was started with
+  // a different layout. Warning only: a wrong ROI still falls back to the full-frame pyramid.
+  void checkVisionTagSize() {
+    if (layout_tag_size_m_ <= 0.0 || vision_tag_size_param_.empty()) return;
+    double vision_size = 0.0;
+    if (!ros::param::getCached(vision_tag_size_param_, vision_size)) return;
+    if (std::abs(vision_size - layout_tag_size_m_) > 1e-6)
+      ROS_WARN_THROTTLE(10.0, "barcode_reader_camera: %s=%.4fm but layout tag size is %.4fm; "
+                        "start vision and reader with the same layout",
+                        vision_tag_size_param_.c_str(), vision_size, layout_tag_size_m_);
+  }
+
   bool onCancel(std_srvs::Trigger::Request&, std_srvs::Trigger::Response& res) {
     std::unique_lock<std::mutex> busy(decode_mutex_, std::try_to_lock);
     if (busy.owns_lock()) {
@@ -218,6 +253,8 @@ class BarcodeReaderCameraNode {
   }
 
   DecoderConfig config_;
+  double layout_tag_size_m_ = 0.0;  // 0 = no layout file
+  std::string vision_tag_size_param_;
   bool require_tag_ = true;
   double max_frame_age_s_ = 1.0;
   bool log_strategies_ = false;

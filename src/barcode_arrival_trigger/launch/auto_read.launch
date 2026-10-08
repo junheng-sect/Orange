@@ -3,11 +3,15 @@
        前提：另开终端跑 ov13855_marker_tracking.launch（相机 + AprilTag + 控制），
        两者不能同时启动相机或视觉节点，否则节点重名冲突。
        只支持 OV13855 链路；不要同时运行 DroneVision（共用 /dev/ttyS1）。
-       读码节点参数在各自 YAML 里：barcode_reader_camera、barcode_reader_serial。 -->
+       读码节点参数在各自 YAML 里：barcode_reader_camera、barcode_reader_serial。
+       layout 选标签版式，必须与 ov13855_marker_tracking.launch 的 layout 相同（tag 边长不一致时读码节点会警告）。 -->
   <arg name="config_file" default="$(find barcode_arrival_trigger)/config/barcode_arrival_trigger.yaml" />
   <arg name="mode" default="" />
+  <arg name="layout" default="qr_top_tag_bottom" />
 
-  <include file="$(find barcode_reader_camera)/launch/barcode_reader_camera.launch" />
+  <include file="$(find barcode_reader_camera)/launch/barcode_reader_camera.launch">
+    <arg name="layout" value="$(arg layout)" />
+  </include>
   <include file="$(find barcode_reader_serial)/launch/barcode_reader.launch" />
   <include file="$(find barcode_arrival_trigger)/launch/barcode_arrival_trigger.launch">
     <arg name="config_file" value="$(arg config_file)" />

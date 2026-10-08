@@ -29,9 +29,11 @@ CameraInfo 必须有效，图像尺寸和 frame 必须与其匹配；无目标�
 ## 配置与接口
 
 参数入口：`config/ov13855_apriltag_vision.yaml`，可通过 `config_file:=/absolute/path/vision.yaml` 覆盖。
+`layout_file:=` 非空时在其后再加载标签版式文件（`barcode_reader_camera/config/layouts/*.yaml`），覆盖
+`target_marker_size_m`；`bringup.launch` 和 `ov13855_marker_tracking.launch` 用 `layout:=<名字>` 传入。
 
 - 原生 AprilTag `tag36h11`，配置的有效黑框边长为 **0.0437 m**（2026-10-08 现场标签实物测量），不含外侧白边/标签纸；
-  节点代码中的兜底默认值仍为 0.012 m。
+  这是不带版式启动时的默认值，带版式时以版式文件为准；节点代码中的兜底默认值仍为 0.012 m。
 - `selection_mode: largest`：全图最大面积；同面积选择较小 ID。
   `selection_mode: fixed`：仅使用 `target_marker_id`，默认值 0。
 - 检测器默认最长边 1280、quad_decimate=1.5、4 线程、refine_edges=true。

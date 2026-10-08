@@ -7,6 +7,7 @@
 #include <ov13855_apriltag_vision/apriltag_detector.hpp>
 #include <ov13855_apriltag_vision/pose_solver.hpp>
 
+#include "barcode_reader_camera/config_yaml.hpp"
 #include "barcode_reader_camera/multi_decoder.hpp"
 #include "synthetic_label.hpp"
 
@@ -84,6 +85,26 @@ TEST(MultiDecoder, TagRoiDecodesAllCodesWithRawBytes) {
   EXPECT_FALSE(anyLineContains(lines, "P1280"));
   EXPECT_FALSE(anyLineContains(lines, "PFULL"));
   EXPECT_EQ(out.report, "QR=2/2 C128=2/2");
+}
+
+TEST(MultiDecoder, CustomTagOffsetShiftsRoi) {
+  const auto scene = synthetic::makeScene();
+  TagPose pose;
+  ASSERT_TRUE(detectPose(scene, pose));
+  DecoderConfig center = testConfig();
+  center.retry_count = 0;
+  DecoderConfig custom = center;
+  custom.tag_position = "custom";
+  custom.tag_offset_x_m = 0.0;
+  custom.tag_offset_y_m = -0.02;  // tag 20 mm below the label center → ROI moves 20 mm up
+  const auto a = decodeBarcodes(scene.gray, &pose, scene.camera, center);
+  const auto b = decodeBarcodes(scene.gray, &pose, scene.camera, custom);
+  ASSERT_EQ(a.roi_quad.size(), 4u);
+  ASSERT_EQ(b.roi_quad.size(), 4u);
+  for (size_t k = 0; k < 4; ++k) {
+    EXPECT_NEAR(b.roi_quad[k].x - a.roi_quad[k].x, 0.0, 2.0);
+    EXPECT_NEAR(b.roi_quad[k].y - a.roi_quad[k].y, -160.0, 4.0);  // 8 px/mm, image y down
+  }
 }
 
 TEST(MultiDecoder, NoTagFallsBackToPyramid) {
@@ -186,6 +207,55 @@ TEST(MultiDecoder, DisabledAndNoFormats) {
 TEST(MultiDecoder, ToHex) {
   EXPECT_EQ(toHex({0x4e, 0x45, 0x00, 0xff}), "4e 45 00 ff");
   EXPECT_EQ(toHex({}), "");
+}
+
+namespace {
+std::string packageFile(const std::string& rel) {
+  const std::string here = __FILE__;  // .../barcode_reader_camera/test/test_multi_decoder.cpp
+  return here.substr(0, here.rfind("/test/")) + "/" + rel;
+}
+}  // namespace
+
+TEST(Layout, ShippedLayoutOverlaysMainConfig) {
+  DecoderConfig c = loadDecoderConfig(YAML::LoadFile(packageFile("config/barcode_reader_camera.yaml")));
+  double tag_size = 0.0;
+  applyLayout(YAML::LoadFile(packageFile("config/layouts/qr_top_tag_bottom.yaml")), c, &tag_size);
+  EXPECT_DOUBLE_EQ(tag_size, 0.0437);
+  EXPECT_DOUBLE_EQ(c.label_width_m, 0.10);
+  EXPECT_DOUBLE_EQ(c.label_height_m, 0.15);
+  EXPECT_EQ(c.tag_position, "custom");
+  EXPECT_DOUBLE_EQ(c.tag_offset_x_m, 0.0);
+  EXPECT_DOUBLE_EQ(c.tag_offset_y_m, -0.0225);
+  EXPECT_TRUE(c.formats.qr);
+  EXPECT_FALSE(c.formats.dm);
+  EXPECT_FALSE(c.formats.c128);
+  EXPECT_EQ(c.expected.qr, 1);
+  EXPECT_EQ(c.expected.dm, 0);
+  EXPECT_EQ(c.expected.c128, 0);
+  EXPECT_DOUBLE_EQ(c.roi_scale, 1.25);  // main-config keys survive the overlay
+
+  applyLayout(YAML::LoadFile(packageFile("config/layouts/drone_vision_default.yaml")), c, &tag_size);
+  EXPECT_DOUBLE_EQ(tag_size, 0.012);
+  EXPECT_EQ(c.tag_position, "center");
+  EXPECT_DOUBLE_EQ(c.tag_offset_y_m, 0.0);
+  EXPECT_TRUE(c.formats.dm);
+  EXPECT_TRUE(c.formats.c128);
+  EXPECT_EQ(c.expected.dm, 1);
+  EXPECT_EQ(c.expected.c128, 2);
+}
+
+TEST(Layout, MissingKeysKeepValuesAndInvalidThrows) {
+  DecoderConfig c;
+  double tag_size = 0.05;
+  applyLayout(YAML::Load("label: {width_meters: 0.08}"), c, &tag_size);
+  EXPECT_DOUBLE_EQ(c.label_width_m, 0.08);
+  EXPECT_DOUBLE_EQ(c.label_height_m, 0.15);
+  EXPECT_DOUBLE_EQ(tag_size, 0.05);
+  // Fresh config per case: a failed overlay may leave c partially modified.
+  DecoderConfig c1, c2, c3;
+  EXPECT_THROW(applyLayout(YAML::Load("label: {tag_position: middle}"), c1, nullptr), std::runtime_error);
+  EXPECT_THROW(applyLayout(YAML::Load("target_marker_size_m: 0"), c2, &tag_size), std::runtime_error);
+  EXPECT_THROW(applyLayout(YAML::Load("expected_codes: {QRCode: -1}"), c3, nullptr), std::runtime_error);
 }
 
 int main(int argc, char** argv) {

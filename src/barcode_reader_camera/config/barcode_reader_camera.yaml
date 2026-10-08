@@ -1,12 +1,10 @@
 # 相机读码参数（decode_image 和 ROS 节点共用，修改后重启节点生效）。
 # 结构与 Drone-Vision config.json 的 tag / detector / barcode_decoder 一致，默认值取自板端 publish/config.json。
 
+# 标签版式（tag 边长、标签纸宽高、tag 位置/偏移、formats、expected_codes）不在这里，
+# 见 config/layouts/<名字>.yaml，启动时用 layout:=<名字> 选择；节点没给版式时用代码默认值。
 tag:
   family: tag36h11
-  size_meters: 0.0437          # AprilTag 黑框边长（2026-10-08 实物量得 43.7 mm）；只在 decode_image 自己检测 tag 时使用
-  label_width_meters: 0.10     # 整张标签纸宽（米）
-  label_height_meters: 0.15    # 整张标签纸高（米）
-  tag_position: center         # tag 在标签上的位置：center/top_left/top_right/bottom_left/bottom_right
   roi_scale: 1.25              # ROI 边长 = 标签尺寸 × roi_scale
 
 detector:                      # 只在 decode_image 自己检测 tag 时使用；ROS 节点用 /front_marker/pose
@@ -17,24 +15,6 @@ detector:                      # 只在 decode_image 自己检测 tag 时使用�
 barcode_decoder:
   enabled: true
   roi_2d_scale: 512            # ROI 2D 小图通道目标边长（px），DM 对模块像素数敏感
-  formats:
-    QRCode: true
-    DataMatrix: true
-    Code128: true
-    Code39: false
-    EAN13: false
-    PDF417: false
-    Aztec: false
-    ITF: false
-  expected_codes:              # 每种码制的预期数量；0 = 不强制（顺带解出），达到全部预期后提前结束
-    QRCode: 1
-    DataMatrix: 1
-    Code128: 2
-    Code39: 0
-    EAN13: 0
-    PDF417: 0
-    Aztec: 0
-    ITF: 0
   preprocess:
     enabled: true
     clahe:

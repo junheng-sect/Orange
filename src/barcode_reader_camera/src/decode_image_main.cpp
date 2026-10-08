@@ -21,8 +21,10 @@ namespace {
 
 void usage() {
   std::fprintf(stderr,
-      "usage: decode_image <image> [--config yaml] [--camera-yaml K.yaml | --focal-px F]\n"
+      "usage: decode_image <image> [--config yaml] [--layout layouts/x.yaml]\n"
+      "                    [--camera-yaml K.yaml | --focal-px F]\n"
       "                    [--no-tag] [--all-formats] [--free] [--annotate out.jpg] [--verbose]\n"
+      "  --layout        label layout overlay (tag size, label geometry, expected codes)\n"
       "  --focal-px F    pinhole focal length in pixels; default 0.6 x image diagonal\n"
       "                  (~26 mm equivalent phone lens), principal point at image center\n"
       "  --no-tag        skip AprilTag, decode with the full-frame pyramid only\n"
@@ -43,7 +45,7 @@ std::string escape(const std::string& s) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string image_path, config_path, camera_yaml, annotate_path;
+  std::string image_path, config_path, layout_path, camera_yaml, annotate_path;
   double focal_px = 0.0;
   bool no_tag = false, all_formats = false, free_decode = false, verbose = false;
   for (int i = 1; i < argc; ++i) {
@@ -53,6 +55,7 @@ int main(int argc, char** argv) {
       return argv[++i];
     };
     if (a == "--config") config_path = value();
+    else if (a == "--layout") layout_path = value();
     else if (a == "--camera-yaml") camera_yaml = value();
     else if (a == "--focal-px") focal_px = std::atof(value().c_str());
     else if (a == "--annotate") annotate_path = value();
@@ -72,6 +75,7 @@ int main(int argc, char** argv) {
     const YAML::Node root = config_path.empty() ? YAML::Node() : YAML::LoadFile(config_path);
     config = loadDecoderConfig(root);
     tag_config = loadTagConfig(root);
+    if (!layout_path.empty()) applyLayout(YAML::LoadFile(layout_path), config, &tag_config.size_m);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "config error: %s\n", e.what());
     return 2;

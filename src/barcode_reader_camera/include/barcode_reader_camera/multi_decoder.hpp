@@ -39,7 +39,10 @@ struct DecoderConfig {
   // Label geometry used to project the decode ROI from the tag pose.
   double label_width_m = 0.10;
   double label_height_m = 0.15;
-  std::string tag_position = "center";  // center/top_left/top_right/bottom_left/bottom_right (or 中文)
+  std::string tag_position = "center";  // center/top_left/top_right/bottom_left/bottom_right/custom (or 中文)
+  // custom only: tag center relative to the label center, in the tag frame (+x right, +y tag-up).
+  double tag_offset_x_m = 0.0;
+  double tag_offset_y_m = 0.0;
   double roi_scale = 1.25;
 };
 

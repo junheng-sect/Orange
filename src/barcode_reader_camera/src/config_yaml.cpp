@@ -20,7 +20,67 @@ void require(bool ok, const char* what) {
   if (!ok) throw std::runtime_error(std::string("invalid config: ") + what);
 }
 
+void readExpected(const YAML::Node& e, ExpectedCounts& x) {
+  x.qr = get(e, "QRCode", x.qr);
+  x.dm = get(e, "DataMatrix", x.dm);
+  x.c128 = get(e, "Code128", x.c128);
+  x.c39 = get(e, "Code39", x.c39);
+  x.ean13 = get(e, "EAN13", x.ean13);
+  x.pdf417 = get(e, "PDF417", x.pdf417);
+  x.aztec = get(e, "Aztec", x.aztec);
+  x.itf = get(e, "ITF", x.itf);
+}
+
+void readFormats(const YAML::Node& f, FormatSwitches& x) {
+  x.qr = get(f, "QRCode", x.qr);
+  x.dm = get(f, "DataMatrix", x.dm);
+  x.c128 = get(f, "Code128", x.c128);
+  x.c39 = get(f, "Code39", x.c39);
+  x.ean13 = get(f, "EAN13", x.ean13);
+  x.pdf417 = get(f, "PDF417", x.pdf417);
+  x.aztec = get(f, "Aztec", x.aztec);
+  x.itf = get(f, "ITF", x.itf);
+}
+
 }  // namespace
+
+void validateDecoderConfig(const DecoderConfig& c) {
+  require(std::isfinite(c.label_width_m) && c.label_width_m > 0, "label width > 0");
+  require(std::isfinite(c.label_height_m) && c.label_height_m > 0, "label height > 0");
+  require(std::isfinite(c.roi_scale) && c.roi_scale > 0, "tag.roi_scale > 0");
+  static const char* positions[] = {"center", "中间", "top_left", "左上", "top_right", "右上",
+                                    "bottom_left", "左下", "bottom_right", "右下", "custom", "自定义"};
+  bool known = false;
+  for (const char* p : positions) known = known || c.tag_position == p;
+  require(known, "tag_position");
+  require(std::isfinite(c.tag_offset_x_m), "tag_offset_x_meters finite");
+  require(std::isfinite(c.tag_offset_y_m), "tag_offset_y_meters finite");
+  const ExpectedCounts& x = c.expected;
+  require(x.qr >= 0 && x.dm >= 0 && x.c128 >= 0 && x.c39 >= 0 && x.ean13 >= 0 && x.pdf417 >= 0 &&
+              x.aztec >= 0 && x.itf >= 0,
+          "expected_codes >= 0");
+  require(c.roi_2d_scale > 0, "barcode_decoder.roi_2d_scale > 0");
+  require(std::isfinite(c.clahe_clip) && c.clahe_clip > 0, "preprocess.clahe.clip_limit > 0");
+  require(c.clahe_grid >= 1, "preprocess.clahe.grid_size >= 1");
+  require(c.retry_count >= 0, "retry.count >= 0");
+  require(c.retry_interval_ms >= 0, "retry.interval_ms >= 0");
+}
+
+void applyLayout(const YAML::Node& layout, DecoderConfig& c, double* tag_size_m) {
+  const YAML::Node label = layout["label"];
+  c.label_width_m = get(label, "width_meters", c.label_width_m);
+  c.label_height_m = get(label, "height_meters", c.label_height_m);
+  c.tag_position = get(label, "tag_position", c.tag_position);
+  c.tag_offset_x_m = get(label, "tag_offset_x_meters", c.tag_offset_x_m);
+  c.tag_offset_y_m = get(label, "tag_offset_y_meters", c.tag_offset_y_m);
+  readFormats(layout["formats"], c.formats);
+  readExpected(layout["expected_codes"], c.expected);
+  if (tag_size_m) {
+    *tag_size_m = get(layout, "target_marker_size_m", *tag_size_m);
+    require(std::isfinite(*tag_size_m) && *tag_size_m > 0, "layout target_marker_size_m > 0");
+  }
+  validateDecoderConfig(c);
+}
 
 DecoderConfig loadDecoderConfig(const YAML::Node& root) {
   DecoderConfig c;
@@ -28,29 +88,15 @@ DecoderConfig loadDecoderConfig(const YAML::Node& root) {
   c.label_width_m = get(tag, "label_width_meters", c.label_width_m);
   c.label_height_m = get(tag, "label_height_meters", c.label_height_m);
   c.tag_position = get(tag, "tag_position", c.tag_position);
+  c.tag_offset_x_m = get(tag, "tag_offset_x_meters", c.tag_offset_x_m);
+  c.tag_offset_y_m = get(tag, "tag_offset_y_meters", c.tag_offset_y_m);
   c.roi_scale = get(tag, "roi_scale", c.roi_scale);
 
   const YAML::Node bc = root["barcode_decoder"];
   c.enabled = get(bc, "enabled", c.enabled);
   c.roi_2d_scale = get(bc, "roi_2d_scale", c.roi_2d_scale);
-  const YAML::Node f = bc ? bc["formats"] : YAML::Node();
-  c.formats.qr = get(f, "QRCode", c.formats.qr);
-  c.formats.dm = get(f, "DataMatrix", c.formats.dm);
-  c.formats.c128 = get(f, "Code128", c.formats.c128);
-  c.formats.c39 = get(f, "Code39", c.formats.c39);
-  c.formats.ean13 = get(f, "EAN13", c.formats.ean13);
-  c.formats.pdf417 = get(f, "PDF417", c.formats.pdf417);
-  c.formats.aztec = get(f, "Aztec", c.formats.aztec);
-  c.formats.itf = get(f, "ITF", c.formats.itf);
-  const YAML::Node e = bc ? bc["expected_codes"] : YAML::Node();
-  c.expected.qr = get(e, "QRCode", c.expected.qr);
-  c.expected.dm = get(e, "DataMatrix", c.expected.dm);
-  c.expected.c128 = get(e, "Code128", c.expected.c128);
-  c.expected.c39 = get(e, "Code39", c.expected.c39);
-  c.expected.ean13 = get(e, "EAN13", c.expected.ean13);
-  c.expected.pdf417 = get(e, "PDF417", c.expected.pdf417);
-  c.expected.aztec = get(e, "Aztec", c.expected.aztec);
-  c.expected.itf = get(e, "ITF", c.expected.itf);
+  readFormats(bc ? bc["formats"] : YAML::Node(), c.formats);
+  readExpected(bc ? bc["expected_codes"] : YAML::Node(), c.expected);
   const YAML::Node pre = bc ? bc["preprocess"] : YAML::Node();
   c.preprocess_enabled = get(pre, "enabled", c.preprocess_enabled);
   const YAML::Node clahe = pre ? pre["clahe"] : YAML::Node();
@@ -63,19 +109,7 @@ DecoderConfig loadDecoderConfig(const YAML::Node& root) {
   c.retry_interval_ms = get(retry, "interval_ms", c.retry_interval_ms);
   c.undistort_enabled = get(bc ? bc["undistort"] : YAML::Node(), "enabled", c.undistort_enabled);
 
-  require(std::isfinite(c.label_width_m) && c.label_width_m > 0, "tag.label_width_meters > 0");
-  require(std::isfinite(c.label_height_m) && c.label_height_m > 0, "tag.label_height_meters > 0");
-  require(std::isfinite(c.roi_scale) && c.roi_scale > 0, "tag.roi_scale > 0");
-  static const char* positions[] = {"center", "中间", "top_left", "左上", "top_right", "右上",
-                                    "bottom_left", "左下", "bottom_right", "右下"};
-  bool known = false;
-  for (const char* p : positions) known = known || c.tag_position == p;
-  require(known, "tag.tag_position");
-  require(c.roi_2d_scale > 0, "barcode_decoder.roi_2d_scale > 0");
-  require(std::isfinite(c.clahe_clip) && c.clahe_clip > 0, "preprocess.clahe.clip_limit > 0");
-  require(c.clahe_grid >= 1, "preprocess.clahe.grid_size >= 1");
-  require(c.retry_count >= 0, "retry.count >= 0");
-  require(c.retry_interval_ms >= 0, "retry.interval_ms >= 0");
+  validateDecoderConfig(c);
   return c;
 }
 

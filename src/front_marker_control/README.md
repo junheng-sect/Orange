@@ -197,6 +197,9 @@ source /home/orangepi/orange/devel/setup.bash
 roslaunch front_marker_control ov13855_marker_tracking.launch
 ```
 
+tag 边长取自标签版式文件，默认 `layout:=qr_top_tag_bottom`（`barcode_reader_camera/config/layouts/`），
+换标签时传 `layout:=<名字>`。
+
 旧 `front_marker_tracking.launch` 保持不变。退出新入口后可用旧入口回退；
 两者不能同时运行，因为共用 `/front_marker/pose` 和 `front_marker` TF。
 新相机标定采用参考配置，分辨率暂假定为 2560×1440，尺度实测见新视觉包 `VALIDATION.md`。
