@@ -3,7 +3,7 @@
 
 tag:
   family: tag36h11
-  size_meters: 0.012           # AprilTag 黑框边长；只在 decode_image 自己检测 tag 时使用
+  size_meters: 0.0437          # AprilTag 黑框边长（2026-10-08 实物量得 43.7 mm）；只在 decode_image 自己检测 tag 时使用
   label_width_meters: 0.10     # 整张标签纸宽（米）
   label_height_meters: 0.15    # 整张标签纸高（米）
   tag_position: center         # tag 在标签上的位置：center/top_left/top_right/bottom_left/bottom_right

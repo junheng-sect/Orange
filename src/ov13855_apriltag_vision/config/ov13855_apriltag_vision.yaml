@@ -22,8 +22,8 @@ refine_edges: true
 detection_max_dimension: 1280
 # 目标 Marker ID
 target_marker_id: 0 # 仅 fixed 模式使用
-# 目标 Marker 实际边长（m），指 tag36h11 黑框外沿、不含白边；2026-09-30 实物量得约 10.5 mm
-target_marker_size_m: 0.0105
+# 目标 Marker 实际边长（m），指 tag36h11 黑框外沿、不含白边；2026-10-08 现场标签实物量得 43.7 mm
+target_marker_size_m: 0.0437
 
 # 位姿直接采用 Drone-Vision 的默认 solvePnP（ITERATIVE，无历史初值）。
 # 无额外轮廓/重投影门禁、双解筛选或连续确认参数。
