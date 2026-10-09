@@ -9,6 +9,9 @@
   <param name="marker_frame" value="ov13855_test_marker" />
   <param name="selection_mode" value="largest" />
   <param name="publish_annotated" value="false" />
+  <param name="preview_image_topic" value="/ov13855_test/preview" />
+  <param name="preview_max_dimension" value="400" />
+  <param name="preview_rate_hz" value="0.0" />
  </node>
  <test test-name="ov13855_pipeline" pkg="ov13855_apriltag_vision" type="test_pipeline.py" time-limit="60" />
 </launch>

@@ -13,6 +13,8 @@ roslaunch ov13855_cam ov13855.launch
 日常参数入口为 `config/ov13855.yaml`。自定义配置：
 `roslaunch ov13855_cam ov13855.launch config_file:=/absolute/path/camera.yaml`。
 输出 `/ov13855/image_raw`、`/ov13855/camera_info`，共用时间戳和 `ov13855_optical_frame`。
+图像经 image_transport 发布，另有 `/ov13855/image_raw/compressed` 等插件话题，只在有订阅者时编码；
+远程查看优先用视觉包的缩小预览 `/ov13855_apriltag_vision/image_preview/compressed`。
 GStreamer appsink 和 ROS 发布队列均为 1；逐帧校验协商后的尺寸/格式/FPS，按实际行步长复制。
 帧时间戳由 GStreamer PTS 的帧龄映射至 ROS 时间；PTS 无效则告警并采用接收时间，
 不宣称是硬件曝光时间。无帧 5 秒或采集错误会退出并释放设备。

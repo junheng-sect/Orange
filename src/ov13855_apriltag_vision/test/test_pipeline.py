@@ -72,6 +72,19 @@ class PipelineTest(unittest.TestCase):
         self.info();self.assert_first_frame_published(9)
         # Reacquisition publishes on its first valid frame, even after a long gap.
         time.sleep(2.1);self.assert_first_frame_published(9)
+    def test_preview(self):
+        previews=[]
+        sub=rospy.Subscriber('/ov13855_test/preview',Image,previews.append)
+        end=time.monotonic()+5
+        while time.monotonic()<end and not sub.get_num_connections():time.sleep(.02)
+        self.assertTrue(sub.get_num_connections())
+        self.info();stamp=self.send(self.scene(7))
+        end=time.monotonic()+2
+        while time.monotonic()<end and not any(m.header.stamp==stamp for m in previews):time.sleep(.01)
+        preview=[m for m in previews if m.header.stamp==stamp]
+        self.assertTrue(preview,'preview was not published')
+        self.assertEqual((preview[-1].width,preview[-1].height,preview[-1].encoding),(400,400,'bgr8'))
+        sub.unregister()
 if __name__=='__main__':
     rospy.init_node('ov13855_pipeline_test')
     rostest.rosrun('ov13855_apriltag_vision','ov13855_pipeline',PipelineTest)

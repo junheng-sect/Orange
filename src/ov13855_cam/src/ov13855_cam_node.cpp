@@ -1,5 +1,6 @@
 #include <ros/ros.h>
 #include <sensor_msgs/Image.h>
+#include <image_transport/image_transport.h>
 #include <camera_info_manager/camera_info_manager.h>
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
@@ -97,7 +98,9 @@ void run() {
   camera_info_manager::CameraInfoManager manager(pnh, name);
   if (!manager.loadCameraInfo(url) || !manager.isCalibrated()) throw std::runtime_error("cannot load calibration");
   validateInfo(manager.getCameraInfo(), width, height);
-  auto image_pub = nh.advertise<sensor_msgs::Image>(image_topic, 1);
+  // image_transport adds <image_topic>/compressed etc.; plugins encode only while subscribed.
+  image_transport::ImageTransport transport(nh);
+  auto image_pub = transport.advertise(image_topic, 1);
   auto info_pub = nh.advertise<sensor_msgs::CameraInfo>(info_topic, 1);
   Pipeline stream; GError* error = nullptr;
   const std::string description = "v4l2src name=source ! video/x-raw,format=NV12,width=" + std::to_string(width) +

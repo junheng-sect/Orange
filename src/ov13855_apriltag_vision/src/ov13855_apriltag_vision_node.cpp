@@ -12,6 +12,7 @@
 #include <ov13855_apriltag_vision/pose_solver.hpp>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TransformStamped.h>
+#include <image_transport/image_transport.h>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/imgproc.hpp>
 #include <ros/ros.h>
@@ -93,11 +94,32 @@ bool rotationToQuaternion(const cv::Mat& rotation, geometry_msgs::Quaternion& qu
          std::isfinite(quaternion.z) && std::isfinite(quaternion.w);
 }
 
+// INTER_AREA is only fast for integer factors (2560 -> 960 costs ~40 ms CPU on RK3588):
+// halve with INTER_AREA, then finish the remaining < 2x step with INTER_LINEAR.
+cv::Mat downscale(const cv::Mat& image, double scale)
+{
+  const cv::Size target(cvRound(image.cols * scale), cvRound(image.rows * scale));
+  cv::Mat current = image;
+  while (current.cols / 2 >= target.width && current.rows / 2 >= target.height)
+  {
+    cv::Mat half;
+    cv::resize(current, half, cv::Size(current.cols / 2, current.rows / 2), 0, 0, cv::INTER_AREA);
+    current = half;
+  }
+  if (current.size() != target)
+  {
+    cv::Mat resized;
+    cv::resize(current, resized, target, 0, 0, cv::INTER_LINEAR);
+    current = resized;
+  }
+  return current;
+}
+
 }
 
 class Ov13855AprilTagVisionNode {
  public:
-  Ov13855AprilTagVisionNode() : pnh_("~") {
+  Ov13855AprilTagVisionNode() : pnh_("~"), image_transport_(nh_) {
     loadParameters();
     detector_.reset(new ov13855_apriltag_vision::AprilTagDetector(
         tag_family_, quad_decimate_, nthreads_, refine_edges_, detection_max_dimension_));
@@ -105,7 +127,9 @@ class Ov13855AprilTagVisionNode {
     transform_debug_pub_ = nh_.advertise<ov13855_apriltag_vision::HomogeneousTransform>(transform_debug_topic_, 1);
     status_pub_ = nh_.advertise<std_msgs::String>(status_topic_, 1, true);
     processing_time_pub_ = nh_.advertise<std_msgs::Float64>(processing_time_topic_, 10);
-    if (publish_annotated_) annotated_pub_ = nh_.advertise<sensor_msgs::Image>(annotated_image_topic_, 1);
+    // image_transport adds /compressed etc.; preview is the downscaled view meant for remote RViz.
+    if (publish_annotated_) annotated_pub_ = image_transport_.advertise(annotated_image_topic_, 1);
+    if (publish_preview_) preview_pub_ = image_transport_.advertise(preview_image_topic_, 1);
     image_sub_ = nh_.subscribe(image_topic_, 1, &Ov13855AprilTagVisionNode::imageCallback,
                               this, ros::TransportHints().tcpNoDelay());
     camera_info_sub_ = nh_.subscribe(camera_info_topic_, 1, &Ov13855AprilTagVisionNode::cameraInfoCallback, this);
@@ -135,12 +159,19 @@ class Ov13855AprilTagVisionNode {
     pnh_.param<std::string>("marker_frame", marker_frame_, "front_marker");
     pnh_.param("publish_annotated", publish_annotated_, true);
     pnh_.param("annotated_rate_hz", annotated_rate_hz_, 5.0);
+    pnh_.param("publish_preview", publish_preview_, true);
+    pnh_.param<std::string>("preview_image_topic", preview_image_topic_, "/ov13855_apriltag_vision/image_preview");
+    pnh_.param("preview_max_dimension", preview_max_dimension_, 960);
+    pnh_.param("preview_rate_hz", preview_rate_hz_, 0.0);
     if (fixed_marker_id_ < 0 || (selection_mode_ != "largest" && selection_mode_ != "fixed"))
       throw std::runtime_error("selection_mode must be largest/fixed and target_marker_id non-negative");
     if (!std::isfinite(target_marker_size_m_) || target_marker_size_m_ <= 0.0)
       throw std::runtime_error("target_marker_size_m must be positive and finite");
     if (publish_marker_tf_ && marker_frame_.empty()) throw std::runtime_error("marker_frame must not be empty");
     if (!std::isfinite(annotated_rate_hz_)) throw std::runtime_error("annotated_rate_hz must be finite");
+    if (!std::isfinite(preview_rate_hz_)) throw std::runtime_error("preview_rate_hz must be finite");
+    if (publish_preview_ && preview_max_dimension_ <= 0)
+      throw std::runtime_error("preview_max_dimension must be positive");
   }
   void invalidateCameraInfo(const std::string& reason) {
     has_camera_info_ = false;
@@ -239,25 +270,21 @@ class Ov13855AprilTagVisionNode {
     }
     publishStatus(status);
     if (!gray.empty()) {
-      publishAnnotatedImage(message, gray, corners, ids, selected,
-                            published ? &pose.rvec : nullptr, published ? &pose.tvec : nullptr, status);
+      publishDebugImages(message, gray, corners, ids, selected,
+                         published ? &pose.rvec : nullptr, published ? &pose.tvec : nullptr, status);
     }
     publishProcessingTime(start);
   }
-  bool shouldPublishAnnotated(const ros::Time& now)
+  static bool rateAllows(double rate_hz, ros::Time& last_time, const ros::Time& now)
   {
-    if (!publish_annotated_)
-    {
-      return false;
-    }
-    if (annotated_rate_hz_ <= 0.0)
+    if (rate_hz <= 0.0)
     {
       return true;
     }
-    const double period = 1.0 / annotated_rate_hz_;
-    if (last_annotated_time_.isZero() || (now - last_annotated_time_).toSec() >= period)
+    const double period = 1.0 / rate_hz;
+    if (last_time.isZero() || (now - last_time).toSec() >= period)
     {
-      last_annotated_time_ = now;
+      last_time = now;
       return true;
     }
     return false;
@@ -343,7 +370,7 @@ class Ov13855AprilTagVisionNode {
     return true;
   }
 
-  void publishAnnotatedImage(
+  void publishDebugImages(
     const sensor_msgs::ImageConstPtr& source,
     const cv::Mat& gray,
     const std::vector<std::vector<cv::Point2f>>& corners,
@@ -353,33 +380,51 @@ class Ov13855AprilTagVisionNode {
     const cv::Vec3d* tvec,
     const std::string& status)
   {
-    if (annotated_pub_.getNumSubscribers() == 0)
+    const ros::Time now = ros::Time::now();
+    if (publish_annotated_ && annotated_pub_.getNumSubscribers() > 0 &&
+        rateAllows(annotated_rate_hz_, last_annotated_time_, now))
     {
-      return;
+      publishAnnotatedImage(annotated_pub_, source, gray, corners, ids, selected_index, rvec, tvec, status, 1.0);
     }
-    if (!shouldPublishAnnotated(ros::Time::now()))
+    if (publish_preview_ && preview_pub_.getNumSubscribers() > 0 &&
+        rateAllows(preview_rate_hz_, last_preview_time_, now))
     {
-      return;
+      const int longest = std::max(gray.cols, gray.rows);
+      const double scale = longest > preview_max_dimension_ ?
+        static_cast<double>(preview_max_dimension_) / longest : 1.0;
+      publishAnnotatedImage(preview_pub_, source, gray, corners, ids, selected_index, rvec, tvec, status, scale);
     }
+  }
 
-    cv::Mat annotated;
+  // Draws at the output resolution (scale <= 1) so overlay text stays readable in the preview.
+  void publishAnnotatedImage(
+    const image_transport::Publisher& publisher,
+    const sensor_msgs::ImageConstPtr& source,
+    const cv::Mat& gray,
+    const std::vector<std::vector<cv::Point2f>>& corners,
+    const std::vector<int>& ids,
+    int selected_index,
+    const cv::Vec3d* rvec,
+    const cv::Vec3d* tvec,
+    const std::string& status,
+    double scale)
+  {
+    cv::Mat image;
     try
     {
       if (source->encoding == sensor_msgs::image_encodings::MONO8)
       {
-        cv::cvtColor(gray, annotated, cv::COLOR_GRAY2BGR);
+        image = gray;
       }
       else if (source->encoding == sensor_msgs::image_encodings::RGB8)
       {
         const cv_bridge::CvImageConstPtr rgb =
           cv_bridge::toCvShare(source, sensor_msgs::image_encodings::RGB8);
-        cv::cvtColor(rgb->image, annotated, cv::COLOR_RGB2BGR);
+        cv::cvtColor(rgb->image, image, cv::COLOR_RGB2BGR);
       }
       else
       {
-        const cv_bridge::CvImageConstPtr bgr =
-          cv_bridge::toCvShare(source, sensor_msgs::image_encodings::BGR8);
-        annotated = bgr->image.clone();
+        image = cv_bridge::toCvShare(source, sensor_msgs::image_encodings::BGR8)->image;
       }
     }
     catch (const cv_bridge::Exception& exception)
@@ -387,20 +432,35 @@ class Ov13855AprilTagVisionNode {
       ROS_ERROR_THROTTLE(1.0, "Annotated image conversion failed: %s", exception.what());
       return;
     }
+    // Resize before colour conversion; never draw into the shared source buffer.
+    const cv::Mat scaled = scale < 1.0 ? downscale(image, scale) : image;
+    cv::Mat annotated;
+    if (scaled.channels() == 1)
+    {
+      cv::cvtColor(scaled, annotated, cv::COLOR_GRAY2BGR);
+    }
+    else
+    {
+      annotated = scaled.data == image.data ? scaled.clone() : scaled;
+    }
     if (!ids.empty())
     {
       for (size_t i = 0; i < corners.size(); ++i)
       {
         for (int k = 0; k < 4; ++k)
-          cv::line(annotated, corners[i][k], corners[i][(k + 1) % 4], cv::Scalar(0,255,0), 2);
-        cv::putText(annotated, std::to_string(ids[i]), corners[i][0],
+          cv::line(annotated, corners[i][k] * scale, corners[i][(k + 1) % 4] * scale, cv::Scalar(0,255,0), 2);
+        cv::putText(annotated, std::to_string(ids[i]), corners[i][0] * scale,
                     cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(0,255,0), 2);
       }
     }
     if (selected_index >= 0 && rvec != nullptr && tvec != nullptr)
     {
+      // Distortion acts on normalised coordinates, so scaling fx/fy/cx/cy matches the resized image.
+      cv::Mat camera_matrix = camera_matrix_.clone();
+      cv::Mat focal_rows = camera_matrix.rowRange(0, 2);
+      focal_rows *= scale;
       cv::drawFrameAxes(
-        annotated, camera_matrix_, dist_coeffs_, *rvec, *tvec, target_marker_size_m_ * 0.5);
+        annotated, camera_matrix, dist_coeffs_, *rvec, *tvec, target_marker_size_m_ * 0.5);
     }
     std::ostringstream summary;
     summary << "F=" << frame_count_ << " Seen=" << marker_count_ << " OK=" << detect_count_
@@ -416,7 +476,7 @@ class Ov13855AprilTagVisionNode {
     output.header = source->header;
     output.encoding = sensor_msgs::image_encodings::BGR8;
     output.image = annotated;
-    annotated_pub_.publish(output.toImageMsg());
+    publisher.publish(output.toImageMsg());
   }
 
   void publishStatus(const std::string& text, bool force = false)
@@ -437,19 +497,23 @@ class Ov13855AprilTagVisionNode {
 
   ros::NodeHandle nh_, pnh_;
   ros::Subscriber image_sub_, camera_info_sub_;
-  ros::Publisher pose_pub_, transform_debug_pub_, annotated_pub_, status_pub_, processing_time_pub_;
+  image_transport::ImageTransport image_transport_;
+  ros::Publisher pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
+  image_transport::Publisher annotated_pub_, preview_pub_;
   tf2_ros::TransformBroadcaster marker_tf_broadcaster_;
   std::string image_topic_, camera_info_topic_, pose_topic_, transform_debug_topic_;
-  std::string processing_time_topic_, annotated_image_topic_, status_topic_, tag_family_, selection_mode_;
+  std::string processing_time_topic_, annotated_image_topic_, preview_image_topic_, status_topic_, tag_family_, selection_mode_;
   std::string marker_frame_, camera_info_frame_, camera_info_error_, last_status_;
   int fixed_marker_id_ = 0, target_marker_id_ = -1, nthreads_ = 4, detection_max_dimension_ = 1280;
-  double target_marker_size_m_ = 0.012, quad_decimate_ = 1.5, annotated_rate_hz_ = 5.0;
-  bool refine_edges_ = true, publish_marker_tf_ = true, publish_annotated_ = true, has_camera_info_ = false;
+  int preview_max_dimension_ = 960;
+  double target_marker_size_m_ = 0.012, quad_decimate_ = 1.5, annotated_rate_hz_ = 5.0, preview_rate_hz_ = 0.0;
+  bool refine_edges_ = true, publish_marker_tf_ = true, publish_annotated_ = true, publish_preview_ = true;
+  bool has_camera_info_ = false;
   uint32_t camera_info_width_ = 0, camera_info_height_ = 0;
   uint64_t frame_count_ = 0, marker_count_ = 0, detect_count_ = 0, pose_reject_count_ = 0;
   std::unique_ptr<ov13855_apriltag_vision::AprilTagDetector> detector_;
   cv::Mat camera_matrix_, dist_coeffs_;
-  ros::Time last_annotated_time_, last_status_time_;
+  ros::Time last_annotated_time_, last_preview_time_, last_status_time_;
 };
 int main(int argc, char** argv) {
   ros::init(argc, argv, "ov13855_apriltag_vision_node");

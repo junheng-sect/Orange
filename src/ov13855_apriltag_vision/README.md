@@ -40,8 +40,11 @@ CameraInfo 必须有效，图像尺寸和 frame 必须与其匹配；无目标�
 - 输入 `/ov13855/image_raw`、`/ov13855/camera_info`；mono8/rgb8/bgr8。
 - 输出 `/front_marker/pose`：geometry_msgs/PoseStamped，语义 `^header.frame_id T_marker`，继承源图像时间戳。
 - 同时间戳发布 `pose.header.frame_id -> front_marker` 动态 TF。
-- 调试前缀 `/ov13855_apriltag_vision/`：`status`、`image_annotated`（默认 5Hz、有订阅者时生成）、
+- 调试前缀 `/ov13855_apriltag_vision/`：`status`、`image_annotated`（原分辨率，默认 5Hz、有订阅者时生成）、
+  `image_preview`（同样标注，最长边默认 960px、默认跟随相机约 15Hz、有订阅者时生成）、
   `debug/processing_time_ms`、`debug/homogeneous_transform`。
+  两路图像都经 image_transport 发布，自动带 `/compressed`；远程（本机 RViz）只订阅
+  `image_preview/compressed`，原分辨率 raw 约 55 MB/s，Wi-Fi 下不要远程订阅。
   矩阵消息为本包 `HomogeneousTransform`，marker_id 为实际选中 ID，matrix 为行主序。
 - 成功状态为 `DETECTED: ID… xyz_camera=(…)m pipeline=SOLVEPNP_ITERATIVE`。
   保留缺少标定时的 `DETECTED_2D`，求解失败为 `SOLVEPNP_FAILED`；不再输出参考状态或分支计数。

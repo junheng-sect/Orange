@@ -10,6 +10,7 @@ pose_topic: /front_marker/pose
 transform_debug_topic: /ov13855_apriltag_vision/debug/homogeneous_transform
 processing_time_topic: /ov13855_apriltag_vision/debug/processing_time_ms
 annotated_image_topic: /ov13855_apriltag_vision/image_annotated
+preview_image_topic: /ov13855_apriltag_vision/image_preview
 status_topic: /ov13855_apriltag_vision/status
 
 # ---- 检测目标 ----
@@ -37,3 +38,10 @@ marker_frame: front_marker
 publish_annotated: true
 # 标注图像发布频率（Hz）
 annotated_rate_hz: 5.0
+# 缩小预览图（同样带标注），供本机 RViz 经 /compressed 远程查看；有订阅者时才生成和编码
+publish_preview: true
+# 预览图最长边（px），原图更小时不放大
+preview_max_dimension: 960
+# 预览图发布频率（Hz），<=0 表示每个处理帧都发（跟随相机，约 15Hz）。
+# 限频按“距上次发布 >= 周期”判断，15fps 下设 10 实际只有约 7.5Hz。
+preview_rate_hz: 0.0
