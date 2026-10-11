@@ -2,8 +2,8 @@
 import collections
 import unittest
 
-from barcode_rc_trigger.runner import (StepResult, format_step, parse_mode, run_sequence,
-                                       step_ok)
+from barcode_rc_trigger.runner import (Raw, StepResult, format_block, parse_mode, run_sequence,
+                                       step_fields, step_ok, summary_is_warning)
 
 CameraRes = collections.namedtuple('CameraRes', 'success partial error elapsed_s report codes')
 SerialRes = collections.namedtuple('SerialRes', 'success code error elapsed_s')
@@ -62,32 +62,60 @@ class FormatTest(unittest.TestCase):
     def test_camera_ok(self):
         res = CameraRes(True, False, '', 0.4804, 'QR=1/1 C128=1/1',
                         [Code('QRCode', 'A20260609001'), Code('Code128', 'NEXT9017324')])
-        text = format_step(StepResult('camera', res, ''))
-        self.assertEqual(text, 'camera: ok report="QR=1/1 C128=1/1" [QRCode]"A20260609001" '
-                               '[Code128]"NEXT9017324" 480ms')
-        self.assertTrue(step_ok(StepResult('camera', res, '')))
+        result = StepResult('camera', res, '')
+        self.assertEqual(step_fields(result), [
+            ('ok', True), ('report', 'QR=1/1 C128=1/1'),
+            ('codes', ['QRCode:A20260609001', 'Code128:NEXT9017324']), ('ms', 480)])
+        self.assertTrue(step_ok(result))
 
     def test_camera_partial_and_fail(self):
         partial = CameraRes(False, True, 'partial', 1.2, 'C128=1/2', [Code('Code128', 'x')])
-        self.assertEqual(format_step(StepResult('camera', partial, '')),
-                         'camera: partial report="C128=1/2" [Code128]"x" 1200ms')
+        self.assertEqual(step_fields(StepResult('camera', partial, '')), [
+            ('ok', False), ('error', 'partial'), ('report', 'C128=1/2'),
+            ('codes', ['Code128:x']), ('ms', 1200)])
         fail = CameraRes(False, False, 'no_tag', 0.012, '', [])
-        self.assertEqual(format_step(StepResult('camera', fail, '')),
-                         'camera: fail error=no_tag 12ms')
+        self.assertEqual(step_fields(StepResult('camera', fail, '')),
+                         [('ok', False), ('error', 'no_tag'), ('ms', 12)])
         self.assertFalse(step_ok(StepResult('camera', fail, '')))
 
     def test_serial(self):
         ok = SerialRes(True, 'NEXT"9\r', '', 0.72)
-        self.assertEqual(format_step(StepResult('serial', ok, '')),
-                         'serial: ok "NEXT\\"9\\x0d" 720ms')
-        fail = SerialRes(False, '', 'timeout', 1.5)
-        self.assertEqual(format_step(StepResult('serial', fail, '')),
-                         'serial: fail error=timeout 1500ms')
+        self.assertEqual(step_fields(StepResult('serial', ok, '')),
+                         [('ok', True), ('code', 'NEXT"9\r'), ('ms', 720)])
+        fail = SerialRes(False, '', 'no_read', 3.0204)
+        self.assertEqual(step_fields(StepResult('serial', fail, '')),
+                         [('ok', False), ('error', 'no_read'), ('ms', 3020)])
 
     def test_unavailable(self):
         result = StepResult('serial', None, 'timeout exceeded')
-        self.assertEqual(format_step(result), 'serial: unavailable (timeout exceeded)')
+        self.assertEqual(step_fields(result), [('ok', False), ('error', 'unavailable'),
+                                               ('detail', 'timeout exceeded')])
         self.assertFalse(step_ok(result))
+
+    def test_block(self):
+        cam = CameraRes(True, False, '', 0.037, 'QR=1/1', [Code('QRCode', '12345678')])
+        ser = SerialRes(False, '', 'no_read', 3.017)
+        results = [StepResult('camera', cam, ''), StepResult('serial', ser, '')]
+        sections = [('tag', [('source', Raw('img')), ('x', Raw('-0.180'))])]
+        sections += [(r.name, step_fields(r)) for r in results]
+        self.assertEqual(format_block('pulse#90', sections), '\n'.join([
+            'pulse#90',
+            'tag:', '  source: img', '  x: -0.180',
+            'camera:', '  ok: true', '  report: "QR=1/1"', '  codes:', '    - "QRCode:12345678"',
+            '  ms: 37',
+            'serial:', '  ok: false', '  error: no_read', '  ms: 3017',
+            '---']))
+
+    def test_block_none_empty_and_escape(self):
+        text = format_block('arrival#1', [('tag', None), ('x', [('codes', []),
+                                                                ('code', 'a"b\r')])])
+        self.assertEqual(text, 'arrival#1\ntag: none\nx:\n  codes: []\n  code: "a\\"b\\x0d"\n---')
+
+    def test_warning_only_when_unavailable(self):
+        fail = SerialRes(False, '', 'no_read', 3.0)
+        self.assertFalse(summary_is_warning([StepResult('serial', fail, '')]))
+        self.assertTrue(summary_is_warning([StepResult('camera', None, 'down'),
+                                            StepResult('serial', fail, '')]))
 
 
 if __name__ == '__main__':

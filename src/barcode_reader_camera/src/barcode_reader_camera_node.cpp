@@ -236,6 +236,10 @@ class BarcodeReaderCameraNode {
     if (result.success) {
       ROS_INFO("barcode_reader_camera: %zu codes (%s) in %.0f ms, tag_roi=%d", result.codes.size(),
                result.report.c_str(), result.elapsed_s * 1000.0, (int)result.used_tag_roi);
+    } else if (result.error == "decode_fail" || result.error == "partial") {
+      // 定位到了但没读出/没读齐，是测距实验里的正常结果；链路问题（no_image/no_tag 等）仍然告警。
+      ROS_INFO("barcode_reader_camera: decode %s, %zu codes (%s) in %.0f ms", result.error.c_str(),
+               result.codes.size(), result.report.c_str(), result.elapsed_s * 1000.0);
     } else {
       ROS_WARN("barcode_reader_camera: decode %s, %zu codes (%s) in %.0f ms", result.error.c_str(),
                result.codes.size(), result.report.c_str(), result.elapsed_s * 1000.0);

@@ -47,6 +47,7 @@ rosrun barcode_reader_camera trigger_decode           # 触发一次读码（另
 - `~result`（`BarcodeArray.msg`）：每次 `~decode` 结束都发布；`~image_annotated` 有订阅者时发布标注图。
 - `error`：`no_image`（没有 1 s 内的新图）、`no_camera_info`、`no_tag`（等待后最近几帧都没有对应位姿）、`busy`、`disabled`、
   `no_formats`、`decode_fail`、`partial`（读到了但没达到 expected_codes）、`cancelled`。
+  节点日志：成功以及 `decode_fail`、`partial` 打 INFO（定位到了但没读出，是正常结果）；`no_image`、`no_tag` 等链路问题打 WARN。
 - 参数：`~config_file`（默认 `config/barcode_reader_camera.yaml`）、`~layout_file`（标签版式，launch 默认
   `config/layouts/qr_top_tag_bottom.yaml`；为空时用代码默认值并警告）、`~vision_tag_size_param`（默认
   `/ov13855_apriltag_vision_node/target_marker_size_m`，与版式 tag 边长不一致时每 10 s 警告一次，不阻断解码）、`~require_tag`（默认 true，与原实现一样没有 tag 不解码；

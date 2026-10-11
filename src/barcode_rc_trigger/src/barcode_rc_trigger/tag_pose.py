@@ -6,6 +6,8 @@
 import collections
 import math
 
+from .runner import Raw
+
 TagSample = collections.namedtuple('TagSample', ['stamp', 'received', 'marker_id',
                                                  'x', 'y', 'z', 'tilt_deg'])
 
@@ -57,9 +59,11 @@ def distance(sample):
     return math.sqrt(sample.x ** 2 + sample.y ** 2 + sample.z ** 2)
 
 
-def format_tag(sample, source):
+def tag_fields(sample, source):
+    """汇总里的 tag 段（runner.format_block 的 fields）；没有 tag 时为 None，输出 `tag: none`。"""
     if sample is None:
-        return 'tag: none'
-    return 'tag@%s id=%d xyz=(%+.3f,%+.3f,%+.3f)m d=%.3fm tilt=%.1fdeg' % (
-        source, sample.marker_id, sample.x, sample.y, sample.z, distance(sample),
-        sample.tilt_deg)
+        return None
+    return [('source', Raw(source)), ('id', sample.marker_id),
+            ('x', Raw('%.3f' % sample.x)), ('y', Raw('%.3f' % sample.y)),
+            ('z', Raw('%.3f' % sample.z)), ('dist', Raw('%.3f' % distance(sample))),
+            ('tilt_deg', Raw('%.1f' % sample.tilt_deg))]

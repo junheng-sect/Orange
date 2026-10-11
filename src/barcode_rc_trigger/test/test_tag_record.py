@@ -7,8 +7,8 @@ import unittest
 
 from barcode_rc_trigger.record import HEADER, CsvRecorder, csv_row
 from barcode_rc_trigger.runner import StepResult
-from barcode_rc_trigger.tag_pose import (TagHistory, format_tag, pick_tag,
-                                         sample_from_matrix)
+from barcode_rc_trigger.tag_pose import (TagHistory, pick_tag, sample_from_matrix,
+                                         tag_fields)
 
 CameraRes = collections.namedtuple('CameraRes', 'success partial error elapsed_s report codes')
 SerialRes = collections.namedtuple('SerialRes', 'success code error elapsed_s')
@@ -51,9 +51,10 @@ class TagPoseTest(unittest.TestCase):
 
     def test_format(self):
         sample = sample_from_matrix(10.0, 1.0, 0, FACING)
-        self.assertEqual(format_tag(sample, 'img'),
-                         'tag@img id=0 xyz=(+0.010,-0.020,+0.500)m d=0.500m tilt=0.0deg')
-        self.assertEqual(format_tag(None, ''), 'tag: none')
+        self.assertEqual([(k, str(v)) for k, v in tag_fields(sample, 'img')],
+                         [('source', 'img'), ('id', '0'), ('x', '0.010'), ('y', '-0.020'),
+                          ('z', '0.500'), ('dist', '0.500'), ('tilt_deg', '0.0')])
+        self.assertIsNone(tag_fields(None, ''))
 
 
 class RecordTest(unittest.TestCase):

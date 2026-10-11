@@ -154,6 +154,9 @@ class BarcodeReader:
         result = self._result(started, request.seq, error, raw)
         if result.success:
             self.log.info('Barcode read request=%d: %s', request.seq, result.code)
+        elif error == NO_READ:
+            # 读码器正常回复“读不到码”，是测距/对准实验里的正常结果，不按异常告警。
+            self.log.info('Barcode read failed request=%d: %s', request.seq, error)
         else:
             self.log.warning('Barcode read failed request=%d: %s', request.seq, error)
         return result

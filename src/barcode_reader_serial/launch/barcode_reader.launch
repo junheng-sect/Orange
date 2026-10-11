@@ -1,6 +1,8 @@
 <launch>
   <arg name="config_file" default="$(find barcode_reader_serial)/config/barcode_reader.yaml" />
-  <node pkg="barcode_reader_serial" type="barcode_reader_node" name="barcode_reader_serial" output="screen">
+  <!-- output：screen 打到终端；log 时 INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端（manual_read 用来让终端只留汇总） -->
+  <arg name="output" default="screen" />
+  <node pkg="barcode_reader_serial" type="barcode_reader_node" name="barcode_reader_serial" output="$(arg output)">
     <rosparam command="load" file="$(arg config_file)" />
   </node>
 </launch>

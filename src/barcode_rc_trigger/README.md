@@ -1,7 +1,7 @@
 # barcode_rc_trigger
 
 遥控器开关（默认 CH9）触发一次读码。本节点只作为服务客户端：拨一下开关，按 `mode` 调用
-`barcode_reader_camera` 的 `~decode` 和/或 `barcode_reader_serial` 的 `~read`，并在日志里汇总成一行。
+`barcode_reader_camera` 的 `~decode` 和/或 `barcode_reader_serial` 的 `~read`，并在日志里输出一块 YAML 风格的汇总。
 两个读码节点和 MAVROS 需要另外启动，本包不改动它们。
 每次拨杆同时记下 tag 位置，写进汇总日志和 CSV，用来测在什么位置相机/读码器能读成功。
 
@@ -31,8 +31,23 @@ roslaunch barcode_rc_trigger manual_read.launch                   # 默认 layou
 roslaunch barcode_rc_trigger manual_read.launch mode:=camera
 ```
 
-- 不跑 fusion 单独测试：`manual_read.launch camera:=true`，由本 launch 起相机 + AprilTag（MAVROS 另外起）；
+- 不跑 fusion 单独测试（地面测试）：`manual_read.launch camera:=true`，由本 launch 起相机 + AprilTag；
+  MAVROS 不并进来（它平时也一直打印，会把终端弄乱），单独开一个终端起。板端系统的 `mavros/launch/px4.launch`
+  默认值已改成与 fusion.launch 一致（`fcu_url` `/dev/ttyS3:921600`、`fcu_protocol` v1.0，原文件备份为 `px4.launch.orig`），
+  直接起即可；apt 升级 mavros 会覆盖这个改动，届时显式传 `fcu_url:=/dev/ttyS3:921600 fcu_protocol:=v1.0`。
+
+  ```bash
+  # 终端 1：MAVROS
+  roslaunch mavros px4.launch
+  # 终端 2：相机 + AprilTag + 两个读码节点 + 本节点；单测一路时加 mode:=serial 或 mode:=camera
+  export ROS_IP=192.168.31.32   # 本机要远程看话题时需要
+  roslaunch barcode_rc_trigger manual_read.launch camera:=true mode:=serial
+  roslaunch barcode_rc_trigger manual_read.launch camera:=true mode:=camera
+  ```
+
   此时不能再跑 `ov13855_marker_tracking.launch`、`bringup.launch` 或带相机的 fusion。
+- `quiet:=true`（默认）：本 launch 起的相机、AprilTag、两个读码节点用 `output=log`，INFO 只进 `~/.ros/log`，
+  WARN/ERROR 仍打到终端，终端里基本只剩本节点的拨杆汇总；`quiet:=false` 恢复全部打印。
 - `camera:=false` 时 AprilTag 用的是 fusion 那边的默认视觉 YAML（tag 43.7 mm），只和 `layout:=qr_top_tag_bottom` 一致；
   换其他 layout 要改用 `camera:=true`，并让 fusion 带 `--no-camera` 启动。
 
@@ -52,12 +67,36 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=camera
 - 某个服务 `service_wait_s` 内不在线时跳过它，另一个照常执行。
 - 每次开始读码时发布 `~pulse`（`std_msgs/UInt32`，拨杆序号，被忽略的拨杆也占序号但不发布），方便在 bag 里对齐；
   详细结果看两个读码节点各自的 `~result`。
-- 日志汇总示例：
-  `pulse#3 tag@img id=0 xyz=(-0.068,-0.005,+0.602)m d=0.606m tilt=20.0deg | camera: ok report="QR=1/1" [QRCode]"A20260609001" 480ms | serial: ok "NEXT9017324" 720ms`
-  （全部成功打 INFO，否则打 WARN）。
+- 每次拨杆一块汇总（风格同 `rostopic echo`，以 `---` 结尾；只跑一路时只有那一段）：
+
+  ```
+  [INFO] [1791699346.533133]: pulse#1
+  tag:
+    source: img
+    id: 0
+    x: -0.094
+    y: -0.063
+    z: 0.205
+    dist: 0.234
+    tilt_deg: 15.8
+  camera:
+    ok: true
+    report: "QR=1/1"
+    codes:
+      - "QRCode:12345678"
+    ms: 26
+  serial:
+    ok: false
+    error: no_read
+    ms: 3019
+  ---
+  ```
+
+  读到、读不到都是 INFO（读不到是测距实验的正常结果）；只有读码服务不在线时打 WARN，该段为
+  `ok: false`、`error: unavailable`、`detail: "..."`。`barcode_arrival_trigger` 共用同一格式（标题 `arrival#N marker=M`，没有 tag 段）。
 - tag 位置来自 `transform_topic`（AprilTag 节点的 `debug/homogeneous_transform`），是 tag 中心在相机光学系下的坐标
-  （x 右、y 下、z 前，m），`d` 为直线距离，`tilt` 为 tag 法向与相机光轴夹角（正对为 0）。
-  `tag@img` 是相机读码所用那一帧图像的位姿；相机没取到图（或只跑 serial）时用拨杆时刻最新一帧，记为 `tag@pulse`；
+  （x 右、y 下、z 前，m），`dist` 为直线距离，`tilt_deg` 为 tag 法向与相机光轴夹角（正对为 0）。
+  `source: img` 是相机读码所用那一帧图像的位姿；相机没取到图（或只跑 serial）时用拨杆时刻最新一帧，记为 `source: pulse`；
   拨杆时刻 `tag_timeout_s` 内没有 tag 则为 `tag: none`。both 模式下读码器在相机之后才读，期间若在移动，位置以相机那一帧为准。
 - 每次拨杆往 `csv_dir/rc_read_<启动时间>.csv` 追加一行（每次启动一个新文件），列：
   `time,pulse,tag_src,marker_id,x,y,z,dist,tilt_deg,camera_ok,camera_error,camera_report,camera_codes,camera_ms,serial_ok,serial_error,serial_code,serial_ms`；
@@ -95,5 +134,5 @@ catkin_test_results build/barcode_rc_trigger
 
 测试不接触飞控和读码硬件：`test_policy.py` 测触发状态机（上电高位、去抖、按住、重新布防、中间区、RC 丢失），
 `test_tag_record.py` 测 tag 位置换算、按图像时间戳匹配和 CSV 行，
-`test_runner.py` 测调用顺序、单个服务失败不影响另一个和日志格式，`node.test` 用假 RC 话题和假读码服务跑完整节点
+`test_runner.py` 测调用顺序、单个服务失败不影响另一个、汇总块格式和日志级别，`node.test` 用假 RC 话题和假读码服务跑完整节点
 （触发、忙时忽略、RC 丢失撤防、服务离线）。

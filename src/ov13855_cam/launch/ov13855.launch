@@ -1,6 +1,7 @@
 <launch>
  <arg name="config_file" default="$(find ov13855_cam)/config/ov13855.yaml" />
- <node pkg="ov13855_cam" type="ov13855_cam_node" name="ov13855_cam" output="screen">
+ <arg name="output" default="screen" />
+ <node pkg="ov13855_cam" type="ov13855_cam_node" name="ov13855_cam" output="$(arg output)">
   <rosparam command="load" file="$(arg config_file)" />
  </node>
 </launch>

@@ -55,27 +55,65 @@ def escape(text):
     return ''.join(out)
 
 
-def format_step(result):
+class Raw(str):
+    """原样输出、不加引号的值（枚举词、已按位数格式化的数字）；普通 str 值输出时加双引号。"""
+
+
+def step_fields(result):
+    """一路读码结果 -> 有序 [(key, value)]，供 format_block 排版。"""
     if result.response is None:
-        return '%s: unavailable (%s)' % (result.name, result.error)
+        return [('ok', False), ('error', Raw('unavailable')), ('detail', result.error)]
+    res = result.response
+    fields = [('ok', bool(res.success))]
     if result.name == 'camera':
-        return _format_camera(result.response)
-    return _format_serial(result.response)
+        if not res.success:
+            fields.append(('error', Raw(res.error or ('partial' if res.partial else 'fail'))))
+        if res.report:
+            fields.append(('report', res.report))
+        if res.codes:
+            fields.append(('codes', ['%s:%s' % (c.format, c.code) for c in res.codes]))
+    elif res.success:
+        fields.append(('code', res.code))
+    else:
+        fields.append(('error', Raw(res.error)))
+    fields.append(('ms', int(round(res.elapsed_s * 1000.0))))
+    return fields
 
 
-def _format_camera(res):
-    state = 'ok' if res.success else ('partial' if res.partial else 'fail')
-    parts = ['camera: %s' % state]
-    if res.error and res.error != state:
-        parts.append('error=%s' % res.error)
-    if res.report:
-        parts.append('report="%s"' % res.report)
-    parts.extend('[%s]"%s"' % (c.format, escape(c.code)) for c in res.codes)
-    parts.append('%.0fms' % (res.elapsed_s * 1000.0))
-    return ' '.join(parts)
+def summary_is_warning(results):
+    """读码结果本身（读到/读不到）都是正常结果打 INFO；只有服务不在线才算异常打 WARN。"""
+    return any(result.response is None for result in results)
 
 
-def _format_serial(res):
-    if res.success:
-        return 'serial: ok "%s" %.0fms' % (escape(res.code), res.elapsed_s * 1000.0)
-    return 'serial: fail error=%s %.0fms' % (res.error, res.elapsed_s * 1000.0)
+def _value(value):
+    if isinstance(value, bool):
+        return 'true' if value else 'false'
+    if isinstance(value, Raw):
+        return str(value)
+    if isinstance(value, str):
+        return '"%s"' % escape(value)
+    return str(value)
+
+
+def format_block(title, sections):
+    """rostopic echo 风格的多行块：标题行 + 每段 `name:` 下缩进两格的 key: value，结尾 `---`。
+
+    sections 为 [(name, fields)]；fields 为 None 时输出 `name: none`。
+    """
+    lines = [title]
+    for name, fields in sections:
+        if fields is None:
+            lines.append('%s: none' % name)
+            continue
+        lines.append('%s:' % name)
+        for key, value in fields:
+            if isinstance(value, (list, tuple)):
+                if not value:
+                    lines.append('  %s: []' % key)
+                    continue
+                lines.append('  %s:' % key)
+                lines.extend('    - %s' % _value(item) for item in value)
+            else:
+                lines.append('  %s: %s' % (key, _value(value)))
+    lines.append('---')
+    return '\n'.join(lines)

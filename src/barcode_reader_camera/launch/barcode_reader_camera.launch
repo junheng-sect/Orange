@@ -5,7 +5,9 @@
   <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
   <arg name="require_tag" default="true" />
   <arg name="log_strategies" default="false" />
-  <node pkg="barcode_reader_camera" type="barcode_reader_camera_node" name="barcode_reader_camera" output="screen">
+  <!-- output：screen 打到终端；log 时 INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端（manual_read 用来让终端只留汇总） -->
+  <arg name="output" default="screen" />
+  <node pkg="barcode_reader_camera" type="barcode_reader_camera_node" name="barcode_reader_camera" output="$(arg output)">
     <param name="config_file" value="$(arg config_file)" />
     <param name="layout_file" value="$(arg layout_file)" />
     <param name="require_tag" value="$(arg require_tag)" />

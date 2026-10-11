@@ -15,7 +15,7 @@ from .policy import RcPulseTrigger
 from .readers import ReaderCalls, log_summary
 from .record import CsvRecorder, csv_row
 from .runner import parse_mode, run_sequence
-from .tag_pose import TagHistory, format_tag, pick_tag, sample_from_matrix
+from .tag_pose import TagHistory, pick_tag, sample_from_matrix, tag_fields
 
 # PWM outside this band is treated as RC invalid (PX4 reports unused channels as 0/65535).
 PWM_VALID_MIN = 800
@@ -130,7 +130,7 @@ class BarcodeRcTriggerNode:
                     image_stamp = result.response.header.stamp.to_sec()
             with self.lock:
                 tag, source = pick_tag(self.tags, image_stamp, pulse_tag)
-            log_summary('pulse#%d %s |' % (seq, format_tag(tag, source)), results)
+            log_summary('pulse#%d' % seq, results, [('tag', tag_fields(tag, source))])
             if self.recorder is not None:
                 self.recorder.write(csv_row(time.time(), seq, tag, source, results))
         except Exception as error:

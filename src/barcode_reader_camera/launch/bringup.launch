@@ -10,17 +10,22 @@
   <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
   <arg name="require_tag" default="true" />
   <arg name="log_strategies" default="false" />
+  <!-- 三个节点的 output（screen/log），透传给各 include -->
+  <arg name="output" default="screen" />
   <include file="$(find ov13855_cam)/launch/ov13855.launch">
     <arg name="config_file" value="$(arg camera_config)" />
+    <arg name="output" value="$(arg output)" />
   </include>
   <include file="$(find ov13855_apriltag_vision)/launch/ov13855_apriltag_vision.launch">
     <arg name="config_file" value="$(arg vision_config)" />
     <arg name="layout_file" value="$(arg layout_file)" />
+    <arg name="output" value="$(arg output)" />
   </include>
   <include file="$(find barcode_reader_camera)/launch/barcode_reader_camera.launch">
     <arg name="config_file" value="$(arg config_file)" />
     <arg name="layout_file" value="$(arg layout_file)" />
     <arg name="require_tag" value="$(arg require_tag)" />
     <arg name="log_strategies" value="$(arg log_strategies)" />
+    <arg name="output" value="$(arg output)" />
   </include>
 </launch>
