@@ -3,8 +3,8 @@
        默认 camera:=false，配合 mid360s_ws/scripts/fusion.sh（默认已起 MAVROS、OV13855 相机和 AprilTag），
        本 launch 不再启动相机和 AprilTag，否则节点重名会互相踢掉。
        不跑 fusion 单独测试时用 camera:=true，由本 launch 起相机 + AprilTag（MAVROS 仍需另外启动）。
-       camera:=false 时 AprilTag 用 fusion 那边的默认视觉 YAML（tag 43.7 mm），只与 layout:=qr_top_tag_bottom 一致；
-       换 layout 时 tag 边长不一致读码节点会告警，位置也不准，需改用 camera:=true，并让 fusion.sh 不启动相机（其 no-camera 选项）。
+       camera:=false 时 AprilTag 用 fusion 那边的默认视觉 YAML（tag 43.7 mm），只与 tag 43.7 mm 的版式一致
+       （layout:=qr_top_tag_bottom 或 dm_top_tag_bottom）；换成其他 tag 边长的 layout 时读码节点会告警，位置也不准，需改用 camera:=true，并让 fusion.sh 不启动相机（其 no-camera 选项）。
        不要同时运行 DroneVision（共用 /dev/ttyS1）。
        quiet:=true（默认）时本 launch 起的其他节点 output=log：INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端，
        终端里基本只剩触发节点每次拨杆的汇总；quiet:=false 恢复全部打印。 -->

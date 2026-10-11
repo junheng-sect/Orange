@@ -48,8 +48,9 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=camera
   此时不能再跑 `ov13855_marker_tracking.launch`、`bringup.launch` 或带相机的 fusion。
 - `quiet:=true`（默认）：本 launch 起的相机、AprilTag、两个读码节点用 `output=log`，INFO 只进 `~/.ros/log`，
   WARN/ERROR 仍打到终端，终端里基本只剩本节点的拨杆汇总；`quiet:=false` 恢复全部打印。
-- `camera:=false` 时 AprilTag 用的是 fusion 那边的默认视觉 YAML（tag 43.7 mm），只和 `layout:=qr_top_tag_bottom` 一致；
-  换其他 layout 要改用 `camera:=true`，并让 fusion 带 `--no-camera` 启动。
+- `camera:=false` 时 AprilTag 用的是 fusion 那边的默认视觉 YAML（tag 43.7 mm），只和 tag 43.7 mm 的版式一致：
+  `layout:=qr_top_tag_bottom`（QR 标签，默认）或 `layout:=dm_top_tag_bottom`（DataMatrix 标签）；
+  换其他 tag 边长的 layout 要改用 `camera:=true`，并让 fusion 带 `--no-camera` 启动。
 
 读码节点的启动方式：
 - 地面单独测相机：`roslaunch barcode_reader_camera bringup.launch`（相机 + AprilTag + 读码节点）。
