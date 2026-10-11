@@ -1,5 +1,5 @@
 <launch>
-  <!-- 手动读码测试：相机读码节点 + 串口读码器 + CH9 触发节点。
+  <!-- 手动读码测试：相机读码节点 + CH9 触发节点（mode:=both / serial 时再加串口读码器）。
        默认 camera:=false，配合 mid360s_ws/scripts/fusion.sh（默认已起 MAVROS、OV13855 相机和 AprilTag），
        本 launch 不再启动相机和 AprilTag，否则节点重名会互相踢掉。
        不跑 fusion 单独测试时用 camera:=true，由本 launch 起相机 + AprilTag（MAVROS 仍需另外启动）。
@@ -9,7 +9,8 @@
        quiet:=true（默认）时本 launch 起的其他节点 output=log：INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端，
        终端里基本只剩触发节点每次拨杆的汇总；quiet:=false 恢复全部打印。 -->
   <arg name="config_file" default="$(find barcode_rc_trigger)/config/barcode_rc_trigger.yaml" />
-  <arg name="mode" default="" />
+  <!-- 默认只用相机读码；mode:=both / serial 时才启动串口读码器（mode 留空则用触发节点 yaml 里的 mode） -->
+  <arg name="mode" default="camera" />
   <arg name="layout" default="qr_top_tag_bottom" />
   <arg name="camera" default="false" />
   <arg name="quiet" default="true" />
@@ -30,7 +31,7 @@
     <arg name="save_frames" value="$(arg save_frames)" />
     <arg name="save_dir" value="$(arg save_dir)" />
   </include>
-  <include file="$(find barcode_reader_serial)/launch/barcode_reader.launch">
+  <include unless="$(eval arg('mode') == 'camera')" file="$(find barcode_reader_serial)/launch/barcode_reader.launch">
     <arg name="output" value="$(arg reader_output)" />
   </include>
   <include file="$(find barcode_rc_trigger)/launch/barcode_rc_trigger.launch">

@@ -19,7 +19,7 @@ roslaunch barcode_rc_trigger barcode_rc_trigger.launch            # 用 yaml 里
 roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=serial
 ```
 
-手动测读码范围用 `manual_read.launch`（两个读码节点 + 本节点）。默认 `camera:=false`，配合
+手动测读码范围用 `manual_read.launch`（相机读码节点 + 本节点，`mode:=both`/`serial` 时加串口读码器）。默认 `camera:=false`，配合
 `/home/orangepi/mid360s_ws/scripts/fusion.sh`：fusion 默认已起 MAVROS、OV13855 相机和 AprilTag，本 launch 不再起相机，
 否则节点重名会互相踢掉。
 
@@ -27,8 +27,8 @@ roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=serial
 # 终端 1：fusion 照常启动
 cd /home/orangepi/mid360s_ws/scripts && ./fusion.sh
 # 终端 2：fusion 起来后
-roslaunch barcode_rc_trigger manual_read.launch                   # 默认 layout:=qr_top_tag_bottom、mode 用 yaml
-roslaunch barcode_rc_trigger manual_read.launch mode:=camera
+roslaunch barcode_rc_trigger manual_read.launch                   # 默认 layout:=qr_top_tag_bottom、mode:=camera
+roslaunch barcode_rc_trigger manual_read.launch mode:=both         # 相机 + 串口读码器都调
 ```
 
 - 不跑 fusion 单独测试（地面测试）：`manual_read.launch camera:=true`，由本 launch 起相机 + AprilTag；
@@ -39,16 +39,18 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=camera
   ```bash
   # 终端 1：MAVROS
   roslaunch mavros px4.launch
-  # 终端 2：相机 + AprilTag + 两个读码节点 + 本节点；单测一路时加 mode:=serial 或 mode:=camera
+  # 终端 2：相机 + AprilTag + 读码节点 + 本节点；默认只测相机，测串口读码器加 mode:=serial 或 mode:=both
   export ROS_IP=192.168.31.32   # 本机要远程看话题时需要
+  roslaunch barcode_rc_trigger manual_read.launch camera:=true
   roslaunch barcode_rc_trigger manual_read.launch camera:=true mode:=serial
-  roslaunch barcode_rc_trigger manual_read.launch camera:=true mode:=camera
   ```
 
   此时不能再跑 `ov13855_marker_tracking.launch`、`bringup.launch` 或带相机的 fusion。
+- `mode`：本 launch 默认 `camera`（串口读码器效果差，日常只用相机），此时不启动串口读码器节点；
+  `mode:=both` / `mode:=serial` 才启动它。单独起 `barcode_rc_trigger.launch` 时仍用 yaml 里的 `mode`（`both`）。
 - `save_frames:=failed|all`：相机读码节点按次保存原图、位姿和策略日志到 `save_dir`（默认 `~/barcode_frames`），
   每次读码另在 `attempts.csv` 记一行；见 `barcode_reader_camera` README「读码记录」。
-- `quiet:=true`（默认）：本 launch 起的相机、AprilTag、两个读码节点用 `output=log`，INFO 只进 `~/.ros/log`，
+- `quiet:=true`（默认）：本 launch 起的相机、AprilTag、读码节点用 `output=log`，INFO 只进 `~/.ros/log`，
   WARN/ERROR 仍打到终端，终端里基本只剩本节点的拨杆汇总；`quiet:=false` 恢复全部打印。
 - `camera:=false` 时 AprilTag 用的是 fusion 那边的默认视觉 YAML（tag 43.7 mm），只和 tag 43.7 mm 的版式一致：
   `layout:=qr_top_tag_bottom`（QR 标签，默认）或 `layout:=dm_top_tag_bottom`（DataMatrix 标签）；
