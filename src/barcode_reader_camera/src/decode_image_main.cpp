@@ -5,7 +5,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -22,9 +24,10 @@ namespace {
 void usage() {
   std::fprintf(stderr,
       "usage: decode_image <image> [--config yaml] [--layout layouts/x.yaml]\n"
-      "                    [--camera-yaml K.yaml | --focal-px F]\n"
+      "                    [--camera-yaml K.yaml | --focal-px F] [--pose meta.yaml]\n"
       "                    [--no-tag] [--all-formats] [--free] [--annotate out.jpg] [--verbose]\n"
       "  --layout        label layout overlay (tag size, label geometry, expected codes)\n"
+      "  --pose          use pose.rvec/tvec from a node-saved meta.yaml instead of detecting the tag\n"
       "  --focal-px F    pinhole focal length in pixels; default 0.6 x image diagonal\n"
       "                  (~26 mm equivalent phone lens), principal point at image center\n"
       "  --no-tag        skip AprilTag, decode with the full-frame pyramid only\n"
@@ -45,7 +48,7 @@ std::string escape(const std::string& s) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  std::string image_path, config_path, layout_path, camera_yaml, annotate_path;
+  std::string image_path, config_path, layout_path, camera_yaml, annotate_path, pose_yaml;
   double focal_px = 0.0;
   bool no_tag = false, all_formats = false, free_decode = false, verbose = false;
   for (int i = 1; i < argc; ++i) {
@@ -59,6 +62,7 @@ int main(int argc, char** argv) {
     else if (a == "--camera-yaml") camera_yaml = value();
     else if (a == "--focal-px") focal_px = std::atof(value().c_str());
     else if (a == "--annotate") annotate_path = value();
+    else if (a == "--pose") pose_yaml = value();
     else if (a == "--no-tag") no_tag = true;
     else if (a == "--all-formats") all_formats = true;
     else if (a == "--free") free_decode = true;
@@ -113,7 +117,22 @@ int main(int argc, char** argv) {
   TagPose pose;
   bool have_pose = false;
   std::vector<cv::Point2f> tag_corners;
-  if (!no_tag) {
+  if (!pose_yaml.empty() && !no_tag) {
+    try {
+      const YAML::Node p = YAML::LoadFile(pose_yaml)["pose"];
+      if (!p) throw std::runtime_error("no pose (the node had no tag for this frame)");
+      const auto r = p["rvec"].as<std::vector<double>>(), t = p["tvec"].as<std::vector<double>>();
+      if (r.size() != 3 || t.size() != 3) throw std::runtime_error("pose.rvec/tvec need 3 values");
+      pose.rvec = cv::Vec3d(r[0], r[1], r[2]);
+      pose.tvec = cv::Vec3d(t[0], t[1], t[2]);
+      have_pose = true;
+      std::printf("tag: pose from %s t=(%.3f, %.3f, %.3f)m\n", pose_yaml.c_str(), pose.tvec[0], pose.tvec[1],
+                  pose.tvec[2]);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "pose error: %s: %s\n", pose_yaml.c_str(), e.what());
+      return 2;
+    }
+  } else if (!no_tag) {
     ov13855_apriltag_vision::AprilTagDetector detector(
         tag_config.family, tag_config.quad_decimate, tag_config.nthreads,
         tag_config.refine_edges, tag_config.max_dimension);

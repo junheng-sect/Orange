@@ -18,6 +18,7 @@ rosrun barcode_reader_camera decode_image 图片.jpg --annotate /tmp/out.jpg
 - `--config yaml` 读取参数（默认值与 `config/barcode_reader_camera.yaml` 相同）；`--layout config/layouts/<名字>.yaml`
   叠加标签版式（含 tag 边长，不给时 tag 边长按 0.012 m）；`--all-formats` 打开全部 8 种码制；
   `--free` 把 expected_codes 全置 0，完整跑一遍不提前结束；`--no-tag` 强制只走全图；`--verbose` 输出每个策略的日志。
+- `--pose meta.yaml`：用节点保存的 `meta.yaml` 里的 rvec/tvec 代替自己检测 tag，复现节点当时的 ROI（见下文「读码记录」）。
 - 每个码一行：`#序号 [码制] code=... raw_hex=... symbology=... center=(x,y) source=策略名`；标注图上序号与输出一致，
   青色框 = 标签 ROI，品红 = tag，绿色 = 已解出，红色 = ROI 内定位到但没解出。
 
