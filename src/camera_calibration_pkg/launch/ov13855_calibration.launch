@@ -1,0 +1,30 @@
+<launch>
+ <!-- 棋盘格：size 为内角点数（列x行），square 为单格边长（米），按实际标定板修改。 -->
+ <arg name="size" default="7x5" />
+ <arg name="square" default="0.041" />
+ <arg name="start_camera" default="true" />
+ <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml" />
+ <!-- 与 ov13855_cam 的 camera_name 一致，ost.yaml 才能直接替换包内标定。 -->
+ <arg name="camera_name" default="ov13855_2560x1440" />
+ <!-- 径向畸变项数；官方默认 2 不够，本镜头边缘需要 k3。 -->
+ <arg name="k_coefficients" default="3" />
+ <arg name="queue_size" default="1" />
+ <!-- 采样时允许的角点平均位移，单位为 2560x1440 原图像素/帧；0.5 对手持标定板过严，几乎不采样。
+      -1 关闭检查（易混入运动模糊样本）。 -->
+ <arg name="max_chessboard_speed" default="3.0" />
+ <!-- CALIBRATE 后自动 SAVE 并另存到此目录，文件名带时间戳。 -->
+ <arg name="out_dir" default="$(env HOME)/.ros/camera_info" />
+
+ <include if="$(arg start_camera)" file="$(find ov13855_cam)/launch/ov13855.launch">
+  <arg name="config_file" value="$(arg camera_config)" />
+ </include>
+
+ <node pkg="camera_calibration_pkg" type="auto_save_calibrator.py" name="ov13855_calibrator" output="screen"
+       args="--size $(arg size) --square $(arg square) --camera_name $(arg camera_name) -k $(arg k_coefficients)
+             --queue-size $(arg queue_size) --max-chessboard-speed $(arg max_chessboard_speed)">
+  <param name="out_dir" value="$(arg out_dir)" />
+  <remap from="image" to="/ov13855/image_raw" />
+  <!-- 服务检查走 ov13855_cam 私有 set_camera_info；不要点 COMMIT，会覆盖 git 跟踪的包内标定。 -->
+  <remap from="camera" to="/ov13855_cam" />
+ </node>
+</launch>
