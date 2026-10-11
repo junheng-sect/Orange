@@ -5,6 +5,11 @@
   <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
   <arg name="require_tag" default="true" />
   <arg name="log_strategies" default="false" />
+  <!-- 读码记录：save_frames=off/failed/all 按次保存原图、重试帧、位姿、内参和策略日志到 save_dir/<时间>_<结果>/；
+       log_attempts 每次 ~decode 在 save_dir/attempts.csv 记一行（不存图），默认开 -->
+  <arg name="save_frames" default="off" />
+  <arg name="save_dir" default="~/barcode_frames" />
+  <arg name="log_attempts" default="true" />
   <!-- output：screen 打到终端；log 时 INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端（manual_read 用来让终端只留汇总） -->
   <arg name="output" default="screen" />
   <node pkg="barcode_reader_camera" type="barcode_reader_camera_node" name="barcode_reader_camera" output="$(arg output)">
@@ -12,6 +17,9 @@
     <param name="layout_file" value="$(arg layout_file)" />
     <param name="require_tag" value="$(arg require_tag)" />
     <param name="log_strategies" value="$(arg log_strategies)" />
+    <param name="save_frames" value="$(arg save_frames)" />
+    <param name="save_dir" value="$(arg save_dir)" />
+    <param name="log_attempts" value="$(arg log_attempts)" />
     <param name="image_topic" value="/ov13855/image_raw" />
     <param name="camera_info_topic" value="/ov13855/camera_info" />
     <param name="pose_topic" value="/front_marker/pose" />

@@ -1,14 +1,18 @@
 // ROS adapter for decodeBarcodes(): ~decode decodes the latest camera frame that has a pose with the
 // same stamp from ov13855_apriltag_vision (waiting briefly for it), using the label ROI; ~cancel
-// interrupts it.
+// interrupts it. Every attempt can be recorded for offline analysis (~save_frames, ~log_attempts).
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/PoseStamped.h>
@@ -23,6 +27,7 @@
 #include "barcode_reader_camera/BarcodeArray.h"
 #include "barcode_reader_camera/DecodeBarcodes.h"
 #include "barcode_reader_camera/config_yaml.hpp"
+#include "barcode_reader_camera/frame_recorder.hpp"
 #include "barcode_reader_camera/multi_decoder.hpp"
 
 namespace barcode_reader_camera {
@@ -30,10 +35,12 @@ namespace barcode_reader_camera {
 class BarcodeReaderCameraNode {
  public:
   BarcodeReaderCameraNode(ros::NodeHandle& nh, ros::NodeHandle& pnh) {
-    const std::string config_file = pnh.param<std::string>(
+    config_file_ = pnh.param<std::string>(
         "config_file", ros::package::getPath("barcode_reader_camera") + "/config/barcode_reader_camera.yaml");
+    const std::string& config_file = config_file_;
     config_ = loadDecoderConfig(YAML::LoadFile(config_file));
-    const std::string layout_file = pnh.param<std::string>("layout_file", "");
+    layout_file_ = pnh.param<std::string>("layout_file", "");
+    const std::string& layout_file = layout_file_;
     if (!layout_file.empty()) {
       applyLayout(YAML::LoadFile(layout_file), config_, &layout_tag_size_m_);
       const FormatSwitches& f = config_.formats;
@@ -59,6 +66,7 @@ class BarcodeReaderCameraNode {
     pose_wait_s_ = std::max(0.0, pnh.param("pose_wait_s", 0.2));
     pose_fallback_s_ = std::max(0.0, pnh.param("pose_fallback_s", 0.2));
     log_strategies_ = pnh.param("log_strategies", false);
+    setupRecorder(pnh);
     const auto image_topic = pnh.param<std::string>("image_topic", "/ov13855/image_raw");
     const auto info_topic = pnh.param<std::string>("camera_info_topic", "/ov13855/camera_info");
     const auto pose_topic = pnh.param<std::string>("pose_topic", "/front_marker/pose");
@@ -81,6 +89,24 @@ class BarcodeReaderCameraNode {
     cv::Mat gray;
     uint64_t seq = 0;
   };
+
+  // ~save_frames off/failed/all: per-attempt directory with frame, retries, pose, intrinsics, log.
+  // ~log_attempts: one row per ~decode in <save_dir>/attempts.csv, independent of ~save_frames.
+  void setupRecorder(ros::NodeHandle& pnh) {
+    std::string dir = pnh.param<std::string>("save_dir", "~/barcode_frames");
+    if (dir.rfind("~/", 0) == 0 && std::getenv("HOME")) dir = std::string(std::getenv("HOME")) + dir.substr(1);
+    const std::string mode_name = pnh.param<std::string>("save_frames", "off");
+    const bool log_attempts = pnh.param("log_attempts", true);
+    try {
+      recorder_ = std::make_unique<FrameRecorder>(dir, parseSaveFrames(mode_name), log_attempts);
+    } catch (const std::exception& e) {
+      ROS_ERROR("barcode_reader_camera: recording disabled: %s", e.what());
+      return;
+    }
+    if (recorder_->enabled())
+      ROS_INFO("barcode_reader_camera: save_frames=%s log_attempts=%d dir=%s", mode_name.c_str(),
+               (int)log_attempts, dir.c_str());
+  }
 
   void onImage(const sensor_msgs::ImageConstPtr& msg) {
     cv_bridge::CvImagePtr image;
@@ -142,6 +168,9 @@ class BarcodeReaderCameraNode {
     }
     cancel_ = false;
     const ros::WallTime started = ros::WallTime::now();
+    const bool keep_log = recorder_ && recorder_->savesFrames();
+    std::vector<std::string> strategy_log;
+    std::vector<std::pair<double, cv::Mat>> retries;
     BarcodeArray result;
 
     Frame frame;
@@ -188,10 +217,13 @@ class BarcodeReaderCameraNode {
     if (result.error.empty()) {
       DecodeHooks hooks;
       hooks.cancelled = [this]() { return cancel_.load(); };
-      if (log_strategies_) hooks.log = [](const std::string& line) { ROS_INFO("%s", line.c_str()); };
-      else hooks.log = [](const std::string& line) { ROS_DEBUG("%s", line.c_str()); };
+      hooks.log = [this, keep_log, &strategy_log](const std::string& line) {
+        if (log_strategies_) ROS_INFO("%s", line.c_str());
+        else ROS_DEBUG("%s", line.c_str());
+        if (keep_log) strategy_log.push_back(line);
+      };
       uint64_t last_seq = frame.seq;
-      hooks.next_frame = [this, &last_seq](cv::Mat& gray) {
+      hooks.next_frame = [this, &last_seq, &retries](cv::Mat& gray) {
         std::unique_lock<std::mutex> lock(mutex_);
         const bool got = frame_cv_.wait_for(lock, std::chrono::seconds(1), [&]() {
           return cancel_.load() || (!frames_.empty() && frames_.back().seq > last_seq);
@@ -199,6 +231,7 @@ class BarcodeReaderCameraNode {
         if (!got || cancel_.load()) return false;
         last_seq = frames_.back().seq;
         gray = frames_.back().gray;
+        retries.emplace_back(frames_.back().stamp.toSec(), gray);  // shares the buffer, no copy
         return true;
       };
       out = decodeBarcodes(frame.gray, have_pose && camera.valid() ? &pose : nullptr, camera, config_, hooks);
@@ -245,6 +278,30 @@ class BarcodeReaderCameraNode {
                result.codes.size(), result.report.c_str(), result.elapsed_s * 1000.0);
     }
 
+    if (recorder_ && recorder_->enabled()) {
+      DecodeRecord rec;
+      rec.wall_time = started.toSec();
+      rec.stamp = frame.stamp.toSec();
+      rec.frame_id = frame.frame_id;
+      rec.frame = frame.gray;
+      rec.retries = std::move(retries);
+      rec.have_pose = have_pose;
+      rec.pose = pose;
+      rec.camera = camera;
+      rec.success = result.success;
+      rec.partial = result.partial;
+      rec.error = result.error;
+      rec.elapsed_s = result.elapsed_s;
+      rec.out = std::move(out);
+      rec.log = std::move(strategy_log);
+      rec.layout_file = layout_file_;
+      rec.config_file = config_file_;
+      if (!recorder_->submit(std::move(rec)))
+        ROS_WARN_THROTTLE(5.0, "barcode_reader_camera: recorder busy, attempt not recorded");
+      const std::string error = recorder_->takeError();
+      if (!error.empty()) ROS_WARN_THROTTLE(10.0, "barcode_reader_camera: recording failed: %s", error.c_str());
+    }
+
     res.success = result.success;
     res.partial = result.partial;
     res.error = result.error;
@@ -283,6 +340,7 @@ class BarcodeReaderCameraNode {
   }
 
   DecoderConfig config_;
+  std::string config_file_, layout_file_;
   double layout_tag_size_m_ = 0.0;  // 0 = no layout file
   std::string vision_tag_size_param_;
   bool require_tag_ = true;
@@ -290,6 +348,7 @@ class BarcodeReaderCameraNode {
   double pose_wait_s_ = 0.2;      // max wait for the latest frame's pose
   double pose_fallback_s_ = 0.2;  // how far back a frame with a pose may be used instead
   bool log_strategies_ = false;
+  std::unique_ptr<FrameRecorder> recorder_;  // background writer; drains its queue on shutdown
 
   std::mutex mutex_;
   std::condition_variable frame_cv_;

@@ -1,8 +1,12 @@
 // rostest: publish a synthetic label (image + camera_info + tag pose with the same stamp),
 // then exercise ~decode, ~result and ~cancel of barcode_reader_camera_node.
+#include <dirent.h>
+
 #include <atomic>
+#include <fstream>
 #include <mutex>
 #include <set>
+#include <string>
 #include <thread>
 
 #include <cv_bridge/cv_bridge.h>
@@ -180,6 +184,67 @@ TEST(BarcodeReaderCameraNode, WaitsForPoseThatArrivesAfterImage) {
     EXPECT_TRUE(srv.response.used_tag_roi) << i;
     ros::Duration(0.037 * (i + 1)).sleep();  // vary the phase against the frame period
   }
+}
+
+namespace {
+
+const char* kSaveDir = "/tmp/barcode_reader_camera_node_test";  // ~save_dir in node.test
+
+std::set<std::string> savedDirs() {
+  std::set<std::string> out;
+  if (DIR* d = opendir(kSaveDir)) {
+    while (const dirent* e = readdir(d)) {
+      const std::string n = e->d_name;
+      if (n != "." && n != ".." && n != "attempts.csv") out.insert(n);
+    }
+    closedir(d);
+  }
+  return out;
+}
+
+size_t csvRows() {
+  std::ifstream f(std::string(kSaveDir) + "/attempts.csv");
+  size_t n = 0;
+  for (std::string l; std::getline(f, l);) ++n;
+  return n;
+}
+
+bool readable(const std::string& path) { return std::ifstream(path).good(); }
+
+}  // namespace
+
+TEST(BarcodeReaderCameraNode, RecordsEachAttempt) {
+  const auto scene = synthetic::makeScene();
+  ASSERT_TRUE(ros::service::waitForService("/barcode_reader_camera/decode", 20000));
+  Publisher publisher(scene);
+  ros::Duration(1.0).sleep();
+  const auto before = savedDirs();
+  const size_t rows_before = csvRows();
+
+  barcode_reader_camera::DecodeBarcodes srv;
+  ASSERT_TRUE(ros::service::call("/barcode_reader_camera/decode", srv));
+  ASSERT_TRUE(srv.response.success) << srv.response.error;
+
+  // Written in the background after the response: wait for the directory and the CSV row.
+  std::string added;
+  const ros::WallTime deadline = ros::WallTime::now() + ros::WallDuration(5.0);
+  while (ros::WallTime::now() < deadline) {
+    for (const auto& d : savedDirs())
+      if (!before.count(d) && readable(std::string(kSaveDir) + "/" + d + "/meta.yaml")) added = d;
+    if (!added.empty() && csvRows() > rows_before) break;
+    ros::WallDuration(0.05).sleep();
+  }
+  ASSERT_FALSE(added.empty());
+  EXPECT_EQ(added.substr(added.size() - 3), "_ok");
+  const std::string d = std::string(kSaveDir) + "/" + added;
+  EXPECT_TRUE(readable(d + "/frame.png"));
+  EXPECT_TRUE(readable(d + "/camera.yaml"));
+  EXPECT_TRUE(readable(d + "/preview.jpg"));
+  std::ifstream meta(d + "/meta.yaml");
+  const std::string text((std::istreambuf_iterator<char>(meta)), std::istreambuf_iterator<char>());
+  EXPECT_NE(text.find("rvec:"), std::string::npos);
+  EXPECT_NE(text.find("QR-TEST-001"), std::string::npos);
+  EXPECT_EQ(csvRows(), std::max<size_t>(rows_before, 1) + 1);  // header written on first use
 }
 
 int main(int argc, char** argv) {

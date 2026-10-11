@@ -13,15 +13,22 @@
   <arg name="layout" default="qr_top_tag_bottom" />
   <arg name="camera" default="false" />
   <arg name="quiet" default="true" />
+  <!-- 相机读码记录：off/failed/all，存到 save_dir/<时间>_<结果>/，见 barcode_reader_camera.launch -->
+  <arg name="save_frames" default="off" />
+  <arg name="save_dir" default="~/barcode_frames" />
   <arg name="reader_output" value="$(eval 'log' if arg('quiet') else 'screen')" />
 
   <include if="$(arg camera)" file="$(find barcode_reader_camera)/launch/bringup.launch">
     <arg name="layout" value="$(arg layout)" />
     <arg name="output" value="$(arg reader_output)" />
+    <arg name="save_frames" value="$(arg save_frames)" />
+    <arg name="save_dir" value="$(arg save_dir)" />
   </include>
   <include unless="$(arg camera)" file="$(find barcode_reader_camera)/launch/barcode_reader_camera.launch">
     <arg name="layout" value="$(arg layout)" />
     <arg name="output" value="$(arg reader_output)" />
+    <arg name="save_frames" value="$(arg save_frames)" />
+    <arg name="save_dir" value="$(arg save_dir)" />
   </include>
   <include file="$(find barcode_reader_serial)/launch/barcode_reader.launch">
     <arg name="output" value="$(arg reader_output)" />

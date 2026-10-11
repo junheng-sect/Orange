@@ -46,6 +46,8 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=camera
   ```
 
   此时不能再跑 `ov13855_marker_tracking.launch`、`bringup.launch` 或带相机的 fusion。
+- `save_frames:=failed|all`：相机读码节点按次保存原图、位姿和策略日志到 `save_dir`（默认 `~/barcode_frames`），
+  每次读码另在 `attempts.csv` 记一行；见 `barcode_reader_camera` README「读码记录」。
 - `quiet:=true`（默认）：本 launch 起的相机、AprilTag、两个读码节点用 `output=log`，INFO 只进 `~/.ros/log`，
   WARN/ERROR 仍打到终端，终端里基本只剩本节点的拨杆汇总；`quiet:=false` 恢复全部打印。
 - `camera:=false` 时 AprilTag 用的是 fusion 那边的默认视觉 YAML（tag 43.7 mm），只和 tag 43.7 mm 的版式一致：

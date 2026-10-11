@@ -5,6 +5,8 @@
     <param name="image_topic" value="/test/image_raw" />
     <param name="camera_info_topic" value="/test/camera_info" />
     <param name="pose_topic" value="/test/pose" />
+    <param name="save_frames" value="all" />
+    <param name="save_dir" value="/tmp/barcode_reader_camera_node_test" />
   </node>
   <test test-name="barcode_reader_camera_node" pkg="barcode_reader_camera" type="test_barcode_reader_camera_node" time-limit="120" />
 </launch>

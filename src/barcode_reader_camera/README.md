@@ -31,7 +31,8 @@ rosrun barcode_reader_camera trigger_decode           # 触发一次读码（另
 ```
 
 - `bringup.launch` include `ov13855_cam/ov13855.launch`、`ov13855_apriltag_vision.launch`、`barcode_reader_camera.launch`，
-  参数 `camera_config` / `vision_config` / `config_file` / `layout` / `layout_file` / `require_tag` / `log_strategies` 透传，
+  参数 `camera_config` / `vision_config` / `config_file` / `layout` / `layout_file` / `require_tag` / `log_strategies` /
+  `save_frames` / `save_dir` 透传，
   同一个版式文件同时给视觉节点和读码节点。它会打开相机，与
   `front_marker_control/ov13855_marker_tracking.launch` 二选一；相机和 AprilTag 已经在跑时只启动 `barcode_reader_camera.launch`。
 - `trigger_decode` 等 `~decode` 服务上线后调用一次，输出格式同 `decode_image`；链路还没就绪（`no_image` /
@@ -52,7 +53,36 @@ rosrun barcode_reader_camera trigger_decode           # 触发一次读码（另
 - 参数：`~config_file`（默认 `config/barcode_reader_camera.yaml`）、`~layout_file`（标签版式，launch 默认
   `config/layouts/qr_top_tag_bottom.yaml`；为空时用代码默认值并警告）、`~vision_tag_size_param`（默认
   `/ov13855_apriltag_vision_node/target_marker_size_m`，与版式 tag 边长不一致时每 10 s 警告一次，不阻断解码）、`~require_tag`（默认 true，与原实现一样没有 tag 不解码；
-  false 时没有 tag 就走全图）、`~max_frame_age_s`（1.0）、`~pose_wait_s`（0.2）、`~pose_fallback_s`（0.2）、`~log_strategies`（false；true 时每个策略的日志打成 INFO）。
+  false 时没有 tag 就走全图）、`~max_frame_age_s`（1.0）、`~pose_wait_s`（0.2）、`~pose_fallback_s`（0.2）、`~log_strategies`（false；true 时每个策略的日志打成 INFO）、
+  `~save_frames` / `~save_dir` / `~log_attempts`（见「读码记录」）。
+
+## 读码记录
+
+用于离线分析读码失败的原因（成功帧做对照）。写盘在后台线程进行，`~decode` 不等待写盘，读码耗时不变。
+
+```bash
+roslaunch barcode_reader_camera bringup.launch save_frames:=failed          # 地面：只存失败
+roslaunch barcode_rc_trigger manual_read.launch save_frames:=all            # 飞行对比：成功失败都存
+```
+
+- `~log_attempts`（默认 true）：每次 `~decode` 在 `<save_dir>/attempts.csv` 追加一行，不存图：时间、图像时间戳、结果、
+  error、report、码内容、命中策略、总耗时/解码耗时、是否用了标签 ROI、tag 距离 `dist_m`、`z_m`、标签倾角 `tilt_deg`
+  （标签法线与视线夹角）、ROI 外接框宽高、ROI 内平均亮度、ROI 内拉普拉斯方差（越大越清晰）、重试取帧数、记录目录名。
+- `~save_frames`：`off`（默认）/ `failed` / `all`。每次存一个目录 `<save_dir>/<YYYYmmdd_HHMMSS_mmm>_<ok|partial|错误名>/`，
+  每次约 2–6 MB：
+  - `frame.png`：送进解码的原图（无损）；`retry_N.png`：换帧重试取到的新帧；`preview.jpg`：缩小的标注图（同 `~image_annotated`）。
+  - `meta.yaml`：结果、码、tag 位姿（rvec/tvec，T_camera_tag）、距离和倾角、ROI 四角、定位到但没解出的框、亮度/清晰度、
+    重试帧时间戳、所用版式和参数文件。
+  - `camera.yaml`：当时的 camera_info（ROS 格式）；`decode.log`：本次每个策略的日志（与 `--verbose` 相同）。
+  - `no_tag` / `no_camera_info`（没进入解码）每 2 s 最多存一个目录，避免 `trigger_decode` 每 0.5 s 重试刷屏；CSV 照常每次一行。
+- `~save_dir`：默认 `~/barcode_frames`；目录不存在会自动创建。写盘失败只告警，不影响读码。
+- 复现某一次读码（每个策略的日志和标注图）：
+
+```bash
+cd ~/barcode_frames/<目录>
+rosrun barcode_reader_camera decode_image frame.png --camera-yaml camera.yaml --pose meta.yaml \
+  --layout <meta.yaml 里的 layout_file> --config <meta.yaml 里的 config_file> --verbose --annotate /tmp/replay.jpg
+```
 
 ## 参数文件
 

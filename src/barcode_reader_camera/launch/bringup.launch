@@ -10,6 +10,9 @@
   <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
   <arg name="require_tag" default="true" />
   <arg name="log_strategies" default="false" />
+  <!-- 读码记录（off/failed/all），见 barcode_reader_camera.launch -->
+  <arg name="save_frames" default="off" />
+  <arg name="save_dir" default="~/barcode_frames" />
   <!-- 三个节点的 output（screen/log），透传给各 include -->
   <arg name="output" default="screen" />
   <include file="$(find ov13855_cam)/launch/ov13855.launch">
@@ -26,6 +29,8 @@
     <arg name="layout_file" value="$(arg layout_file)" />
     <arg name="require_tag" value="$(arg require_tag)" />
     <arg name="log_strategies" value="$(arg log_strategies)" />
+    <arg name="save_frames" value="$(arg save_frames)" />
+    <arg name="save_dir" value="$(arg save_dir)" />
     <arg name="output" value="$(arg output)" />
   </include>
 </launch>
