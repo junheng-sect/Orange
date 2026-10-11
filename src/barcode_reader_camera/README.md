@@ -67,6 +67,7 @@ rosrun barcode_reader_camera trigger_decode           # 触发一次读码（另
 | 版式 | 内容 |
 | --- | --- |
 | `qr_top_tag_bottom`（默认） | 2026-10-08 现场标签：tag 43.7 mm，竖版 100×150 mm，QR 在上、tag 在下方居中，只开 QR、要 1 个 |
+| `dm_top_tag_bottom` | 2026-10-11 现场标签：同上一模板，QR 换成 DataMatrix（tag 上方 63 mm，约 34 mm），只开 DM、要 1 个 |
 | `drone_vision_default` | Drone-Vision 原版：tag 12 mm，100×150 mm，tag 居中，QR×1 + DM×1 + Code128×2 |
 
 ```yaml

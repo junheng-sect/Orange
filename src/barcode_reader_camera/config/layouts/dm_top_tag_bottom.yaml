@@ -1,0 +1,35 @@
+# 标签版式：竖版 100×150 mm，DataMatrix 在上，tag36h11 在下方居中（2026-10-11 现场标签）。
+# 与 qr_top_tag_bottom 同一模板，只是把 QR 换成 DM：DM 中心在 tag 中心上方 63 mm（实测），边长约 34 mm（照片估算）。
+# 启动时用 layout:=dm_top_tag_bottom 选择。坐标约定见 qr_top_tag_bottom.yaml。
+
+# tag 黑框外沿边长（米，不含白边）；与 ov13855_apriltag_vision 参数同名，加载时覆盖其默认值
+target_marker_size_m: 0.0437
+
+label:
+  width_meters: 0.10            # 整张标签纸宽（沿 x）
+  height_meters: 0.15           # 整张标签纸高（沿 y）
+  tag_position: custom          # center/top_left/top_right/bottom_left/bottom_right/custom
+  tag_offset_x_meters: 0.0      # 仅 custom：tag 中心相对标签纸中心的偏移
+  tag_offset_y_meters: -0.0225  # tag 中心在纸中心正下方 22.5 mm
+
+# 标签上有哪些码制；没有的码制要关掉：启用但预期为 0 的码制按"顺带扫描"处理，永远不算读齐，会跑满 1.5 s 并判 partial
+formats:
+  QRCode: false
+  DataMatrix: true
+  Code128: false
+  Code39: false
+  EAN13: false
+  PDF417: false
+  Aztec: false
+  ITF: false
+
+# 每种码制的预期数量（只对启用的码制有效）；达到全部预期后提前结束
+expected_codes:
+  QRCode: 0
+  DataMatrix: 1
+  Code128: 0
+  Code39: 0
+  EAN13: 0
+  PDF417: 0
+  Aztec: 0
+  ITF: 0

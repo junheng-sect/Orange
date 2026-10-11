@@ -242,6 +242,17 @@ TEST(Layout, ShippedLayoutOverlaysMainConfig) {
   EXPECT_TRUE(c.formats.c128);
   EXPECT_EQ(c.expected.dm, 1);
   EXPECT_EQ(c.expected.c128, 2);
+
+  applyLayout(YAML::LoadFile(packageFile("config/layouts/dm_top_tag_bottom.yaml")), c, &tag_size);
+  EXPECT_DOUBLE_EQ(tag_size, 0.0437);
+  EXPECT_EQ(c.tag_position, "custom");
+  EXPECT_DOUBLE_EQ(c.tag_offset_y_m, -0.0225);
+  EXPECT_FALSE(c.formats.qr);
+  EXPECT_TRUE(c.formats.dm);
+  EXPECT_FALSE(c.formats.c128);
+  EXPECT_EQ(c.expected.qr, 0);
+  EXPECT_EQ(c.expected.dm, 1);
+  EXPECT_EQ(c.expected.c128, 0);
 }
 
 TEST(Layout, MissingKeysKeepValuesAndInvalidThrows) {
