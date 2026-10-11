@@ -98,6 +98,8 @@ expected_codes: {QRCode: 1, DataMatrix: 0, Code128: 0, ...}       # 每种要读
 - 取消在每次 ZXing 调用前和每个大步骤前检查（原实现只在重试间检查），`~cancel` 约 20 ms 内生效。
 - 重试抓帧改为从 ROS 图像话题取新帧；1500 ms 总时长限制不变。
 - `FUSION-CHECK` 不再把 detected 与 fusion 计数不一致记为 ERROR：same-symbol 候选进入 fusion 但不导出，二者本来就可能不同。
+- WARP 矫正图改为标签正立：原实现把 ROI 的左下角映射到矫正图左上角，矫正图上下镜像（ZXing 对 QR/DM 会尝试镜像，
+  实测解码结果和耗时不受影响）。坐标经 H⁻¹ 映射回原图，输出不变。
 
 ## 构建和测试
 

@@ -760,11 +760,13 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
 
         auto make_warp = [&](const cv::Size& warp_size, int interpolation,
                              cv::Mat& warped, cv::Mat& H_inv) -> bool {
+          // roi_2d 按 tag 系 (-x,-y) 起逆时针：左下、右下、右上、左上（+y = 标签正立向上）。
+          // 映射到矫正图同名角，使矫正图与标签正立方向一致；原实现映射到左上起，图像上下镜像。
           std::vector<cv::Point2f> dst_quad = {
-              cv::Point2f(0.0f, 0.0f),
-              cv::Point2f((float)(warp_size.width - 1), 0.0f),
+              cv::Point2f(0.0f, (float)(warp_size.height - 1)),
               cv::Point2f((float)(warp_size.width - 1), (float)(warp_size.height - 1)),
-              cv::Point2f(0.0f, (float)(warp_size.height - 1))
+              cv::Point2f((float)(warp_size.width - 1), 0.0f),
+              cv::Point2f(0.0f, 0.0f)
           };
           cv::Mat H = cv::getPerspectiveTransform(roi_2d, dst_quad);
           if (H.empty()) {
