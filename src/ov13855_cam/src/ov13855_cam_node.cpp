@@ -123,7 +123,6 @@ void run() {
   if (gst_element_set_state(stream.pipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
     checkBus(stream.pipeline); throw std::runtime_error("camera failed to start");
   }
-  ROS_WARN("Bundled reference calibration assumes 2560x1440; original JSON lacks calibration size metadata");
   auto last_frame = ros::WallTime::now(); bool first = true;
   while (ros::ok()) {
     ros::spinOnce(); checkBus(stream.pipeline);
