@@ -6,6 +6,7 @@
     <param name="rc_timeout_s" value="0.5" />
     <param name="camera_service" value="/fake_camera/decode" />
     <param name="serial_service" value="/fake_serial/read" />
+    <param name="csv_dir" value="" />
   </node>
   <test test-name="barcode_rc_trigger_node" pkg="barcode_rc_trigger" type="integration_node.py" time-limit="90" />
 </launch>

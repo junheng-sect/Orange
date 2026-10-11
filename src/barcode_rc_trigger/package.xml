@@ -9,6 +9,7 @@
   <depend>barcode_reader_camera</depend>
   <depend>barcode_reader_serial</depend>
   <depend>mavros_msgs</depend>
+  <depend>ov13855_apriltag_vision</depend>
   <depend>rospy</depend>
   <depend>std_msgs</depend>
   <test_depend>python3-nose</test_depend>

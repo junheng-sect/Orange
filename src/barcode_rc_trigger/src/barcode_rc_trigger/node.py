@@ -1,14 +1,21 @@
-"""ROS adapter: RC switch pulse on /mavros/rc/in -> one camera decode and/or serial read."""
+"""ROS adapter: RC switch pulse on /mavros/rc/in -> one camera decode and/or serial read.
+
+每次拨杆同时记下 tag 位置（相机光学系），写进汇总日志和 CSV，用来看在什么位置能读成功。
+"""
+import os
 import threading
 import time
 
 import rospy
 from mavros_msgs.msg import RCIn
+from ov13855_apriltag_vision.msg import HomogeneousTransform
 from std_msgs.msg import UInt32
 
 from .policy import RcPulseTrigger
 from .readers import ReaderCalls, log_summary
+from .record import CsvRecorder, csv_row
 from .runner import parse_mode, run_sequence
+from .tag_pose import TagHistory, format_tag, pick_tag, sample_from_matrix
 
 # PWM outside this band is treated as RC invalid (PX4 reports unused channels as 0/65535).
 PWM_VALID_MIN = 800
@@ -31,6 +38,10 @@ class BarcodeRcTriggerNode:
                                    float(rospy.get_param('~serial_timeout_s', 0.0)),
                                    float(rospy.get_param('~service_wait_s', 0.5)))
         rc_topic = rospy.get_param('~rc_topic', '/mavros/rc/in')
+        transform_topic = str(rospy.get_param(
+            '~transform_topic', '/ov13855_apriltag_vision/debug/homogeneous_transform'))
+        self.tag_timeout_s = float(rospy.get_param('~tag_timeout_s', 0.5))
+        csv_dir = os.path.expanduser(str(rospy.get_param('~csv_dir', '~/barcode_rc_logs')))
 
         self.lock = threading.Lock()
         self.busy = False
@@ -38,14 +49,31 @@ class BarcodeRcTriggerNode:
         self.last_rc = None      # monotonic receive time of the last valid sample
         self.rc_online = False
         self.started = time.monotonic()
+        self.tags = TagHistory()
+        self.recorder = None
+        if csv_dir:
+            self.recorder = CsvRecorder(os.path.join(
+                csv_dir, time.strftime('rc_read_%Y%m%d_%H%M%S.csv')))
+            rospy.on_shutdown(self.recorder.close)
 
         self.pulse_pub = rospy.Publisher('~pulse', UInt32, queue_size=10)
         self.rc_sub = rospy.Subscriber(rc_topic, RCIn, self.on_rc, queue_size=50)
+        if transform_topic:
+            self.tag_sub = rospy.Subscriber(transform_topic, HomogeneousTransform,
+                                            self.on_transform, queue_size=10)
         self.timer = rospy.Timer(rospy.Duration(0.1), self.on_timer)
         rospy.loginfo('barcode_rc_trigger: %s CH%d arm<%d fire>%d hold=%.2fs mode=%s '
                       'camera=%s serial=%s', rc_topic, self.rc_channel, self.policy.arm_below,
                       self.policy.trigger_above, self.policy.hold_s, '+'.join(self.steps),
                       self.camera_service, self.serial_service)
+        rospy.loginfo('tag: %s (%.1fs) | csv: %s', transform_topic or 'off', self.tag_timeout_s,
+                      self.recorder.path if self.recorder else 'off')
+
+    def on_transform(self, message):
+        sample = sample_from_matrix(message.header.stamp.to_sec(), time.monotonic(),
+                                    message.marker_id, message.matrix)
+        with self.lock:
+            self.tags.add(sample)
 
     def on_rc(self, message):
         now = time.monotonic()
@@ -89,12 +117,25 @@ class BarcodeRcTriggerNode:
         self.busy = True
         rospy.loginfo('pulse#%d CH%d=%d -> %s', seq, self.rc_channel, pwm, '+'.join(self.steps))
         self.pulse_pub.publish(UInt32(seq))
-        threading.Thread(target=self._run, args=(seq,), name='barcode-rc-read-%d' % seq,
-                         daemon=True).start()
+        pulse_tag = self.tags.latest(time.monotonic(), self.tag_timeout_s)
+        threading.Thread(target=self._run, args=(seq, pulse_tag),
+                         name='barcode-rc-read-%d' % seq, daemon=True).start()
 
-    def _run(self, seq):
+    def _run(self, seq, pulse_tag):
         try:
-            log_summary('pulse#%d' % seq, run_sequence(self.steps, self.readers.calls))
+            results = run_sequence(self.steps, self.readers.calls)
+            image_stamp = 0.0
+            for result in results:
+                if result.name == 'camera' and result.response is not None:
+                    image_stamp = result.response.header.stamp.to_sec()
+            with self.lock:
+                tag, source = pick_tag(self.tags, image_stamp, pulse_tag)
+            log_summary('pulse#%d %s |' % (seq, format_tag(tag, source)), results)
+            if self.recorder is not None:
+                self.recorder.write(csv_row(time.time(), seq, tag, source, results))
+        except Exception as error:
+            if not rospy.is_shutdown():
+                rospy.logerr('pulse#%d 记录失败: %s', seq, error)
         finally:
             with self.lock:
                 self.busy = False
