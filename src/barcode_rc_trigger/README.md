@@ -68,7 +68,8 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=both         # 相机 + �
 
 - `mode`：`camera` 只调相机；`serial` 只调读码器；`both` 先相机后读码器，两个都调（不是失败才用读码器），
   同一次拨杆拿两份结果对比。先相机的原因：相机节点收到请求后等下一帧新图，读码器的补光或瞄准光不会拍进这一帧。
-- 读码在工作线程里执行；上一次还没结束时再拨，这一下会被忽略，日志提示 `pulse#N ignored`。
+- 读码在工作线程里执行；上一次还没结束时再拨，这一下会被忽略，日志提示 `pulse#N ignored`。相机第一帧没读出时会换新帧
+  重试，读不出要约 2 s 才返回（`barcode_reader_camera` 的 `retry.timeout_ms`）。
 - 某个服务 `service_wait_s` 内不在线时跳过它，另一个照常执行。
 - 每次开始读码时发布 `~pulse`（`std_msgs/UInt32`，拨杆序号，被忽略的拨杆也占序号但不发布），方便在 bag 里对齐；
   详细结果看两个读码节点各自的 `~result`。
@@ -101,7 +102,7 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=both         # 相机 + �
   `ok: false`、`error: unavailable`、`detail: "..."`。`barcode_arrival_trigger` 共用同一格式（标题 `arrival#N marker=M`，没有 tag 段）。
 - tag 位置来自 `transform_topic`（AprilTag 节点的 `debug/homogeneous_transform`），是 tag 中心在相机光学系下的坐标
   （x 右、y 下、z 前，m），`dist` 为直线距离，`tilt_deg` 为 tag 法向与相机光轴夹角（正对为 0）。
-  `source: img` 是相机读码所用那一帧图像的位姿；相机没取到图（或只跑 serial）时用拨杆时刻最新一帧，记为 `source: pulse`；
+  `source: img` 是相机读码所用那一帧图像的位姿（换帧重试读出时是读出的那一帧）；相机没取到图（或只跑 serial）时用拨杆时刻最新一帧，记为 `source: pulse`；
   拨杆时刻 `tag_timeout_s` 内没有 tag 则为 `tag: none`。both 模式下读码器在相机之后才读，期间若在移动，位置以相机那一帧为准。
 - 每次拨杆往 `csv_dir/rc_read_<启动时间>.csv` 追加一行（每次启动一个新文件），列：
   `time,pulse,tag_src,marker_id,x,y,z,dist,tilt_deg,camera_ok,camera_error,camera_report,camera_codes,camera_ms,serial_ok,serial_error,serial_code,serial_ms`；

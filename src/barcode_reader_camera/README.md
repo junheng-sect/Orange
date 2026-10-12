@@ -1,9 +1,10 @@
 # barcode_reader_camera
 
 相机读码 ROS Noetic 包，移植自 Drone-Vision `vision_core/src/vision_detect.cpp` 的 `decode_barcodes`（ZXing-C++ 3.0）。
-流程与原实现一致：AprilTag 位姿 → 按标签物理尺寸投影 ROI → 透视矫正 / ROI / 1D 补救 → 全图金字塔 → 去畸变 → 换帧重试，
-所有结果经 `barcode_result_fusion.h`（原样复制）按物理位置去重。策略名（`WARP-2d`、`ROI-raw`、`PFULL-1d-otsu` …）与
-`vision_run.log` 相同，便于对照。串口读码器见同工作空间的 `barcode_reader_serial`。
+第一帧流程与原实现一致：AprilTag 位姿 → 按标签物理尺寸投影 ROI → 透视矫正 / ROI / 1D 补救 → 全图金字塔 → 去畸变；
+没读齐时换新帧重试（与原实现不同，见「换帧重试」）。所有结果经 `barcode_result_fusion.h`（原样复制）按物理位置去重。
+策略名（`WARP-2d`、`ROI-raw`、`PFULL-1d-otsu` …）与 `vision_run.log` 相同，便于对照；重试帧上的策略名加 `RT-` 前缀。
+串口读码器见同工作空间的 `barcode_reader_serial`。
 
 ## 看图工具 decode_image
 
@@ -18,7 +19,8 @@ rosrun barcode_reader_camera decode_image 图片.jpg --annotate /tmp/out.jpg
 - `--config yaml` 读取参数（默认值与 `config/barcode_reader_camera.yaml` 相同）；`--layout config/layouts/<名字>.yaml`
   叠加标签版式（含 tag 边长，不给时 tag 边长按 0.012 m）；`--all-formats` 打开全部 8 种码制；
   `--free` 把 expected_codes 全置 0，完整跑一遍不提前结束；`--no-tag` 强制只走全图；`--verbose` 输出每个策略的日志。
-- `--pose meta.yaml`：用节点保存的 `meta.yaml` 里的 rvec/tvec 代替自己检测 tag，复现节点当时的 ROI（见下文「读码记录」）。
+- `--pose meta.yaml`：用节点保存的 `meta.yaml` 里的 rvec/tvec 代替自己检测 tag，复现节点当时的 ROI（见下文「读码记录」）；
+  图片是该目录的 `retry_N.png` 时自动取 `retries` 里这一帧自己的位姿。
 - 每个码一行：`#序号 [码制] code=... raw_hex=... symbology=... center=(x,y) source=策略名`；标注图上序号与输出一致，
   青色框 = 标签 ROI，品红 = tag，绿色 = 已解出，红色 = ROI 内定位到但没解出。
 
@@ -43,8 +45,10 @@ rosrun barcode_reader_camera trigger_decode           # 触发一次读码（另
   转回 rvec/tvec 投影 ROI。视觉节点要算 AprilTag，位姿比图像晚约 30–50 ms；`~decode` 先等最新帧的位姿（最多
   `~pose_wait_s`，收到更新帧的位姿说明这帧被视觉节点跳过，提前停止等待），再选最近一帧有位姿的图像（最多比最新帧早
   `~pose_fallback_s`），都没有才返回 `no_tag`。
-- `~decode`（`DecodeBarcodes.srv`）：解码最新一帧；重试时等待之后的新帧。返回 `success / partial / error / elapsed_s /
-  used_tag_roi / report / codes[] / header`（`header` 为所解图像的时间戳和坐标系，与 `~result` 相同；没取到图像时为空），每个码是 `Barcode.msg`：`format, code, raw_hex, symbology_id, center_x/y, corners, source`。
+- `~decode`（`DecodeBarcodes.srv`）：解码最新一帧，没读齐时换新帧重试（见「换帧重试」）。返回 `success / partial / error / elapsed_s /
+  used_tag_roi / report / codes[] / header`（`header` 为结果所在那一帧的时间戳和坐标系：重试帧读出时是那一帧，否则是第一帧；
+  与 `~result` 相同；没取到图像时为空），每个码是 `Barcode.msg`：`format, code, raw_hex, symbology_id, center_x/y, corners, source`，
+  角点是该帧的像素坐标。
 - `~cancel`（`std_srvs/Trigger`）：中止正在进行的解码，`~decode` 返回 `cancelled`；空闲时 `success=false`。
 - `~result`（`BarcodeArray.msg`）：每次 `~decode` 结束都发布；`~image_annotated` 有订阅者时发布标注图。
 - `error`：`no_image`（没有 1 s 内的新图）、`no_camera_info`、`no_tag`（等待后最近几帧都没有对应位姿）、`busy`、`disabled`、
@@ -54,7 +58,22 @@ rosrun barcode_reader_camera trigger_decode           # 触发一次读码（另
   `config/layouts/qr_top_tag_bottom.yaml`；为空时用代码默认值并警告）、`~vision_tag_size_param`（默认
   `/ov13855_apriltag_vision_node/target_marker_size_m`，与版式 tag 边长不一致时每 10 s 警告一次，不阻断解码）、`~require_tag`（默认 true，与原实现一样没有 tag 不解码；
   false 时没有 tag 就走全图）、`~max_frame_age_s`（1.0）、`~pose_wait_s`（0.2）、`~pose_fallback_s`（0.2）、`~log_strategies`（false；true 时每个策略的日志打成 INFO）、
-  `~save_frames` / `~save_dir` / `~log_attempts`（见「读码记录」）。
+  `~save_frames` / `~save_dir` / `~log_attempts` / `~save_retry_frames`（见「读码记录」）。
+
+## 换帧重试
+
+第一帧没读齐时，节点把之后的新帧一帧一帧送进解码，直到读齐或解码开始后 `barcode_decoder.retry.timeout_ms`（默认 2000 ms，
+0 = 不重试）：
+
+- 每个重试帧用它自己的 tag 位姿（同时间戳的 `/front_marker/pose`）重新投影 ROI，只跑标签 ROI 策略（`RT-WARP-2d`、
+  `RT-ROI-raw` …，按缺的码型补），不跑全图金字塔和去畸变。只有 QR/DM 时每帧约 30–50 ms，相机 15 fps 基本每帧都能试到；
+  版式里有 Code128 时 1D 策略要多跑，每帧可能到几百 ms，2 s 内试的帧数少很多。
+- 取帧规则：上一帧之后、位姿已到的最新一帧；位姿约晚 40 ms 到，所以重试帧通常是刚拍的那一帧。视觉节点没检测到 tag 的帧
+  （太糊、出画）没有位姿，不试。
+- 依据：2026-10-11 实飞读码失败几乎都是运动模糊（曝光约 30 ms 内机体晃动），模糊一阵一阵出现，换帧最有效。原实现的重试
+  是把整帧缩到 512 扫两次（`RT-2d-small`），实飞 18 次失败一次也没读出；全图金字塔和去畸变每帧 100 ms 以上，实飞也从未读出。
+  用实飞记录回放（每次只有主帧和 2 张重试帧）：36 次中成功从 16 次升到 25 次，救回的约 0.3 s 内读出。
+- 读不出时 `~decode` 要等满 `timeout_ms` 才返回；`barcode_rc_trigger` 在这期间再拨杆会被忽略。
 
 ## 读码记录
 
@@ -65,14 +84,18 @@ roslaunch barcode_reader_camera bringup.launch save_frames:=failed          # �
 roslaunch barcode_rc_trigger manual_read.launch save_frames:=all            # 飞行对比：成功失败都存
 ```
 
-- `~log_attempts`（默认 true）：每次 `~decode` 在 `<save_dir>/attempts.csv` 追加一行，不存图：时间、图像时间戳、结果、
+- `~log_attempts`（默认 true）：每次 `~decode` 在 `<save_dir>/attempts.csv` 追加一行，不存图：时间、第一帧时间戳、结果、
   error、report、码内容、命中策略、总耗时/解码耗时、是否用了标签 ROI、tag 距离 `dist_m`、`z_m`、标签倾角 `tilt_deg`
-  （标签法线与视线夹角）、ROI 外接框宽高、ROI 内平均亮度、ROI 内拉普拉斯方差（越大越清晰）、重试取帧数、记录目录名。
+  （标签法线与视线夹角）、ROI 外接框宽高、ROI 内平均亮度、ROI 内拉普拉斯方差（越大越清晰；以上都是第一帧的）、
+  `frames`（共试了几帧：1 + 重试帧数）、`result_frame`（最后一个新码出自第几帧，0 = 第一帧，没读到码时为空）、记录目录名。
+  已有的 `attempts.csv` 列不同（旧版节点写的）时，启动时改名为 `attempts_<时间>.csv` 另起新文件。
 - `~save_frames`：`off`（默认）/ `failed` / `all`。每次存一个目录 `<save_dir>/<YYYYmmdd_HHMMSS_mmm>_<ok|partial|错误名>/`，
-  每次约 2–6 MB：
-  - `frame.png`：送进解码的原图（无损）；`retry_N.png`：换帧重试取到的新帧；`preview.jpg`：缩小的标注图（同 `~image_annotated`）。
-  - `meta.yaml`：结果、码、tag 位姿（rvec/tvec，T_camera_tag）、距离和倾角、ROI 四角、定位到但没解出的框、亮度/清晰度、
-    重试帧时间戳、所用版式和参数文件。
+  第一帧读出约 2 MB，重试到超时约 7 MB：
+  - `frame.png`：第一帧原图（无损）；`retry_N.png`：第 N 个重试帧，只存前 `~save_retry_frames`（默认 2，<0 全存）个、
+    读出码的那一帧和最后一帧；`preview.jpg`：缩小的标注图（同 `~image_annotated`，重试帧读出时画在那一帧上）。
+  - `meta.yaml`：结果（含 `frames`、`result_frame`）、码（含所在帧 `frame`）、第一帧的 tag 位姿（rvec/tvec，T_camera_tag）、
+    距离和倾角、ROI 四角、定位到但没解出的框、亮度/清晰度、每个重试帧的序号/时间戳/位姿/文件名（没存图为空）、
+    所用版式和参数文件。
   - `camera.yaml`：当时的 camera_info（ROS 格式）；`decode.log`：本次每个策略的日志（与 `--verbose` 相同）。
   - `no_tag` / `no_camera_info`（没进入解码）每 2 s 最多存一个目录，避免 `trigger_decode` 每 0.5 s 重试刷屏；CSV 照常每次一行。
 - `~save_dir`：默认 `~/barcode_frames`；目录不存在会自动创建。写盘失败只告警，不影响读码。
@@ -84,11 +107,14 @@ rosrun barcode_reader_camera decode_image frame.png --camera-yaml camera.yaml --
   --layout <meta.yaml 里的 layout_file> --config <meta.yaml 里的 config_file> --verbose --annotate /tmp/replay.jpg
 ```
 
+把 `frame.png` 换成 `retry_N.png` 复现某个重试帧（自动用该帧的位姿；decode_image 不做重试，单帧会跑完整流程）。
+
 ## 参数文件
 
 `config/barcode_reader_camera.yaml`，结构同 Drone-Vision `config.json` 的 `tag` / `detector` / `barcode_decoder`，
 默认值取自板端 `Drone-Vision/publish/config.json`：roi_scale 1.25；启用 QR/DM/Code128；CLAHE 2.0/8；try_rotate；
-重试 2 次、间隔 100 ms；2D 没读齐时去畸变重扫。标签几何、码制开关和预期码数放在版式文件里。
+2D 没读齐时去畸变重扫；换帧重试到解码开始后 2 s（`retry.timeout_ms`，原实现的 `retry.count/interval_ms` 已删除，
+写了会报错）。标签几何、码制开关和预期码数放在版式文件里。
 
 ## 标签版式
 
@@ -114,7 +140,7 @@ expected_codes: {QRCode: 1, DataMatrix: 0, Code128: 0, ...}       # 每种要读
 ```
 
 - 标签上没有的码制要在 `formats` 里关掉：沿用原实现语义，启用但预期为 0 的码制按「顺带扫描」处理、永远不算读齐，
-  解码会跑满 1.5 s 并返回 `partial`。
+  解码会重试到 `retry.timeout_ms`（2 s）并返回 `partial`。
 
 - 标签 ROI 只由 tag 位姿和版式推算，程序不检测标签纸边缘；版式填错不会漏读，但 ROI/透视矫正白跑，退到全图兜底。
 - `tag_position` 的四个角表示 tag 中心正好落在纸的对应角上；tag 在纸内任意位置用 `custom` + 偏移。
@@ -127,7 +153,8 @@ expected_codes: {QRCode: 1, DataMatrix: 0, Code128: 0, ...}       # 每种要读
 - 输出从定长 C 缓冲改为码列表，新增 `raw_hex`（ZXing `bytes()`）、`symbology_id`、角点和命中策略，不再有 `truncated`。
 - 没有 tag 或没有内参时跳过 ROI 和去畸变（原实现没有 tag 直接不解码；节点用 `require_tag` 保持该行为）。
 - 取消在每次 ZXing 调用前和每个大步骤前检查（原实现只在重试间检查），`~cancel` 约 20 ms 内生效。
-- 重试抓帧改为从 ROS 图像话题取新帧；1500 ms 总时长限制不变。
+- 换帧重试改为：从 ROS 图像话题取有位姿的新帧，每帧用自己的位姿只跑标签 ROI，直到 `retry.timeout_ms`（见「换帧重试」）。
+  原实现固定重试 2 帧、整帧缩到 512 扫描，1500 ms 总时长。
 - `FUSION-CHECK` 不再把 detected 与 fusion 计数不一致记为 ERROR：same-symbol 候选进入 fusion 但不导出，二者本来就可能不同。
 - WARP 矫正图改为标签正立：原实现把 ROI 的左下角映射到矫正图左上角，矫正图上下镜像（ZXing 对 QR/DM 会尝试镜像，
   实测解码结果和耗时不受影响）。坐标经 H⁻¹ 映射回原图，输出不变。
