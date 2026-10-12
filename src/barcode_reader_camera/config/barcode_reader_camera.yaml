@@ -23,8 +23,7 @@ barcode_decoder:
       grid_size: 8
   decoder:
     try_rotate: true
-  retry:                       # 仍缺码时换新帧重试；总解码时间超过 1500 ms 不再重试
-    count: 2
-    interval_ms: 100
+  retry:                       # 第一帧没读齐时换新帧重试：每帧用自己的 tag 位姿，只跑标签 ROI（WARP/ROI）
+    timeout_ms: 2000           # 解码开始后多久停止重试（含第一帧），0 = 不重试
   undistort:
     enabled: true              # 2D 没读齐时，去畸变后再扫一次（需要 CameraInfo）

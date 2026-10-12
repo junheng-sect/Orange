@@ -67,6 +67,6 @@ if(CATKIN_ENABLE_TESTING)
     add_dependencies(test_barcode_reader_camera_node barcode_reader_camera_node
       ${${PROJECT_NAME}_EXPORTED_TARGETS})
     target_link_libraries(test_barcode_reader_camera_node ${catkin_LIBRARIES} ${OpenCV_LIBRARIES}
-      ${APRILTAG_LIBRARY})
+      ${YAML_CPP_LIBRARIES} ${APRILTAG_LIBRARY})
   endif()
 endif()

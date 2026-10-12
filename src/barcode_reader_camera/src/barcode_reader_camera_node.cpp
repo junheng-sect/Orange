@@ -1,5 +1,6 @@
 // ROS adapter for decodeBarcodes(): ~decode decodes the latest camera frame that has a pose with the
-// same stamp from ov13855_apriltag_vision (waiting briefly for it), using the label ROI; ~cancel
+// same stamp from ov13855_apriltag_vision (waiting briefly for it), using the label ROI. While codes
+// are missing it retries on newer frames that have their own pose, until retry.timeout_ms; ~cancel
 // interrupts it. Every attempt can be recorded for offline analysis (~save_frames, ~log_attempts).
 #include <algorithm>
 #include <atomic>
@@ -91,8 +92,11 @@ class BarcodeReaderCameraNode {
   };
 
   // ~save_frames off/failed/all: per-attempt directory with frame, retries, pose, intrinsics, log.
+  // ~save_retry_frames: retry images kept per attempt besides the one that read the code and the
+  // last one (<0 = all); every retry frame's stamp and pose is recorded either way.
   // ~log_attempts: one row per ~decode in <save_dir>/attempts.csv, independent of ~save_frames.
   void setupRecorder(ros::NodeHandle& pnh) {
+    save_retry_frames_ = pnh.param("save_retry_frames", 2);
     std::string dir = pnh.param<std::string>("save_dir", "~/barcode_frames");
     if (dir.rfind("~/", 0) == 0 && std::getenv("HOME")) dir = std::string(std::getenv("HOME")) + dir.substr(1);
     const std::string mode_name = pnh.param<std::string>("save_frames", "off");
@@ -119,7 +123,7 @@ class BarcodeReaderCameraNode {
     std::lock_guard<std::mutex> lock(mutex_);
     frames_.push_back({msg->header.stamp, msg->header.frame_id, image->image, ++frame_seq_});
     while (frames_.size() > 5) frames_.pop_front();
-    frame_cv_.notify_all();
+    update_cv_.notify_all();
   }
 
   void onInfo(const sensor_msgs::CameraInfoConstPtr& msg) {
@@ -137,7 +141,7 @@ class BarcodeReaderCameraNode {
     std::lock_guard<std::mutex> lock(mutex_);
     poses_.push_back(*msg);
     while (poses_.size() > 30) poses_.pop_front();
-    pose_cv_.notify_all();
+    update_cv_.notify_all();
   }
 
   // Caller holds mutex_.
@@ -170,7 +174,8 @@ class BarcodeReaderCameraNode {
     const ros::WallTime started = ros::WallTime::now();
     const bool keep_log = recorder_ && recorder_->savesFrames();
     std::vector<std::string> strategy_log;
-    std::vector<std::pair<double, cv::Mat>> retries;
+    std::vector<RetryFrameRecord> retries;  // numbered like DecodedCode::frame
+    std::vector<ros::Time> retry_stamps;    // exact header stamps of retries
     BarcodeArray result;
 
     Frame frame;
@@ -186,7 +191,7 @@ class BarcodeReaderCameraNode {
         // frame's pose, but stop early once a newer pose shows the vision node skipped this frame.
         const Frame latest = frames_.back();
         const ros::Time latest_stamp = latest.stamp;
-        pose_cv_.wait_for(lock, std::chrono::duration<double>(pose_wait_s_), [&]() {
+        update_cv_.wait_for(lock, std::chrono::duration<double>(pose_wait_s_), [&]() {
           return findPose(latest_stamp) || (!poses_.empty() && poses_.back().header.stamp > latest_stamp);
         });
         // Newest frame with a pose, at most pose_fallback_s_ older than the latest frame.
@@ -223,15 +228,33 @@ class BarcodeReaderCameraNode {
         if (keep_log) strategy_log.push_back(line);
       };
       uint64_t last_seq = frame.seq;
-      hooks.next_frame = [this, &last_seq, &retries](cv::Mat& gray) {
+      hooks.next_frame = [this, &last_seq, &retries, &retry_stamps](int timeout_ms, cv::Mat& gray, TagPose& tag) {
         std::unique_lock<std::mutex> lock(mutex_);
-        const bool got = frame_cv_.wait_for(lock, std::chrono::seconds(1), [&]() {
-          return cancel_.load() || (!frames_.empty() && frames_.back().seq > last_seq);
+        // Newest frame after the previous one whose own pose has arrived (~40 ms after the image);
+        // frames without a pose (tag not detected, or skipped by the vision node) are not tried.
+        const Frame* next = nullptr;
+        const geometry_msgs::PoseStamped* next_pose = nullptr;
+        update_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&]() {
+          if (cancel_.load()) return true;
+          for (auto it = frames_.rbegin(); it != frames_.rend() && it->seq > last_seq; ++it) {
+            if ((next_pose = findPose(it->stamp))) {
+              next = &*it;
+              return true;
+            }
+          }
+          return false;
         });
-        if (!got || cancel_.load()) return false;
-        last_seq = frames_.back().seq;
-        gray = frames_.back().gray;
-        retries.emplace_back(frames_.back().stamp.toSec(), gray);  // shares the buffer, no copy
+        if (cancel_.load() || !next) return false;
+        last_seq = next->seq;
+        gray = next->gray;  // shares the buffer, no copy
+        tag = toTagPose(next_pose->pose);
+        RetryFrameRecord rec;
+        rec.index = (int)retries.size() + 1;
+        rec.stamp = next->stamp.toSec();
+        rec.pose = tag;
+        rec.gray = gray;
+        retries.push_back(std::move(rec));
+        retry_stamps.push_back(next->stamp);
         return true;
       };
       out = decodeBarcodes(frame.gray, have_pose && camera.valid() ? &pose : nullptr, camera, config_, hooks);
@@ -256,23 +279,30 @@ class BarcodeReaderCameraNode {
         result.codes.push_back(b);
       }
     }
-    result.header.stamp = frame.stamp;
+    // The result refers to the frame that produced the last new code: a retry frame when retries read it.
+    // Its stamp lets callers look up the pose of that frame (barcode_rc_trigger tag.source=img).
+    const int result_index = out.result_frame;
+    const bool from_retry = result_index > 0 && result_index <= (int)retries.size();
+    const cv::Mat& result_gray = from_retry ? retries[result_index - 1].gray : frame.gray;
+    result.header.stamp = from_retry ? retry_stamps[result_index - 1] : frame.stamp;
     result.header.frame_id = frame.frame_id;
     result.elapsed_s = (float)(ros::WallTime::now() - started).toSec();
     result_pub_.publish(result);
-    if (!frame.gray.empty() && annotated_pub_.getNumSubscribers() > 0) {
+    if (!result_gray.empty() && annotated_pub_.getNumSubscribers() > 0) {
       cv_bridge::CvImage annotated(result.header, "bgr8");
-      cv::cvtColor(frame.gray, annotated.image, cv::COLOR_GRAY2BGR);
-      drawDecodeOutput(annotated.image, out);
+      cv::cvtColor(result_gray, annotated.image, cv::COLOR_GRAY2BGR);
+      drawDecodeOutput(annotated.image, out, from_retry ? result_index : 0);
       annotated_pub_.publish(annotated.toImageMsg());
     }
     if (result.success) {
-      ROS_INFO("barcode_reader_camera: %zu codes (%s) in %.0f ms, tag_roi=%d", result.codes.size(),
-               result.report.c_str(), result.elapsed_s * 1000.0, (int)result.used_tag_roi);
+      ROS_INFO("barcode_reader_camera: %zu codes (%s) in %.0f ms, frames=%d result_frame=%d tag_roi=%d",
+               result.codes.size(), result.report.c_str(), result.elapsed_s * 1000.0, out.frames,
+               out.result_frame, (int)result.used_tag_roi);
     } else if (result.error == "decode_fail" || result.error == "partial") {
       // 定位到了但没读出/没读齐，是测距实验里的正常结果；链路问题（no_image/no_tag 等）仍然告警。
-      ROS_INFO("barcode_reader_camera: decode %s, %zu codes (%s) in %.0f ms", result.error.c_str(),
-               result.codes.size(), result.report.c_str(), result.elapsed_s * 1000.0);
+      ROS_INFO("barcode_reader_camera: decode %s, %zu codes (%s) in %.0f ms, frames=%d",
+               result.error.c_str(), result.codes.size(), result.report.c_str(), result.elapsed_s * 1000.0,
+               out.frames);
     } else {
       ROS_WARN("barcode_reader_camera: decode %s, %zu codes (%s) in %.0f ms", result.error.c_str(),
                result.codes.size(), result.report.c_str(), result.elapsed_s * 1000.0);
@@ -284,6 +314,13 @@ class BarcodeReaderCameraNode {
       rec.stamp = frame.stamp.toSec();
       rec.frame_id = frame.frame_id;
       rec.frame = frame.gray;
+      // Keep the first save_retry_frames_ retry images, the one that read the code and the last one.
+      const bool keep_images = recorder_->savesFrames();
+      for (auto& f : retries) {
+        const bool keep = keep_images && (save_retry_frames_ < 0 || f.index <= save_retry_frames_ ||
+                                          f.index == result_index || f.index == (int)retries.size());
+        if (!keep) f.gray.release();
+      }
       rec.retries = std::move(retries);
       rec.have_pose = have_pose;
       rec.pose = pose;
@@ -333,7 +370,7 @@ class BarcodeReaderCameraNode {
       return true;
     }
     cancel_ = true;
-    frame_cv_.notify_all();
+    update_cv_.notify_all();
     res.success = true;
     res.message = "cancel requested";
     return true;
@@ -349,10 +386,10 @@ class BarcodeReaderCameraNode {
   double pose_fallback_s_ = 0.2;  // how far back a frame with a pose may be used instead
   bool log_strategies_ = false;
   std::unique_ptr<FrameRecorder> recorder_;  // background writer; drains its queue on shutdown
+  int save_retry_frames_ = 2;
 
   std::mutex mutex_;
-  std::condition_variable frame_cv_;
-  std::condition_variable pose_cv_;
+  std::condition_variable update_cv_;  // new frame, new pose or cancel
   std::deque<Frame> frames_;
   uint64_t frame_seq_ = 0;
   std::deque<geometry_msgs::PoseStamped> poses_;

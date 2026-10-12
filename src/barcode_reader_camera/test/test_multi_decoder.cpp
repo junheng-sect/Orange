@@ -1,6 +1,8 @@
 #include <algorithm>
+#include <chrono>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -51,6 +53,29 @@ bool anyLineContains(const std::vector<std::string>& lines, const std::string& n
 
 const std::multiset<std::string> kAll = {"QRCode:QR-TEST-001", "QRCode:QR-TEST-002",
                                          "Code128:C128-12345", "Code128:C128-67890"};
+const std::multiset<std::string> kQr = {"QRCode:QR-TEST-001", "QRCode:QR-TEST-002"};
+
+DecoderConfig qrConfig() {
+  DecoderConfig c = testConfig();
+  c.formats = FormatSwitches{true, false, false, false, false, false, false, false};
+  c.expected = ExpectedCounts{2, 0, 0, 0, 0, 0, 0, 0};
+  return c;
+}
+
+// Horizontal motion blur over 41 px (5 QR modules at 8 px/mm): no code decodes, like the failed
+// flight frames; the tag pose is still known.
+cv::Mat motionBlur(const cv::Mat& gray) {
+  cv::Mat out;
+  cv::blur(gray, out, cv::Size(41, 1));
+  return out;
+}
+
+// The scene moved down by dy pixels between frames (camera moved).
+cv::Mat shiftDown(const cv::Mat& gray, int dy) {
+  cv::Mat out(gray.size(), gray.type(), cv::Scalar(140));
+  gray(cv::Rect(0, 0, gray.cols, gray.rows - dy)).copyTo(out(cv::Rect(0, dy, gray.cols, gray.rows - dy)));
+  return out;
+}
 
 }  // namespace
 
@@ -92,7 +117,7 @@ TEST(MultiDecoder, CustomTagOffsetShiftsRoi) {
   TagPose pose;
   ASSERT_TRUE(detectPose(scene, pose));
   DecoderConfig center = testConfig();
-  center.retry_count = 0;
+  center.retry_timeout_ms = 0;
   DecoderConfig custom = center;
   custom.tag_position = "custom";
   custom.tag_offset_x_m = 0.0;
@@ -139,7 +164,7 @@ TEST(MultiDecoder, UnmetExpectationIsPartial) {
   ASSERT_TRUE(detectPose(scene, pose));
   auto config = testConfig();
   config.expected.c128 = 3;
-  config.retry_count = 0;
+  config.retry_timeout_ms = 0;
   const auto out = decodeBarcodes(scene.gray, &pose, scene.camera, config);
   EXPECT_FALSE(out.success);
   EXPECT_TRUE(out.partial);
@@ -169,16 +194,106 @@ TEST(MultiDecoder, RetryUsesNextFrameOnlyWhenCodesMissing) {
   ASSERT_TRUE(detectPose(scene, pose));
   int calls = 0;
   DecodeHooks hooks;
-  hooks.next_frame = [&](cv::Mat& gray) { ++calls; gray = scene.gray; return true; };
+  hooks.next_frame = [&](int, cv::Mat& gray, TagPose& p) {
+    if (calls >= 3) return false;  // camera stopped
+    ++calls;
+    gray = scene.gray;
+    p = pose;
+    return true;
+  };
   decodeBarcodes(scene.gray, &pose, scene.camera, testConfig(), hooks);
   EXPECT_EQ(calls, 0);  // everything found in the first frame
 
   auto config = testConfig();
-  config.expected.c128 = 3;  // unreachable
-  config.retry_interval_ms = 0;
+  config.expected.c128 = 3;          // unreachable
+  config.retry_timeout_ms = 60000;   // ends when next_frame has no more frames
   const auto out = decodeBarcodes(scene.gray, &pose, scene.camera, config, hooks);
-  EXPECT_LE(calls, config.retry_count);  // also bounded by the 1500 ms decode budget
-  EXPECT_EQ(texts(out), kAll);           // retry duplicates are fused away
+  EXPECT_EQ(calls, 3);
+  EXPECT_EQ(out.frames, 4);
+  EXPECT_EQ(texts(out), kAll);  // retry duplicates are fused away
+  for (const auto& c : out.codes) EXPECT_EQ(c.frame, 0);
+  EXPECT_EQ(out.result_frame, 0);
+  EXPECT_EQ(out.error, "partial");
+}
+
+TEST(MultiDecoder, RetryReadsLaterFrameWithItsOwnPose) {
+  const auto scene = synthetic::makeScene();
+  TagPose pose0;
+  ASSERT_TRUE(detectPose(scene, pose0));
+  synthetic::Scene moved = scene;
+  moved.gray = shiftDown(scene.gray, 320);  // 40 mm: the bottom QR leaves the first frame's ROI
+  TagPose pose_moved;
+  ASSERT_TRUE(detectPose(moved, pose_moved));
+  const cv::Mat blurred = motionBlur(scene.gray);
+  auto config = qrConfig();
+  config.retry_timeout_ms = 60000;
+
+  for (bool own_pose : {true, false}) {
+    SCOPED_TRACE(own_pose ? "own pose" : "first frame's pose");
+    std::vector<std::string> lines;
+    int calls = 0;
+    DecodeHooks hooks;
+    hooks.log = [&](const std::string& l) { lines.push_back(l); };
+    hooks.next_frame = [&](int timeout_ms, cv::Mat& gray, TagPose& p) {
+      EXPECT_GT(timeout_ms, 0);
+      if (calls >= 2) return false;
+      ++calls;
+      gray = calls == 1 ? blurred : moved.gray;  // retry 1 still blurred, retry 2 sharp but moved
+      p = calls == 1 || !own_pose ? pose0 : pose_moved;
+      return true;
+    };
+    const auto out = decodeBarcodes(blurred, &pose0, scene.camera, config, hooks);
+    EXPECT_EQ(out.frames, 3);
+    // Retry frames run the label ROI only, never the full-frame pyramid.
+    EXPECT_TRUE(anyLineContains(lines, "T RT-WARP-2d:"));
+    EXPECT_FALSE(anyLineContains(lines, "RT1280"));
+    EXPECT_FALSE(anyLineContains(lines, "RTFULL"));
+    EXPECT_FALSE(anyLineContains(lines, "RT-2d-small"));
+    if (own_pose) {
+      EXPECT_TRUE(out.success) << out.error << " " << out.report;
+      EXPECT_EQ(texts(out), kQr);
+      EXPECT_EQ(out.result_frame, 2);
+      for (const auto& c : out.codes) {
+        EXPECT_EQ(c.frame, 2);
+        EXPECT_EQ(c.source.rfind("RT-", 0), 0u) << c.source;
+        EXPECT_GT(c.center.y, 320.0f + 8 * 45);  // retry 2 pixels: label moved 320 px down
+      }
+    } else {
+      // The first frame's ROI misses the moved bottom QR: per-frame poses are what makes retries work.
+      EXPECT_FALSE(out.success);
+      EXPECT_LT(out.codes.size(), 2u);
+    }
+  }
+}
+
+TEST(MultiDecoder, RetryStopsAtTimeout) {
+  const auto scene = synthetic::makeScene();
+  TagPose pose;
+  ASSERT_TRUE(detectPose(scene, pose));
+  const cv::Mat blurred = motionBlur(scene.gray);
+  auto config = qrConfig();
+  config.retry_timeout_ms = 1500;
+  std::vector<int> timeouts;
+  DecodeHooks hooks;
+  hooks.next_frame = [&](int timeout_ms, cv::Mat& gray, TagPose& p) {
+    timeouts.push_back(timeout_ms);
+    std::this_thread::sleep_for(std::chrono::milliseconds(std::min(30, timeout_ms)));  // ~camera frame wait
+    gray = blurred;
+    p = pose;
+    return true;
+  };
+  const auto out = decodeBarcodes(blurred, &pose, scene.camera, config, hooks);
+  EXPECT_EQ(out.error, "decode_fail");
+  EXPECT_EQ(out.frames, 1 + (int)timeouts.size());
+  ASSERT_FALSE(timeouts.empty()) << "first frame alone took " << out.elapsed_ms << " ms";
+  for (size_t i = 0; i < timeouts.size(); ++i) {
+    EXPECT_LE(timeouts[i], config.retry_timeout_ms);
+    if (i > 0) {
+      EXPECT_LT(timeouts[i], timeouts[i - 1]);  // remaining budget, counted from decode start
+    }
+  }
+  EXPECT_GE(out.elapsed_ms, config.retry_timeout_ms);
+  EXPECT_LT(out.elapsed_ms, config.retry_timeout_ms + 600);  // overshoot: at most one retry frame
 }
 
 TEST(MultiDecoder, CancelStopsDecoding) {
@@ -267,6 +382,14 @@ TEST(Layout, MissingKeysKeepValuesAndInvalidThrows) {
   EXPECT_THROW(applyLayout(YAML::Load("label: {tag_position: middle}"), c1, nullptr), std::runtime_error);
   EXPECT_THROW(applyLayout(YAML::Load("target_marker_size_m: 0"), c2, &tag_size), std::runtime_error);
   EXPECT_THROW(applyLayout(YAML::Load("expected_codes: {QRCode: -1}"), c3, nullptr), std::runtime_error);
+}
+
+TEST(Config, RetryTimeoutAndOldRetryKeys) {
+  EXPECT_EQ(loadDecoderConfig(YAML::Load("barcode_decoder: {retry: {timeout_ms: 800}}")).retry_timeout_ms, 800);
+  EXPECT_EQ(loadDecoderConfig(YAML::Load("barcode_decoder: {enabled: true}")).retry_timeout_ms, 2000);
+  EXPECT_THROW(loadDecoderConfig(YAML::Load("barcode_decoder: {retry: {count: 2, interval_ms: 100}}")),
+               std::runtime_error);
+  EXPECT_THROW(loadDecoderConfig(YAML::Load("barcode_decoder: {retry: {timeout_ms: -1}}")), std::runtime_error);
 }
 
 int main(int argc, char** argv) {

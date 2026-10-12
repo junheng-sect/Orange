@@ -8,7 +8,6 @@
 #include <mutex>
 #include <string>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include <opencv2/core.hpp>
@@ -22,12 +21,20 @@ enum class SaveFrames { Off, Failed, All };
 // "off" / "failed" / "all"; throws std::invalid_argument otherwise.
 SaveFrames parseSaveFrames(const std::string& s);
 
+// One retry frame scanned by decodeBarcodes (numbered like DecodedCode::frame).
+struct RetryFrameRecord {
+  int index = 0;  // 1 = first retry frame
+  double stamp = 0.0;
+  TagPose pose;
+  cv::Mat gray;  // empty when this frame's image is not kept (only some retry frames are saved)
+};
+
 struct DecodeRecord {
   double wall_time = 0.0;  // seconds since epoch, when ~decode was called
-  double stamp = 0.0;      // image header stamp; 0 when no frame was picked
+  double stamp = 0.0;      // input frame's header stamp; 0 when no frame was picked
   std::string frame_id;
-  cv::Mat frame;                                    // CV_8UC1 frame given to decodeBarcodes; may be empty
-  std::vector<std::pair<double, cv::Mat>> retries;  // (stamp, gray) frames fetched by decode retries
+  cv::Mat frame;                          // CV_8UC1 input frame given to decodeBarcodes; may be empty
+  std::vector<RetryFrameRecord> retries;  // every retry frame decodeBarcodes scanned, in order
   bool have_pose = false;
   TagPose pose;
   CameraModel camera;  // may be invalid
@@ -60,6 +67,7 @@ class FrameRecorder {
  private:
   void run();
   void write(const DecodeRecord& r);
+  void rotateStaleCsv();
 
   static constexpr double kChainErrorSaveGapS = 2.0;
 

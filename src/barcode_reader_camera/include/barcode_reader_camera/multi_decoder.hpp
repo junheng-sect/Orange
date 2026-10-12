@@ -1,7 +1,8 @@
 #pragma once
 // Camera barcode decoding ported from Drone-Vision vision_detect.cpp decode_barcodes().
-// Strategy order, parameters and strategy labels are kept so logs compare 1:1 with
-// vision_run.log. This header does not expose ZXing types.
+// Strategy order, parameters and strategy labels of the first frame are kept so logs compare 1:1
+// with vision_run.log; the retry step differs (see DecoderConfig::retry_timeout_ms). This header
+// does not expose ZXing types.
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -34,8 +35,10 @@ struct DecoderConfig {
   int clahe_grid = 8;
   int roi_2d_scale = 512;
   bool undistort_enabled = true;
-  int retry_count = 2;
-  int retry_interval_ms = 100;
+  // Codes still missing after the first frame: take new frames, each with its own tag pose, and run
+  // only the label-ROI strategies (WARP/ROI) on them until this many ms after decoding started.
+  // 0 = no retry. Drone-Vision retried twice on the whole frame shrunk to roi_2d_scale.
+  int retry_timeout_ms = 2000;
   // Label geometry used to project the decode ROI from the tag pose.
   double label_width_m = 0.10;
   double label_height_m = 0.15;
@@ -66,7 +69,8 @@ struct DecodedCode {
   std::string symbology_id;  // ISO/IEC 15424, e.g. ]Q1 ]d1 ]C0
   std::array<cv::Point2f, 4> corners;  // original image pixels
   cv::Point2f center;
-  std::string source;        // strategy label that first produced it
+  std::string source;        // strategy label that first produced it (RT-... on a retry frame)
+  int frame = 0;             // frame the corners refer to: 0 = input frame, n = n-th retry frame
 };
 
 struct DecodeOutput {
@@ -77,16 +81,20 @@ struct DecodeOutput {
   std::vector<DecodedCode> codes;
   double elapsed_ms = 0.0;
   bool used_tag_roi = false;
-  std::vector<cv::Point2f> roi_quad;                   // projected label ROI, empty without a tag
-  std::vector<std::array<cv::Point2f, 4>> failed_boxes;  // located but not decoded (ROI only)
+  std::vector<cv::Point2f> roi_quad;                   // input frame's projected label ROI, empty without a tag
+  std::vector<std::array<cv::Point2f, 4>> failed_boxes;  // input frame: located but not decoded (ROI only)
   std::string report;                                  // DecodeReport line, e.g. "QR=1/1 DM=0/1 C128=2/2"
+  int frames = 0;        // frames scanned: 1 (input frame) + retry frames; 0 when decoding did not run
+  int result_frame = 0;  // last frame that produced a new code (0 = input frame or no code)
 };
 
 struct DecodeHooks {
   std::function<void(const std::string&)> log;  // one line per call, no trailing newline
   std::function<bool()> cancelled;              // polled before every decode attempt
-  // Retry source replacing Drone-Vision's camera re-grab; returns false when no frame.
-  std::function<bool(cv::Mat& gray)> next_frame;
+  // Retry source replacing Drone-Vision's camera re-grab: block up to timeout_ms for a frame newer
+  // than the previous one that has its own tag pose (T_camera_tag, same convention as decodeBarcodes).
+  // Returns false when none arrived in time or decoding was cancelled.
+  std::function<bool(int timeout_ms, cv::Mat& gray, TagPose& pose)> next_frame;
 };
 
 // gray: CV_8UC1 full camera frame. tag: nullptr = no ROI (pyramid only).
@@ -95,7 +103,8 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray, const TagPose* tag, const Camer
 
 std::string toHex(const std::vector<uint8_t>& bytes);
 
-// Draw ROI (cyan), failed candidates (red) and decoded codes (green, "#index").
-void drawDecodeOutput(cv::Mat& bgr, const DecodeOutput& output);
+// Draw on frame `frame` of the decode (0 = input frame, n = n-th retry frame): its decoded codes
+// (green, "#index"), and for the input frame also the ROI (cyan) and failed candidates (red).
+void drawDecodeOutput(cv::Mat& bgr, const DecodeOutput& output, int frame = 0);
 
 }  // namespace barcode_reader_camera

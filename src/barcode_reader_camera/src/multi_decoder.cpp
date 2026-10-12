@@ -1,10 +1,13 @@
 // Port of Drone-Vision vision_core/src/vision_detect.cpp decode_barcodes() and its 1D helpers
-// (BUILD_ID vision_detect_fusion_fix_buildlog_20260903_01). The decode strategy chain, parameters
+// (BUILD_ID vision_detect_fusion_fix_buildlog_20260903_01). The first-frame strategy chain, parameters
 // and labels are unchanged; only the process-global dependencies were replaced:
 //   VisionConfigSnapshot -> DecoderConfig (mapped to LegacyCfg below, original field names)
 //   VisionResult buffers  -> DecodeOutput
 //   vlogf/ms_now/op_aborted/g_ctx.cap->read -> DecodeHooks log/steady clock/cancelled/next_frame
 //   rv/tv + r->found      -> optional TagPose + CameraModel
+// The retry step (7) is new: retry frames come with their own pose and run the label-ROI strategies
+// only, until retry_timeout_ms. Drone-Vision scanned 2 retry frames shrunk to roi_2d_scale (RT-2d-small),
+// which read none of the 18 motion-blurred flight failures on 2026-10-11.
 #include "barcode_reader_camera/multi_decoder.hpp"
 #include "barcode_reader_camera/barcode_result_fusion.h"
 
@@ -21,7 +24,6 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
-#include <thread>
 
 namespace barcode_reader_camera {
 namespace {
@@ -57,7 +59,7 @@ struct LegacyCfg {
   int exp_qr, exp_dm, exp_128, exp_39, exp_ean13, exp_pdf417, exp_aztec, exp_itf;
   int bc_roi_2d_scale;
   bool bc_try_rotate;
-  int bc_retry_count, bc_retry_interval_ms;
+  int bc_retry_timeout_ms;
   bool bc_preproc_enabled, bc_clahe_enabled;
   double bc_clahe_clip;
   int bc_clahe_grid;
@@ -80,8 +82,7 @@ LegacyCfg make_legacy(const DecoderConfig& c, const CameraModel& camera) {
   l.exp_aztec = c.expected.aztec; l.exp_itf = c.expected.itf;
   l.bc_roi_2d_scale = c.roi_2d_scale;
   l.bc_try_rotate = c.try_rotate;
-  l.bc_retry_count = c.retry_count;
-  l.bc_retry_interval_ms = c.retry_interval_ms;
+  l.bc_retry_timeout_ms = c.retry_timeout_ms;
   l.bc_preproc_enabled = c.preprocess_enabled;
   l.bc_clahe_enabled = c.clahe_enabled;
   l.bc_clahe_clip = c.clahe_clip;
@@ -265,7 +266,8 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
   cv::Mat gray = gray_in;  // shared header; strategies never write into it
 
   // r->found in Drone-Vision: a tag with a valid pose. ROI projection also needs intrinsics.
-  const bool tag_roi = tag != nullptr && camera.valid();
+  // rv/tv (and tag_roi) are replaced by each retry frame's own pose.
+  bool tag_roi = tag != nullptr && camera.valid();
   cv::Mat rv, tv;
   if (tag_roi) {
     rv = (cv::Mat_<double>(3, 1) << tag->rvec[0], tag->rvec[1], tag->rvec[2]);
@@ -277,6 +279,10 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
     return cancelled;
   };
   std::vector<BarcodeBox> barcode_boxes;
+  // Frame being scanned (0 = input frame, n = n-th retry frame) and the label prefix of its strategies
+  // ("" on the input frame, "RT-" on retry frames).
+  int cur_frame = 0;
+  std::string label_prefix;
 
   using namespace ZXing;
   long long t_start = ms_now();
@@ -376,7 +382,9 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
     for (int i = 0; i < 4; ++i) code.corners[i] = cv::Point2f(fused.corners[i].x, fused.corners[i].y);
     code.center = cv::Point2f(fused.center.x, fused.center.y);
     code.source = fused.source;
+    code.frame = cur_frame;
     out.codes.push_back(std::move(code));
+    out.result_frame = cur_frame;
   };
 
   auto add_unique = [&](const Barcodes& results, double scl = 1.0,
@@ -585,9 +593,12 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
   auto scan_image = [&](cv::Mat& img, BarcodeFormats fmts,
                         bool try_harder, bool try_rotate,
                         bool use_binarizer, int min_lines,
-                        const char* label,
+                        const char* label_in,
                         double scl = 1.0, int off_x = 0, int off_y = 0) {
     if (fmts.empty() || img.empty() || check_cancel()) return;
+    // 重试帧标签为 RT-ROI-...：红框（定位到但没解出）只画主帧的。
+    const std::string label_str = label_prefix + label_in;
+    const char* label = label_str.c_str();
     ImageView view(img.data, img.cols, img.rows, ImageFormat::Lum, (int)img.step);
     ReaderOptions opts = ReaderOptions()
         .setFormats(fmts)
@@ -709,8 +720,8 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
           (int)!type_done(true), (int)!type_done(false));
   };
 
-  // 金字塔主流程：ROI → 1280(快) → 1920(细) → 全分辨率(最后防线)
-  auto run_pyramid = [&](cv::Mat& src, const char* tag_name, bool with_roi) {
+  // 金字塔主流程：ROI → 1280(快) → 1920(细) → 全分辨率(最后防线)；重试帧只跑 ROI（with_layers=false）
+  auto run_pyramid = [&](cv::Mat& src, const char* tag_name, bool with_roi, bool with_layers) {
     // ── 4.1 AprilTag ROI 裁切解码（最高优先级，最快） ──
     if (with_roi && tag_roi && !check_cancel()) {
       // ROI 覆盖整张标签纸并留 roi_scale 倍余量，保持标签真实物理宽高比。
@@ -745,7 +756,7 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
       };
       std::vector<cv::Point2f> roi_2d;
       cv::projectPoints(roi_3d, rv, tv, cfg.camera_matrix, cfg.dist_coeffs, roi_2d);
-      out.roi_quad = roi_2d;
+      if (cur_frame == 0) out.roi_quad = roi_2d;
       out.used_tag_roi = true;
 
       // ════ Homography 透视矫正：2D 1024×1024 / 1D 按标签比例长边 2048 ════
@@ -788,11 +799,13 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
         };
 
         // 对透视矫正后的图像解码，并将 ZXing 返回的坐标映射回原始相机图像。
-        auto scan_warped = [&](cv::Mat& wimg, BarcodeFormats fmts, const char* label,
+        auto scan_warped = [&](cv::Mat& wimg, BarcodeFormats fmts, const char* label_in,
                                bool try_rotate, const cv::Mat& H_inv,
                                bool use_binarizer, int min_lines,
                                double coord_scale = 1.0) {
           if (fmts.empty() || wimg.empty() || check_cancel()) return;
+          const std::string label_str = label_prefix + label_in;
+          const char* label = label_str.c_str();
 
           long long t0 = ms_now();
           ImageView view(wimg.data, wimg.cols, wimg.rows, ImageFormat::Lum, (int)wimg.step);
@@ -996,8 +1009,10 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
             }
             const double sx = rescue_scaled.cols / (double)rescue.cols;
             const double sy = rescue_scaled.rows / (double)rescue.rows;
-            auto scan_rescue = [&](cv::Mat& img, bool use_binarizer, const char* source) {
+            auto scan_rescue = [&](cv::Mat& img, bool use_binarizer, const char* source_in) {
               if (check_cancel()) return;
+              const std::string source_str = label_prefix + source_in;
+              const char* source = source_str.c_str();
               ImageView view(img.data, img.cols, img.rows, ImageFormat::Lum, (int)img.step);
               ReaderOptions opts = ReaderOptions()
                   .setFormats(fmts_1d).setTryHarder(true).setTryRotate(false)
@@ -1100,6 +1115,7 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
     }
 
     // ── 4.2 金字塔层：小图先跑（快），大图殿后（细） ──
+    if (!with_layers) return;
     int long_side = std::max(src.cols, src.rows);
 
     if (long_side > 1280 && !all_done() && !check_cancel()) {
@@ -1134,7 +1150,8 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
   };
 
   // ── 5. 主帧金字塔（带 ROI 先验） ──
-  run_pyramid(full_gray, "P", true);
+  out.frames = 1;
+  run_pyramid(full_gray, "P", true, true);
 
   // ── 6. 畸变校正兜底（2D 未命中时；需要相机内参） ──
   if (!type_done(true) && cfg.bc_undistort_enabled && !fmts_2d.empty() && !check_cancel()) {
@@ -1147,74 +1164,54 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
     }
   }
 
-  // ── 7. 重试抓帧（仍有缺码型时；同样小图优先） ──
-  if (!all_done() && cfg.bc_retry_count > 0 && !cancelled) {
-    const long long scan_timeout_ms = 1500;
+  // ── 7. 换帧重试（仍有缺码型时） ──
+  // 实飞读码失败几乎都是运动模糊，模糊一阵一阵出现，换帧最有效：每帧用自己的 tag 位姿重投影 ROI，
+  // 只跑标签 ROI 策略（WARP/ROI，只有 2D 码时约 30–50 ms/帧），直到解码开始后 retry_timeout_ms。
+  // 全图金字塔和去畸变每帧 100 ms 以上且实飞中从未读出，重试帧不跑。
+  if (!all_done() && cfg.bc_retry_timeout_ms > 0 && !cancelled) {
     if (!hooks.next_frame) {
       vlogf("[Vision] Still missing codes, retry skipped (no frame source)\n");
+    } else if (!camera.valid()) {
+      vlogf("[Vision] Still missing codes, retry skipped (no camera model)\n");
     } else {
-      vlogf("[Vision] Still missing codes, retrying (%d times)...\n", cfg.bc_retry_count);
-    }
-    for (int rt = 0; hooks.next_frame && rt < cfg.bc_retry_count && !all_done(); rt++) {
-      std::string missing;
-      if (!req_done(cfg.bc_qr, cfg.exp_qr, ZXing::BarcodeFormat::QRCode)) missing += " QR";
-      if (!req_done(cfg.bc_dm, cfg.exp_dm, ZXing::BarcodeFormat::DataMatrix)) missing += " DM";
-      if (!req_done(cfg.bc_aztec, cfg.exp_aztec, ZXing::BarcodeFormat::Aztec)) missing += " Aztec";
-      if (!req_done(cfg.bc_pdf417, cfg.exp_pdf417, ZXing::BarcodeFormat::PDF417)) missing += " PDF417";
-      if (!req_done(cfg.bc_128, cfg.exp_128, ZXing::BarcodeFormat::Code128)) missing += " Code128";
-      if (!req_done(cfg.bc_39, cfg.exp_39, ZXing::BarcodeFormat::Code39)) missing += " Code39";
-      if (!req_done(cfg.bc_ean13, cfg.exp_ean13, ZXing::BarcodeFormat::EAN13)) missing += " EAN13";
-      if (!req_done(cfg.bc_itf, cfg.exp_itf, ZXing::BarcodeFormat::ITF)) missing += " ITF";
-      vlogf("[RETRY] attempt=%d missing=[%s ] distinct=%zu\n", rt + 1, missing.c_str(), detected.size());
-
-      // 重试间检查取消。
-      if (check_cancel()) break;
-      if (ms_now() - t_start >= scan_timeout_ms) {
-        vlogf("[Vision] Decode timeout, stop retry (elapsed=%lldms)\n", ms_now() - t_start);
-        break;
+      vlogf("[Vision] Still missing codes, retrying new frames until %dms...\n", cfg.bc_retry_timeout_ms);
+      label_prefix = "RT-";
+      while (!all_done() && !check_cancel()) {
+        const long long left = cfg.bc_retry_timeout_ms - (ms_now() - t_start);
+        if (left <= 0) {
+          vlogf("[Vision] Decode timeout, stop retry (elapsed=%lldms)\n", ms_now() - t_start);
+          break;
+        }
+        cv::Mat g2;
+        TagPose p2;
+        if (!hooks.next_frame((int)left, g2, p2) || g2.empty()) {
+          if (!check_cancel())
+            vlogf("[Vision] No new frame with a tag pose, stop retry (elapsed=%lldms)\n", ms_now() - t_start);
+          break;
+        }
+        if (g2.channels() == 3) cv::cvtColor(g2, g2, cv::COLOR_BGR2GRAY);
+        else if (g2.channels() == 4) cv::cvtColor(g2, g2, cv::COLOR_BGRA2GRAY);
+        std::string missing;
+        if (!req_done(cfg.bc_qr, cfg.exp_qr, ZXing::BarcodeFormat::QRCode)) missing += " QR";
+        if (!req_done(cfg.bc_dm, cfg.exp_dm, ZXing::BarcodeFormat::DataMatrix)) missing += " DM";
+        if (!req_done(cfg.bc_aztec, cfg.exp_aztec, ZXing::BarcodeFormat::Aztec)) missing += " Aztec";
+        if (!req_done(cfg.bc_pdf417, cfg.exp_pdf417, ZXing::BarcodeFormat::PDF417)) missing += " PDF417";
+        if (!req_done(cfg.bc_128, cfg.exp_128, ZXing::BarcodeFormat::Code128)) missing += " Code128";
+        if (!req_done(cfg.bc_39, cfg.exp_39, ZXing::BarcodeFormat::Code39)) missing += " Code39";
+        if (!req_done(cfg.bc_ean13, cfg.exp_ean13, ZXing::BarcodeFormat::EAN13)) missing += " EAN13";
+        if (!req_done(cfg.bc_itf, cfg.exp_itf, ZXing::BarcodeFormat::ITF)) missing += " ITF";
+        cur_frame++;
+        out.frames++;
+        vlogf("[RETRY] frame=%d t=%lldms missing=[%s ] distinct=%zu tvec=(%.3f,%.3f,%.3f)\n", cur_frame,
+              ms_now() - t_start, missing.c_str(), detected.size(), p2.tvec[0], p2.tvec[1], p2.tvec[2]);
+        rv = (cv::Mat_<double>(3, 1) << p2.rvec[0], p2.rvec[1], p2.rvec[2]);
+        tv = (cv::Mat_<double>(3, 1) << p2.tvec[0], p2.tvec[1], p2.tvec[2]);
+        tag_roi = true;
+        // 定向补缺：run_pyramid 里各通道按 type_done 只补仍缺失的类型。
+        long long f0 = ms_now();
+        run_pyramid(g2, "RT", true, false);
+        vlogf("[Vision] Retry frame %d: %zu codes, %lldms\n", cur_frame, detected.size(), ms_now() - f0);
       }
-      std::this_thread::sleep_for(std::chrono::milliseconds(cfg.bc_retry_interval_ms));
-      cv::Mat g2;
-      if (!hooks.next_frame(g2) || g2.empty()) continue;
-      if (g2.channels() == 3) cv::cvtColor(g2, g2, cv::COLOR_BGR2GRAY);
-      else if (g2.channels() == 4) cv::cvtColor(g2, g2, cv::COLOR_BGRA2GRAY);
-      // 定向补缺：只补仍缺失的类型，直接上最有把握的通道
-      if (!type_done(true) && !fmts_2d.empty()) {
-        cv::Mat small;
-        double s = (double)cfg.bc_roi_2d_scale / std::max(g2.cols, g2.rows);
-        double scl;
-        if (s < 1.0) { cv::resize(g2, small, cv::Size(), s, s, cv::INTER_LINEAR); scl = 1.0 / s; }
-        else { small = g2; scl = 1.0; }
-        scan_image(small, fmts_2d, true, cfg.bc_try_rotate, false, 0, "RT-2d-small", scl, 0, 0);
-        if (!type_done(true) && cfg.bc_preproc_enabled && cfg.bc_clahe_enabled) {
-          cv::Mat clahe_img;
-          cv::Ptr<cv::CLAHE> clahe = cv::createCLAHE(
-              cfg.bc_clahe_clip, cv::Size(cfg.bc_clahe_grid, cfg.bc_clahe_grid));
-          clahe->apply(small, clahe_img);
-          scan_image(clahe_img, fmts_2d, true, cfg.bc_try_rotate, false, 0,
-                     "RT-2d-small-clahe", scl, 0, 0);
-        }
-      }
-      if (!type_done(false) && !fmts_1d.empty()) {
-        scan_image(g2, fmts_1d, true, cfg.bc_try_rotate, false, 1, "RT-1d-full-raw", 1.0, 0, 0);
-        if (!type_done(false)) {
-          scan_image(g2, fmts_1d, true, cfg.bc_try_rotate, true, 1, "RT-1d-full-local", 1.0, 0, 0);
-        }
-        if (!type_done(false)) {
-          cv::Mat bin;
-          cv::threshold(g2, bin, 0, 255, cv::THRESH_BINARY | cv::THRESH_OTSU);
-          scan_image(bin, fmts_1d, true, false, false, 1, "RT-1d-otsu", 1.0, 0, 0);
-        }
-        if (!type_done(false)) {
-          cv::Mat adaptive = barcode_1d_adaptive_threshold(g2);
-          scan_image(adaptive, fmts_1d, true, false, false, 1, "RT-1d-adaptive", 1.0, 0, 0);
-        }
-        if (!type_done(false)) {
-          cv::Mat enh = barcode_1d_sobel_adaptive(g2);
-          scan_image(enh, fmts_1d, true, false, false, 1, "RT-1d-sobel", 1.0, 0, 0);
-        }
-      }
-      vlogf("[Vision] Retry %d/%d: %zu codes\n", rt + 1, cfg.bc_retry_count, detected.size());
     }
   }
 
@@ -1285,7 +1282,8 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
     if (cfg.bc_itf)    rep_add("ITF",    found_count(ZXing::BarcodeFormat::ITF),        cfg.exp_itf);
     out.report = rep;
     out.elapsed_ms = (double)(ms_now() - t_start);
-    vlogf("[DecodeReport] %.0fms %s\n", out.elapsed_ms, rep.c_str());
+    vlogf("[DecodeReport] %.0fms %s frames=%d result_frame=%d\n", out.elapsed_ms, rep.c_str(), out.frames,
+          out.result_frame);
   }
 
   for (const auto& b : barcode_boxes) {
@@ -1296,19 +1294,21 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
   return out;
 }
 
-void drawDecodeOutput(cv::Mat& bgr, const DecodeOutput& output) {
+void drawDecodeOutput(cv::Mat& bgr, const DecodeOutput& output, int frame) {
   const int thick = std::max(2, bgr.cols / 800);
   const double font = std::max(0.6, bgr.cols / 1600.0);
-  if (output.roi_quad.size() == 4) {
+  if (frame == 0 && output.roi_quad.size() == 4) {
     for (int k = 0; k < 4; ++k)
       cv::line(bgr, output.roi_quad[k], output.roi_quad[(k + 1) % 4], cv::Scalar(255, 255, 0), thick);
   }
   for (const auto& box : output.failed_boxes) {
+    if (frame != 0) break;
     for (int k = 0; k < 4; ++k)
       cv::line(bgr, box[k], box[(k + 1) % 4], cv::Scalar(0, 0, 255), thick);
   }
   for (size_t i = 0; i < output.codes.size(); ++i) {
     const auto& c = output.codes[i];
+    if (c.frame != frame) continue;
     for (int k = 0; k < 4; ++k)
       cv::line(bgr, c.corners[k], c.corners[(k + 1) % 4], cv::Scalar(0, 255, 0), thick + 1);
     const std::string label = "#" + std::to_string(i + 1);

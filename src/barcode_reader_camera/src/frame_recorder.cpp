@@ -32,6 +32,11 @@ bool exists(const std::string& path) {
   return ::stat(path.c_str(), &st) == 0;
 }
 
+// frames: 1 (input frame) + retry frames; result_frame: frame that produced the last new code.
+const char* const kCsvHeader =
+    "time,stamp,result,error,report,codes,sources,elapsed_ms,decode_ms,tag_roi,dist_m,z_m,tilt_deg,"
+    "roi_w,roi_h,roi_mean,roi_laplacian_var,frames,result_frame,dir";
+
 // "2026-10-11 21:40:05.123" (sep=true) or "20261011_214005_123" (sep=false), local time.
 std::string formatTime(double t, bool sep) {
   const time_t s = (time_t)std::floor(t);
@@ -142,7 +147,11 @@ std::string cameraYaml(const CameraModel& c, const cv::Size& size) {
   return std::string(e.c_str()) + "\n";
 }
 
-std::string metaYaml(const DecodeRecord& r, const Metrics& m, const std::vector<std::string>& retry_files) {
+std::string retryFile(const RetryFrameRecord& f) {
+  return f.gray.empty() ? "" : "retry_" + std::to_string(f.index) + ".png";
+}
+
+std::string metaYaml(const DecodeRecord& r, const Metrics& m) {
   YAML::Emitter e;
   e.SetDoublePrecision(10);
   e.SetFloatPrecision(7);
@@ -156,13 +165,16 @@ std::string metaYaml(const DecodeRecord& r, const Metrics& m, const std::vector<
     << YAML::Key << "report" << YAML::Value << r.out.report
     << YAML::Key << "elapsed_s" << YAML::Value << r.elapsed_s
     << YAML::Key << "decode_ms" << YAML::Value << r.out.elapsed_ms
-    << YAML::Key << "used_tag_roi" << YAML::Value << r.out.used_tag_roi << YAML::EndMap;
+    << YAML::Key << "used_tag_roi" << YAML::Value << r.out.used_tag_roi
+    << YAML::Key << "frames" << YAML::Value << r.out.frames
+    << YAML::Key << "result_frame" << YAML::Value << r.out.result_frame << YAML::EndMap;
   e << YAML::Key << "codes" << YAML::Value << YAML::BeginSeq;
   for (const auto& c : r.out.codes) {
     e << YAML::BeginMap << YAML::Key << "format" << YAML::Value << c.format
       << YAML::Key << "code" << YAML::Value << c.code
       << YAML::Key << "raw_hex" << YAML::Value << toHex(c.bytes)
       << YAML::Key << "source" << YAML::Value << c.source
+      << YAML::Key << "frame" << YAML::Value << c.frame
       << YAML::Key << "center" << YAML::Value;
     emitPoint(e, c.center);
     e << YAML::Key << "corners" << YAML::Value;
@@ -190,10 +202,16 @@ std::string metaYaml(const DecodeRecord& r, const Metrics& m, const std::vector<
     << m.roi.x << m.roi.y << m.roi.width << m.roi.height << YAML::EndSeq
     << YAML::Key << "mean" << YAML::Value << m.mean
     << YAML::Key << "laplacian_var" << YAML::Value << m.sharpness << YAML::EndMap;
+  // Every retry frame with its own pose; file is "" when its image was not kept.
+  // decode_image retry_N.png --pose meta.yaml picks the entry of that file.
   e << YAML::Key << "retries" << YAML::Value << YAML::BeginSeq;
-  for (size_t i = 0; i < r.retries.size(); ++i)
-    e << YAML::Flow << YAML::BeginMap << YAML::Key << "file" << YAML::Value << retry_files[i]
-      << YAML::Key << "stamp" << YAML::Value << num(r.retries[i].first, 6) << YAML::EndMap;
+  for (const auto& f : r.retries)
+    e << YAML::Flow << YAML::BeginMap << YAML::Key << "index" << YAML::Value << f.index
+      << YAML::Key << "file" << YAML::Value << retryFile(f)
+      << YAML::Key << "stamp" << YAML::Value << num(f.stamp, 6)
+      << YAML::Key << "rvec" << YAML::Value << YAML::BeginSeq << f.pose.rvec[0] << f.pose.rvec[1]
+      << f.pose.rvec[2] << YAML::EndSeq << YAML::Key << "tvec" << YAML::Value << YAML::BeginSeq
+      << f.pose.tvec[0] << f.pose.tvec[1] << f.pose.tvec[2] << YAML::EndSeq << YAML::EndMap;
   e << YAML::EndSeq;
   e << YAML::Key << "layout_file" << YAML::Value << r.layout_file;
   e << YAML::Key << "config_file" << YAML::Value << r.config_file;
@@ -215,7 +233,24 @@ FrameRecorder::FrameRecorder(const std::string& dir, SaveFrames mode, bool log_a
   while (dir_.size() > 1 && dir_.back() == '/') dir_.pop_back();
   if (!enabled()) return;
   makeDirs(dir_);
+  if (log_attempts_) rotateStaleCsv();
   thread_ = std::thread([this]() { run(); });
+}
+
+// attempts.csv written with other columns (older node): move it aside instead of appending
+// misaligned rows.
+void FrameRecorder::rotateStaleCsv() {
+  const std::string csv = dir_ + "/attempts.csv";
+  if (!exists(csv)) return;
+  std::ifstream f(csv);
+  std::string header;
+  std::getline(f, header);
+  if (header == kCsvHeader) return;
+  const std::string base = dir_ + "/attempts_" + formatTime((double)std::time(nullptr), false);
+  std::string moved = base + ".csv";
+  for (int i = 2; exists(moved); ++i) moved = base + "_" + std::to_string(i) + ".csv";
+  if (std::rename(csv.c_str(), moved.c_str()) != 0)
+    throw std::runtime_error("rename " + csv + ": " + std::strerror(errno));
 }
 
 FrameRecorder::~FrameRecorder() {
@@ -285,19 +320,25 @@ void FrameRecorder::write(const DecodeRecord& r) {
     makeDirs(d);
     const std::vector<int> png = {cv::IMWRITE_PNG_COMPRESSION, 1};
     writeImage(d + "/frame.png", r.frame, png);
-    std::vector<std::string> retry_files;
-    for (size_t i = 0; i < r.retries.size(); ++i) {
-      retry_files.push_back("retry_" + std::to_string(i + 1) + ".png");
-      writeImage(d + "/" + retry_files.back(), r.retries[i].second, png);
-    }
+    for (const auto& f : r.retries)
+      if (!f.gray.empty()) writeImage(d + "/" + retryFile(f), f.gray, png);
     if (r.camera.valid()) writeText(d + "/camera.yaml", cameraYaml(r.camera, r.frame.size()));
-    writeText(d + "/meta.yaml", metaYaml(r, m, retry_files));
+    writeText(d + "/meta.yaml", metaYaml(r, m));
     std::string log;
     for (const auto& line : r.log) log += line + "\n";
     writeText(d + "/decode.log", log);
+    // Preview the frame the result came from (a retry frame when retries read the code).
+    const cv::Mat* shown = &r.frame;
+    int shown_index = 0;
+    for (const auto& f : r.retries) {
+      if (f.index == r.out.result_frame && !f.gray.empty()) {
+        shown = &f.gray;
+        shown_index = f.index;
+      }
+    }
     cv::Mat preview;
-    cv::cvtColor(r.frame, preview, cv::COLOR_GRAY2BGR);
-    drawDecodeOutput(preview, r.out);
+    cv::cvtColor(*shown, preview, cv::COLOR_GRAY2BGR);
+    drawDecodeOutput(preview, r.out, shown_index);
     if (preview.cols > 1280)
       cv::resize(preview, preview, cv::Size(), 1280.0 / preview.cols, 1280.0 / preview.cols, cv::INTER_AREA);
     writeImage(d + "/preview.jpg", preview, {cv::IMWRITE_JPEG_QUALITY, 85});
@@ -307,9 +348,7 @@ void FrameRecorder::write(const DecodeRecord& r) {
   const std::string csv = dir_ + "/attempts.csv";
   const bool fresh = !exists(csv);
   std::ofstream f(csv, std::ios::app);
-  if (fresh)
-    f << "time,stamp,result,error,report,codes,sources,elapsed_ms,decode_ms,tag_roi,dist_m,z_m,tilt_deg,"
-         "roi_w,roi_h,roi_mean,roi_laplacian_var,retries,dir\n";
+  if (fresh) f << kCsvHeader << '\n';
   std::string codes, sources;
   for (const auto& c : r.out.codes) {
     codes += (codes.empty() ? "" : ";") + c.format + ":" + c.code;
@@ -322,7 +361,8 @@ void FrameRecorder::write(const DecodeRecord& r) {
     << (r.frame.empty() ? "" : num(r.out.elapsed_ms, 0)) << ',' << (int)r.out.used_tag_roi << ','
     << num(m.distance, 3) << ',' << num(m.z, 3) << ',' << num(m.tilt_deg, 1) << ','
     << (has_area ? std::to_string(m.roi.width) : "") << ',' << (has_area ? std::to_string(m.roi.height) : "") << ','
-    << num(m.mean, 1) << ',' << num(m.sharpness, 1) << ',' << r.retries.size() << ',' << csvField(name) << '\n';
+    << num(m.mean, 1) << ',' << num(m.sharpness, 1) << ',' << (r.frame.empty() ? "" : std::to_string(r.out.frames))
+    << ',' << (r.out.codes.empty() ? "" : std::to_string(r.out.result_frame)) << ',' << csvField(name) << '\n';
   if (!f) throw std::runtime_error("cannot append " + csv);
 }
 

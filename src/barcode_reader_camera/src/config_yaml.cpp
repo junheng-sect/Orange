@@ -62,8 +62,7 @@ void validateDecoderConfig(const DecoderConfig& c) {
   require(c.roi_2d_scale > 0, "barcode_decoder.roi_2d_scale > 0");
   require(std::isfinite(c.clahe_clip) && c.clahe_clip > 0, "preprocess.clahe.clip_limit > 0");
   require(c.clahe_grid >= 1, "preprocess.clahe.grid_size >= 1");
-  require(c.retry_count >= 0, "retry.count >= 0");
-  require(c.retry_interval_ms >= 0, "retry.interval_ms >= 0");
+  require(c.retry_timeout_ms >= 0, "retry.timeout_ms >= 0");
 }
 
 void applyLayout(const YAML::Node& layout, DecoderConfig& c, double* tag_size_m) {
@@ -105,8 +104,10 @@ DecoderConfig loadDecoderConfig(const YAML::Node& root) {
   c.clahe_grid = get(clahe, "grid_size", c.clahe_grid);
   c.try_rotate = get(bc ? bc["decoder"] : YAML::Node(), "try_rotate", c.try_rotate);
   const YAML::Node retry = bc ? bc["retry"] : YAML::Node();
-  c.retry_count = get(retry, "count", c.retry_count);
-  c.retry_interval_ms = get(retry, "interval_ms", c.retry_interval_ms);
+  c.retry_timeout_ms = get(retry, "timeout_ms", c.retry_timeout_ms);
+  // Drone-Vision keys of the old whole-frame retry; reject them so an old config is not silently ignored.
+  require(!retry || (!retry["count"] && !retry["interval_ms"]),
+          "retry.count/interval_ms were replaced by retry.timeout_ms");
   c.undistort_enabled = get(bc ? bc["undistort"] : YAML::Node(), "enabled", c.undistort_enabled);
 
   validateDecoderConfig(c);

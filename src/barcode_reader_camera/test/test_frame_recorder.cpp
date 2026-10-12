@@ -29,7 +29,7 @@ std::vector<std::string> subdirs(const std::string& dir) {
   if (DIR* d = opendir(dir.c_str())) {
     while (const dirent* e = readdir(d)) {
       const std::string n = e->d_name;
-      if (n != "." && n != ".." && n != "attempts.csv") out.push_back(n);
+      if (n != "." && n != ".." && n.rfind("attempts", 0) != 0) out.push_back(n);
     }
     closedir(d);
   }
@@ -43,6 +43,8 @@ std::vector<std::string> lines(const std::string& path) {
   return out;
 }
 
+bool readable(const std::string& path) { return std::ifstream(path).good(); }
+
 bool endsWith(const std::string& s, const std::string& suffix) {
   return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
@@ -54,10 +56,18 @@ DecodeRecord makeRecord(bool success, const std::string& error) {
   r.frame_id = "ov13855_optical_frame";
   r.frame = cv::Mat(144, 256, CV_8UC1);
   cv::randu(r.frame, 0, 255);
-  r.retries.emplace_back(1760190005.2, cv::Mat(144, 256, CV_8UC1, cv::Scalar(77)));
   r.have_pose = true;
   r.pose.rvec = cv::Vec3d(2.95965, -0.054603, -0.973757);
   r.pose.tvec = cv::Vec3d(-0.0306827, -0.0125738, 0.362314);
+  for (int i = 1; i <= 2; ++i) {  // retry 1 kept, retry 2 image dropped by the node
+    RetryFrameRecord f;
+    f.index = i;
+    f.stamp = 1760190005.05 + 0.0667 * i;
+    f.pose = r.pose;
+    f.pose.tvec[0] += 0.001 * i;
+    if (i == 1) f.gray = cv::Mat(144, 256, CV_8UC1, cv::Scalar(77));
+    r.retries.push_back(f);
+  }
   r.camera.camera_matrix = (cv::Mat_<double>(3, 3) << 188.75, 0, 128.7, 0, 142.9, 71.9, 0, 0, 1);
   r.camera.dist_coeffs = (cv::Mat_<double>(1, 5) << 0.182839, -0.557115, -0.001278, -0.000407, 0.498597);
   r.success = success;
@@ -68,6 +78,7 @@ DecodeRecord makeRecord(bool success, const std::string& error) {
   r.out.elapsed_ms = 31.0;
   r.out.used_tag_roi = true;
   r.out.report = success ? "QR=1/1" : "QR=0/1";
+  r.out.frames = 3;
   r.out.roi_quad = {{90, 94}, {141, 97}, {138, 14}, {89, 26}};
   if (success) {
     DecodedCode c;
@@ -126,7 +137,14 @@ TEST(FrameRecorder, AllModeWritesReplayableAttempt) {
   EXPECT_EQ(meta["result"]["status"].as<std::string>(), "ok");
   EXPECT_EQ(meta["codes"][0]["code"].as<std::string>(), "12345678");
   EXPECT_EQ(meta["codes"][0]["source"].as<std::string>(), "WARP-2d");
+  ASSERT_EQ(meta["retries"].size(), 2u);  // every retry frame, image or not
   EXPECT_EQ(meta["retries"][0]["file"].as<std::string>(), "retry_1.png");
+  EXPECT_EQ(meta["retries"][1]["file"].as<std::string>(), "");
+  EXPECT_EQ(meta["retries"][1]["index"].as<int>(), 2);
+  EXPECT_NEAR(meta["retries"][1]["tvec"][0].as<double>(), rec.pose.tvec[0] + 0.002, 1e-9);
+  EXPECT_FALSE(readable(d + "/retry_2.png"));
+  EXPECT_EQ(meta["result"]["frames"].as<int>(), 3);
+  EXPECT_EQ(meta["codes"][0]["frame"].as<int>(), 0);
   EXPECT_EQ(meta["roi_quad"].size(), 4u);
   EXPECT_EQ(meta["stamp"].as<std::string>(), "1760190005.050000");
 
@@ -137,7 +155,55 @@ TEST(FrameRecorder, AllModeWritesReplayableAttempt) {
   EXPECT_NE(csv[1].find("\"QRCode:12345678\""), std::string::npos);
   EXPECT_NE(csv[1].find("\"WARP-2d\""), std::string::npos);
   EXPECT_NE(csv[1].find(",0.364,0.362,"), std::string::npos);  // dist_m, z_m
-  EXPECT_TRUE(endsWith(csv[1], ",1,\"" + dirs[0] + "\""));
+  EXPECT_TRUE(endsWith(csv[1], ",3,0,\"" + dirs[0] + "\""));  // frames, result_frame, dir
+}
+
+TEST(FrameRecorder, ResultFromRetryFrameIsPreviewed) {
+  const std::string dir = makeTempDir();
+  DecodeRecord rec = makeRecord(true, "");
+  rec.retries[1].gray = cv::Mat(144, 256, CV_8UC1, cv::Scalar(200));
+  rec.out.codes[0].frame = 2;
+  rec.out.codes[0].source = "RT-WARP-2d";
+  rec.out.result_frame = 2;
+  {
+    FrameRecorder recorder(dir, SaveFrames::All, true);
+    ASSERT_TRUE(recorder.submit(rec));
+  }
+  const auto dirs = subdirs(dir);
+  ASSERT_EQ(dirs.size(), 1u);
+  const std::string d = dir + "/" + dirs[0];
+  EXPECT_FALSE(cv::imread(d + "/retry_2.png", cv::IMREAD_UNCHANGED).empty());
+  const cv::Mat preview = cv::imread(d + "/preview.jpg", cv::IMREAD_GRAYSCALE);
+  ASSERT_FALSE(preview.empty());
+  EXPECT_NEAR(preview.at<uchar>(130, 10), 200, 3);  // retry 2 (200), not the random input frame
+  const YAML::Node meta = YAML::LoadFile(d + "/meta.yaml");
+  EXPECT_EQ(meta["result"]["result_frame"].as<int>(), 2);
+  EXPECT_EQ(meta["codes"][0]["frame"].as<int>(), 2);
+  const auto csv = lines(dir + "/attempts.csv");
+  ASSERT_EQ(csv.size(), 2u);
+  EXPECT_TRUE(endsWith(csv[1], ",3,2,\"" + dirs[0] + "\""));
+}
+
+TEST(FrameRecorder, MovesCsvWithOtherColumnsAside) {
+  const std::string dir = makeTempDir();
+  { std::ofstream(dir + "/attempts.csv") << "time,stamp,result,retries,dir\nold,row\n"; }
+  {
+    FrameRecorder recorder(dir, SaveFrames::Off, true);
+    ASSERT_TRUE(recorder.submit(makeRecord(true, "")));
+  }
+  const auto csv = lines(dir + "/attempts.csv");
+  ASSERT_EQ(csv.size(), 2u);
+  EXPECT_NE(csv[0].find(",frames,result_frame,dir"), std::string::npos);
+  std::vector<std::string> moved;
+  if (DIR* d = opendir(dir.c_str())) {
+    while (const dirent* e = readdir(d)) {
+      const std::string n = e->d_name;
+      if (n.rfind("attempts_", 0) == 0) moved.push_back(n);
+    }
+    closedir(d);
+  }
+  ASSERT_EQ(moved.size(), 1u);
+  EXPECT_EQ(lines(dir + "/" + moved[0]), (std::vector<std::string>{"time,stamp,result,retries,dir", "old,row"}));
 }
 
 TEST(FrameRecorder, FailedModeSkipsSuccessfulFrames) {

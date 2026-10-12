@@ -15,9 +15,11 @@
 #include <opencv2/calib3d.hpp>
 #include <ov13855_apriltag_vision/apriltag_detector.hpp>
 #include <ov13855_apriltag_vision/pose_solver.hpp>
+#include <opencv2/imgproc.hpp>
 #include <ros/ros.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <std_srvs/Trigger.h>
+#include <yaml-cpp/yaml.h>
 
 #include "barcode_reader_camera/BarcodeArray.h"
 #include "barcode_reader_camera/DecodeBarcodes.h"
@@ -74,6 +76,7 @@ geometry_msgs::Pose detectPose(const synthetic::Scene& scene) {
 class Publisher {
  public:
   explicit Publisher(const synthetic::Scene& scene) : scene_(scene), pose_(detectPose(scene)) {
+    cv::blur(scene.gray, blurred_gray_, cv::Size(41, 1));  // motion blur: nothing decodes
     ros::NodeHandle nh;
     image_pub_ = nh.advertise<sensor_msgs::Image>("/test/image_raw", 1);
     info_pub_ = nh.advertise<sensor_msgs::CameraInfo>("/test/camera_info", 1);
@@ -86,6 +89,7 @@ class Publisher {
   }
   std::atomic<bool> publish_pose{true};
   std::atomic<int> pose_delay_ms{0};  // > 0: pose after its image, like the real vision node
+  std::atomic<bool> blurred{false};   // publish motion-blurred frames (the pose is still published)
 
  private:
   void run() {
@@ -106,7 +110,7 @@ class Publisher {
       pose.pose = pose_;
       const int delay_ms = pose_delay_ms;
       if (publish_pose && delay_ms <= 0) pose_pub_.publish(pose);  // pose buffered before its image
-      image_pub_.publish(cv_bridge::CvImage(header, "mono8", scene_.gray).toImageMsg());
+      image_pub_.publish(cv_bridge::CvImage(header, "mono8", blurred ? blurred_gray_ : scene_.gray).toImageMsg());
       if (publish_pose && delay_ms > 0) {
         ros::Duration(delay_ms / 1000.0).sleep();
         pose_pub_.publish(pose);
@@ -115,6 +119,7 @@ class Publisher {
     }
   }
   const synthetic::Scene& scene_;
+  cv::Mat blurred_gray_;
   geometry_msgs::Pose pose_;
   ros::Publisher image_pub_, info_pub_, pose_pub_;
   std::thread thread_;
@@ -186,6 +191,30 @@ TEST(BarcodeReaderCameraNode, WaitsForPoseThatArrivesAfterImage) {
   }
 }
 
+TEST(BarcodeReaderCameraNode, RetriesNewFramesUntilDecoded) {
+  const auto scene = synthetic::makeScene();
+  ASSERT_TRUE(ros::service::waitForService("/barcode_reader_camera/decode", 20000));
+  Publisher publisher(scene);
+  publisher.blurred = true;
+  ros::Duration(1.0).sleep();
+
+  barcode_reader_camera::DecodeBarcodes srv;
+  const ros::Time called = ros::Time::now();
+  std::thread sharpen([&]() {
+    ros::Duration(0.6).sleep();
+    publisher.blurred = false;  // the drone steadied: later frames are sharp
+  });
+  const bool called_ok = ros::service::call("/barcode_reader_camera/decode", srv);
+  sharpen.join();
+  ASSERT_TRUE(called_ok);
+  EXPECT_TRUE(srv.response.success) << srv.response.error << " " << srv.response.report;
+  EXPECT_EQ(srv.response.codes.size(), 4u);
+  for (const auto& c : srv.response.codes) EXPECT_EQ(c.source.rfind("RT-", 0), 0u) << c.source;
+  // The result refers to the sharp retry frame, not to the blurred frame the call started with.
+  EXPECT_GT((srv.response.header.stamp - called).toSec(), 0.4);
+  EXPECT_LT(srv.response.elapsed_s, 2.0f + 0.5f);
+}
+
 namespace {
 
 const char* kSaveDir = "/tmp/barcode_reader_camera_node_test";  // ~save_dir in node.test
@@ -245,6 +274,57 @@ TEST(BarcodeReaderCameraNode, RecordsEachAttempt) {
   EXPECT_NE(text.find("rvec:"), std::string::npos);
   EXPECT_NE(text.find("QR-TEST-001"), std::string::npos);
   EXPECT_EQ(csvRows(), std::max<size_t>(rows_before, 1) + 1);  // header written on first use
+}
+
+TEST(BarcodeReaderCameraNode, FailedAttemptRecordsRetryFrames) {
+  const auto scene = synthetic::makeScene();
+  ASSERT_TRUE(ros::service::waitForService("/barcode_reader_camera/decode", 20000));
+  Publisher publisher(scene);
+  publisher.blurred = true;
+  ros::Duration(1.0).sleep();
+  const auto before = savedDirs();
+
+  barcode_reader_camera::DecodeBarcodes srv;
+  ASSERT_TRUE(ros::service::call("/barcode_reader_camera/decode", srv));
+  EXPECT_EQ(srv.response.error, "decode_fail");
+  // Retries until retry.timeout_ms (2000 ms default, from decode start) plus at most one frame.
+  EXPECT_GT(srv.response.elapsed_s, 1.9f);
+  EXPECT_LT(srv.response.elapsed_s, 2.0f + 0.5f);
+
+  std::string added;
+  const ros::WallTime deadline = ros::WallTime::now() + ros::WallDuration(10.0);
+  while (added.empty() && ros::WallTime::now() < deadline) {
+    for (const auto& d : savedDirs())
+      if (!before.count(d) && readable(std::string(kSaveDir) + "/" + d + "/meta.yaml")) added = d;
+    ros::WallDuration(0.05).sleep();
+  }
+  ASSERT_FALSE(added.empty());
+  EXPECT_EQ(added.substr(added.size() - 12), "_decode_fail");
+  const std::string d = std::string(kSaveDir) + "/" + added;
+  const YAML::Node meta = YAML::LoadFile(d + "/meta.yaml");
+  const YAML::Node retries = meta["retries"];
+  const int frames = meta["result"]["frames"].as<int>();
+  ASSERT_EQ((int)retries.size(), frames - 1);
+  // QR + Code128 here: the first frame's full chain takes ~0.75 s and each retry frame ~0.45 s (1D ROI
+  // strategies on a 1000x1500 px ROI), so 2 s fit 3 retry frames on the board. QR-only layouts take ~20 ms.
+  EXPECT_GE(frames, 3);
+  // Every retry frame keeps its stamp and pose; images only for the first 2 (save_retry_frames) and the last.
+  int saved = 0;
+  double last_stamp = meta["stamp"].as<double>();
+  for (size_t i = 0; i < retries.size(); ++i) {
+    EXPECT_EQ(retries[i]["index"].as<int>(), (int)i + 1);
+    EXPECT_EQ(retries[i]["tvec"].size(), 3u);
+    EXPECT_GT(retries[i]["stamp"].as<double>(), last_stamp);
+    last_stamp = retries[i]["stamp"].as<double>();
+    const std::string file = retries[i]["file"].as<std::string>();
+    const bool expect_saved = i < 2 || i + 1 == retries.size();
+    EXPECT_EQ(!file.empty(), expect_saved) << i;
+    if (!file.empty()) {
+      EXPECT_TRUE(readable(d + "/" + file)) << file;
+      ++saved;
+    }
+  }
+  EXPECT_EQ(saved, 3);
 }
 
 int main(int argc, char** argv) {
