@@ -27,7 +27,8 @@ void usage() {
       "                    [--camera-yaml K.yaml | --focal-px F] [--pose meta.yaml]\n"
       "                    [--no-tag] [--all-formats] [--free] [--annotate out.jpg] [--verbose]\n"
       "  --layout        label layout overlay (tag size, label geometry, expected codes)\n"
-      "  --pose          use pose.rvec/tvec from a node-saved meta.yaml instead of detecting the tag\n"
+      "  --pose          use the pose from a node-saved meta.yaml instead of detecting the tag\n"
+      "                  (pose.rvec/tvec, or the retries entry when <image> is one of its retry_N.png)\n"
       "  --focal-px F    pinhole focal length in pixels; default 0.6 x image diagonal\n"
       "                  (~26 mm equivalent phone lens), principal point at image center\n"
       "  --no-tag        skip AprilTag, decode with the full-frame pyramid only\n"
@@ -119,15 +120,25 @@ int main(int argc, char** argv) {
   std::vector<cv::Point2f> tag_corners;
   if (!pose_yaml.empty() && !no_tag) {
     try {
-      const YAML::Node p = YAML::LoadFile(pose_yaml)["pose"];
+      const YAML::Node meta = YAML::LoadFile(pose_yaml);
+      // Retry frames carry their own pose in the retries list, keyed by file name.
+      const std::string image_name = image_path.substr(image_path.rfind('/') + 1);
+      YAML::Node p = meta["pose"];
+      std::string which = "pose";
+      for (const auto& f : meta["retries"]) {
+        if (f["file"] && f["file"].as<std::string>() == image_name) {
+          p.reset(f);  // rebind; operator= would overwrite meta["pose"]
+          which = "retries[index=" + f["index"].as<std::string>() + "]";
+        }
+      }
       if (!p) throw std::runtime_error("no pose (the node had no tag for this frame)");
       const auto r = p["rvec"].as<std::vector<double>>(), t = p["tvec"].as<std::vector<double>>();
-      if (r.size() != 3 || t.size() != 3) throw std::runtime_error("pose.rvec/tvec need 3 values");
+      if (r.size() != 3 || t.size() != 3) throw std::runtime_error(which + " rvec/tvec need 3 values");
       pose.rvec = cv::Vec3d(r[0], r[1], r[2]);
       pose.tvec = cv::Vec3d(t[0], t[1], t[2]);
       have_pose = true;
-      std::printf("tag: pose from %s t=(%.3f, %.3f, %.3f)m\n", pose_yaml.c_str(), pose.tvec[0], pose.tvec[1],
-                  pose.tvec[2]);
+      std::printf("tag: %s from %s t=(%.3f, %.3f, %.3f)m\n", which.c_str(), pose_yaml.c_str(), pose.tvec[0],
+                  pose.tvec[1], pose.tvec[2]);
     } catch (const std::exception& e) {
       std::fprintf(stderr, "pose error: %s: %s\n", pose_yaml.c_str(), e.what());
       return 2;
