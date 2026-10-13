@@ -23,6 +23,17 @@ roslaunch mavros px4.launch                                    # 终端 1
 roslaunch barcode_rc_trigger manual_read.launch camera:=true   # 终端 2
 ```
 
+自动移到码前、再手动拨杆读码（`front_marker_control` 负责移动和对准）：配合 fusion 时，fusion 起来后、`manual_read` 之前
+再开一个终端（同样先 source、export ROS_IP），起相机 TF 和控制：
+
+```bash
+roslaunch front_marker_control ov13855_marker_tracking.launch camera:=false   # 用 fusion 起的相机和 AprilTag
+```
+
+飞机切 OFFBOARD 后自动移到 tag 正前方（相机到 tag 约 0.62 m），到位后拨 CH9。汇总标题会带上当时的控制模式
+（如 `pulse#3 mode=POS_HOLD`），`rc_read.csv` 的 `control_mode` 列同样记录，方便只统计到位后的读码。
+全自动（到位就读）见 `barcode_arrival_trigger`。
+
 忘了参数怎么填：
 
 ```bash
@@ -61,10 +72,10 @@ roslaunch barcode_rc_trigger manual_read.launch layout:=dm_top_tag_bottom save_f
 
 只用串口读码器（`mode:=serial`）时没有相机记录，`rc_read.csv` 放在 `~/test_data/barcode/<启动时间>_serial/`。
 
-终端汇总（`mode:=camera` 时只有 `camera` 段，含 serial 时后面多一段 `serial`）：
+终端汇总（`mode:=camera` 时只有 `camera` 段，含 serial 时后面多一段 `serial`；控制节点在跑时标题带 `mode=<控制模式>`）：
 
 ```
-pulse#1
+pulse#1 mode=POS_HOLD
 tag:
   source: img
   id: 0
@@ -126,7 +137,7 @@ roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=both
   节点启动或 RC 重连时开关已在高位不会触发。
 - CSV 每次启动一个文件，第一次拨杆时才创建：位置取相机 `~decode` 返回的 `session_dir`（相机读码节点这次启动的文件夹），
   没有时用 `csv_dir/<启动时间>_<mode>/`。列：
-  `time,pulse,tag_src,marker_id,x,y,z,dist,tilt_deg,camera_ok,camera_error,camera_report,camera_codes,camera_ms,serial_ok,serial_error,serial_code,serial_ms`；
+  `time,pulse,control_mode,tag_src,marker_id,x,y,z,dist,tilt_deg,camera_ok,camera_error,camera_report,camera_codes,camera_ms,serial_ok,serial_error,serial_code,serial_ms`；
   没调用的那一路留空，服务不在线时 `*_ok=0`、`*_error=unavailable`。
 
 ### 参数文件
@@ -144,6 +155,7 @@ roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=both
 | `camera_service` | `/barcode_reader_camera/decode` | 相机读码服务 |
 | `service_wait_s` | 0.5 | 等读码服务上线的最长时间 |
 | `transform_topic` | `/ov13855_apriltag_vision/debug/homogeneous_transform` | tag 位置来源，留空不记录 |
+| `control_mode_topic` | `/front_marker_control/control_mode` | 控制模式来源（latch），记进标题和 `control_mode` 列；控制节点没在跑时为空；留空不订阅 |
 | `tag_timeout_s` | 0.5 | 拨杆时刻最新 tag 的最大年龄 |
 | `csv_dir` | `~/test_data/barcode` | 相机没给启动文件夹（只跑 serial）时 `rc_read.csv` 的根目录；留空不写 CSV |
 | `serial_service`（`serial.yaml`） | `/barcode_reader_serial/read` | 串口读码服务 |

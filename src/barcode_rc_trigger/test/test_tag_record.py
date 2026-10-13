@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 
-from barcode_rc_trigger.record import HEADER, CsvRecorder, csv_path, csv_row
+from barcode_rc_trigger.record import ARRIVAL_HEADER, HEADER, CsvRecorder, csv_path, csv_row
 from barcode_rc_trigger.runner import StepResult
 from barcode_rc_trigger.tag_pose import (TagHistory, pick_tag, sample_from_matrix,
                                          tag_fields)
@@ -97,9 +97,24 @@ class RecordTest(unittest.TestCase):
         self.assertEqual(len(lines), 3)
         self.assertEqual(lines[0], ','.join(HEADER))
 
+    def test_control_mode_column(self):
+        row = self.row(1.0, 3, None, '', [], {'control_mode': 'POS_HOLD'})
+        self.assertEqual((row['pulse'], row['control_mode']), (3, 'POS_HOLD'))
+        self.assertEqual(self.row(1.0, 4, None, '', [])['control_mode'], '')  # control not running
+
+    def test_arrival_row_shares_result_columns(self):
+        tag = sample_from_matrix(10.0, 1.0, 0, FACING)
+        results = [StepResult('camera', CameraRes(True, False, '', 0.2, 'QR=1/1', [Code('QRCode', 'A1')]), '')]
+        row = dict(zip(ARRIVAL_HEADER, csv_row(2.0, 5, tag, 'img', results, {'hold_lost': 1}, ARRIVAL_HEADER)))
+        self.assertEqual((row['arrival'], row['hold_lost'], row['z'], row['camera_codes']),
+                         (5, 1, '0.5000', 'QRCode:A1'))
+        self.assertEqual(ARRIVAL_HEADER[3:], HEADER[3:])  # same analysis scripts for both files
+
     def test_csv_goes_into_camera_session(self):
         session = '/data/barcode/20261013_150000_qr_top_tag_bottom'
         self.assertEqual(csv_path(session, '/data/barcode', 0.0, 'both'), session + '/rc_read.csv')
+        self.assertEqual(csv_path(session, '/data/barcode', 0.0, 'camera', 'arrival_read.csv'),
+                         session + '/arrival_read.csv')
 
     def test_csv_without_camera_session_gets_own_folder(self):
         start = time.mktime((2026, 10, 13, 15, 0, 5, 0, 0, -1))  # local time, like the folder name

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """ROS integration with a fake control_mode stream and fake reader services; run with rostest node.test."""
+import csv
+import os
+import tempfile
 import threading
 import time
 import unittest
@@ -17,6 +20,8 @@ from barcode_arrival_trigger.msg import ArrivalReadResult
 
 OFFBOARD = 'OFFBOARD'
 IMAGE_STAMP = rospy.Time(123, 0)  # 假相机服务回传的「所解图像」时间戳
+# 假相机服务回传的会话目录：arrival_read.csv 应写进这里（每次运行新建，互不干扰）。
+SESSION_DIR = os.path.join(tempfile.mkdtemp(prefix='barcode_arrival_test_'), '20261013_150000_qr')
 
 
 class Integration(unittest.TestCase):
@@ -68,7 +73,8 @@ class Integration(unittest.TestCase):
         return DecodeBarcodesResponse(success=True, partial=False, error='', elapsed_s=0.01,
                                       used_tag_roi=True, report='QR=1/1',
                                       codes=[Barcode(format='QRCode', code='ABC')],
-                                      header=Header(stamp=IMAGE_STAMP, frame_id='ov13855'))
+                                      header=Header(stamp=IMAGE_STAMP, frame_id='ov13855'),
+                                      session_dir=SESSION_DIR)
 
     def on_read(self, _request):
         with self.lock:
@@ -147,6 +153,15 @@ class Integration(unittest.TestCase):
         self.assertEqual(first.serial.code, 'NEXT9017324')
         self.assertEqual(first.serial.request_seq, 7)
         self.assertEqual(self.calls, ['camera', 'serial'])
+        # 每次到位一行，写进相机返回的会话目录。
+        path = os.path.join(SESSION_DIR, 'arrival_read.csv')
+        self.assertTrue(self.wait_for(  # header + the first row (written after ~result)
+            lambda: os.path.exists(path) and len(open(path).read().splitlines()) >= 2, 2.0))
+        with open(path, newline='') as handle:
+            rows = list(csv.DictReader(handle))
+        self.assertEqual((rows[0]['arrival'], rows[0]['hold_lost'], rows[0]['camera_ok'],
+                          rows[0]['camera_codes'], rows[0]['serial_ok']),
+                         ('1', '0', '1', 'QRCode:ABC', '1'))
 
         # 停在 POS_HOLD 期间重复发布不重读。
         self.switch('POS_HOLD')

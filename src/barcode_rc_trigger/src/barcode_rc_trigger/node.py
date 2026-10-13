@@ -1,6 +1,7 @@
 """ROS adapter: RC switch pulse on /mavros/rc/in -> one camera decode and/or serial read.
 
-每次拨杆同时记下 tag 位置（相机光学系），写进汇总日志和 CSV，用来看在什么位置能读成功。
+每次拨杆同时记下 tag 位置（相机光学系）和 front_marker_control 当时的控制模式，写进汇总日志和 CSV，
+用来看在什么位置、是否已到位（POS_HOLD）时能读成功。
 """
 import os
 import threading
@@ -9,7 +10,7 @@ import time
 import rospy
 from mavros_msgs.msg import RCIn
 from ov13855_apriltag_vision.msg import HomogeneousTransform
-from std_msgs.msg import UInt32
+from std_msgs.msg import String, UInt32
 
 from .policy import RcPulseTrigger
 from .readers import ReaderCalls, log_summary
@@ -42,6 +43,8 @@ class BarcodeRcTriggerNode:
         transform_topic = str(rospy.get_param(
             '~transform_topic', '/ov13855_apriltag_vision/debug/homogeneous_transform'))
         self.tag_timeout_s = float(rospy.get_param('~tag_timeout_s', 0.5))
+        control_mode_topic = str(rospy.get_param(
+            '~control_mode_topic', '/front_marker_control/control_mode'))
         self.csv_dir = os.path.expanduser(str(rospy.get_param('~csv_dir', '~/test_data/barcode')))
 
         self.lock = threading.Lock()
@@ -52,6 +55,7 @@ class BarcodeRcTriggerNode:
         self.started = time.monotonic()
         self.start_time = time.time()
         self.tags = TagHistory()
+        self.control_mode = ''  # latest front_marker_control mode; '' while it is not running
         # Opened with the first pulse, in the camera node's session directory (see record.csv_path),
         # so a run without pulses leaves no file behind.
         self.recorder = None
@@ -62,6 +66,9 @@ class BarcodeRcTriggerNode:
         if transform_topic:
             self.tag_sub = rospy.Subscriber(transform_topic, HomogeneousTransform,
                                             self.on_transform, queue_size=10)
+        if control_mode_topic:  # latched: the current mode arrives on subscribe
+            self.mode_sub = rospy.Subscriber(control_mode_topic, String, self.on_control_mode,
+                                             queue_size=10)
         self.timer = rospy.Timer(rospy.Duration(0.1), self.on_timer)
         # Only the services this mode calls, so camera mode prints nothing about the serial reader.
         services = {'camera': self.camera_service, 'serial': self.serial_service}
@@ -82,6 +89,10 @@ class BarcodeRcTriggerNode:
                                     message.marker_id, message.matrix)
         with self.lock:
             self.tags.add(sample)
+
+    def on_control_mode(self, message):
+        with self.lock:
+            self.control_mode = str(message.data).strip()
 
     def on_rc(self, message):
         now = time.monotonic()
@@ -123,13 +134,14 @@ class BarcodeRcTriggerNode:
             rospy.logwarn('pulse#%d ignored: previous read still running', seq)
             return
         self.busy = True
-        rospy.loginfo('pulse#%d CH%d=%d -> %s', seq, self.rc_channel, pwm, '+'.join(self.steps))
+        title = 'pulse#%d' % seq + (' mode=%s' % self.control_mode if self.control_mode else '')
+        rospy.loginfo('%s CH%d=%d -> %s', title, self.rc_channel, pwm, '+'.join(self.steps))
         self.pulse_pub.publish(UInt32(seq))
         pulse_tag = self.tags.latest(time.monotonic(), self.tag_timeout_s)
-        threading.Thread(target=self._run, args=(seq, pulse_tag),
+        threading.Thread(target=self._run, args=(seq, title, self.control_mode, pulse_tag),
                          name='barcode-rc-read-%d' % seq, daemon=True).start()
 
-    def _run(self, seq, pulse_tag):
+    def _run(self, seq, title, control_mode, pulse_tag):
         try:
             results = run_sequence(self.steps, self.readers.calls)
             image_stamp = 0.0
@@ -140,14 +152,15 @@ class BarcodeRcTriggerNode:
                     session_dir = result.response.session_dir
             with self.lock:
                 tag, source = pick_tag(self.tags, image_stamp, pulse_tag)
-            log_summary('pulse#%d' % seq, results, [('tag', tag_fields(tag, source))])
+            log_summary(title, results, [('tag', tag_fields(tag, source))])
             # Pulses run one at a time (busy), so only this thread opens the recorder.
             if self.recorder is None and self.csv_dir:
                 self.recorder = CsvRecorder(
                     csv_path(session_dir, self.csv_dir, self.start_time, self.mode))
                 rospy.loginfo('csv: %s', self.recorder.path)
             if self.recorder is not None:
-                self.recorder.write(csv_row(time.time(), seq, tag, source, results))
+                self.recorder.write(csv_row(time.time(), seq, tag, source, results,
+                                            {'control_mode': control_mode}))
         except Exception as error:
             if not rospy.is_shutdown():
                 rospy.logerr('pulse#%d 记录失败: %s', seq, error)

@@ -1,11 +1,14 @@
 <launch>
   <!-- 只启动到位触发节点；front_marker_control、读码节点和 MAVROS 另外启动。日常用 auto_read.launch。 -->
-  <arg name="mode" default=""
-       doc="读码器：留空（默认，用 config_file 里的 mode，现为 both）/ camera（只相机）/ serial（只串口读码器）/ both（先相机后读码器）" />
+  <arg name="mode" default="camera"
+       doc="读码器：camera（只相机，默认）/ serial（只串口读码器）/ both（先相机后读码器，两个都读）" />
   <arg name="config_file" default="$(find barcode_arrival_trigger)/config/barcode_arrival_trigger.yaml"
-       doc="到位触发节点参数文件（话题、门控、mode 等）" />
+       doc="到位触发节点参数文件（话题、飞行门控、CSV 目录等）" />
+  <arg name="serial_config_file" default="$(find barcode_arrival_trigger)/config/serial.yaml"
+       doc="串口读码器参数（服务名、超时），只在 mode 为 serial / both 时加载" />
   <node pkg="barcode_arrival_trigger" type="barcode_arrival_trigger_node" name="barcode_arrival_trigger" output="screen">
     <rosparam command="load" file="$(arg config_file)" />
-    <param if="$(eval arg('mode') != '')" name="mode" value="$(arg mode)" />
+    <rosparam unless="$(eval arg('mode') == 'camera')" command="load" file="$(arg serial_config_file)" />
+    <param name="mode" value="$(arg mode)" />
   </node>
 </launch>

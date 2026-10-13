@@ -1,24 +1,26 @@
 <launch>
-  <!-- 到位自动读码：相机读码节点 + 串口读码器 + 到位触发节点（不含相机/视觉/控制）。
-       前提：另开终端跑 ov13855_marker_tracking.launch（相机 + AprilTag + 控制），layout 两边必须相同。
-       不要同时运行 DroneVision（共用 /dev/ttyS1）。可选值见下面的 doc。 -->
-  <arg name="mode" default=""
-       doc="读码器：留空（默认，用 config_file 里的 mode，现为 both）/ camera（只相机）/ serial（只串口读码器）/ both（先相机后读码器）" />
+  <!-- 到位自动读码：相机读码节点 + 到位触发节点（mode 含 serial 时再加串口读码器）；不含相机、AprilTag、控制。
+       前提：相机 + AprilTag + front_marker_control 已在跑（fusion.sh + ov13855_marker_tracking.launch camera:=false，
+       或 fusion.sh no-camera 选项 + ov13855_marker_tracking.launch），layout 两边必须相同。
+       每次到位的结果在 save_dir/时间_版式/ 的 arrival_read.csv。mode 含 serial 时不要同时运行 DroneVision（共用 /dev/ttyS1）。
+       可选值见下面的 doc。 -->
+  <arg name="mode" default="camera"
+       doc="读码器：camera（只相机，默认）/ serial（只串口读码器）/ both（先相机后读码器，两个都读）" />
   <arg name="layout" default="qr_top_tag_bottom"
-       doc="标签版式，必须与 ov13855_marker_tracking.launch 相同：qr_top_tag_bottom（默认）/ dm_top_tag_bottom / drone_vision_default" />
+       doc="标签版式，必须与 AprilTag 那边相同：qr_top_tag_bottom（默认）/ dm_top_tag_bottom / drone_vision_default" />
   <arg name="save_frames" default="off"
        doc="相机读码存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次读码一个目录，放在本次启动的文件夹里" />
   <arg name="save_dir" default="~/test_data/barcode"
-       doc="记录根目录：每次启动建一个子文件夹 时间_版式/，attempts.csv、存的图（和 manual_read 的 rc_read.csv）都在里面" />
+       doc="记录根目录：每次启动建一个子文件夹 时间_版式/，attempts.csv、arrival_read.csv 和存的图都在里面" />
   <arg name="config_file" default="$(find barcode_arrival_trigger)/config/barcode_arrival_trigger.yaml"
-       doc="到位触发节点参数文件（话题、门控、mode 等）" />
+       doc="到位触发节点参数文件（话题、飞行门控、CSV 目录等）" />
 
   <include file="$(find barcode_reader_camera)/launch/barcode_reader_camera.launch">
     <arg name="layout" value="$(arg layout)" />
     <arg name="save_frames" value="$(arg save_frames)" />
     <arg name="save_dir" value="$(arg save_dir)" />
   </include>
-  <include file="$(find barcode_reader_serial)/launch/barcode_reader.launch" />
+  <include unless="$(eval arg('mode') == 'camera')" file="$(find barcode_reader_serial)/launch/barcode_reader.launch" />
   <include file="$(find barcode_arrival_trigger)/launch/barcode_arrival_trigger.launch">
     <arg name="config_file" value="$(arg config_file)" />
     <arg name="mode" value="$(arg mode)" />

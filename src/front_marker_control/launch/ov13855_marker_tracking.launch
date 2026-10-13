@@ -1,18 +1,30 @@
 <launch>
- <!-- 与旧 front_marker_tracking.launch 二选一，不能同时启动。 -->
- <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml" />
- <arg name="vision_config" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml" />
- <arg name="camera_tf_config" default="$(find front_marker_control)/config/ov13855_camera_tf.yaml" />
- <arg name="control_config" default="$(find front_marker_control)/config/front_marker_control.yaml" />
- <arg name="control_scene_config" default="" />
+ <!-- OV13855 + AprilTag 视觉控制：相机、AprilTag、相机静态 TF、front_marker_control。与旧 front_marker_tracking.launch 二选一。
+      和 mid360s_ws/scripts/fusion.sh 一起用时（fusion 默认已起相机和 AprilTag），加 camera:=false 只起 TF 和控制，
+      否则相机/AprilTag 节点重名，会和 fusion 那一套（带 respawn）互相踢掉。
+      可选值见下面的 doc。 -->
+ <arg name="camera" default="true"
+      doc="相机和 AprilTag 谁来起：true（本 launch 起，默认）/ false（fusion 已起，本 launch 只起相机 TF 和控制）" />
  <!-- 标签版式（决定 tag 边长）：barcode_reader_camera/config/layouts/<layout>.yaml；
-      与同时运行的 auto_read.launch 用同一个 layout -->
- <arg name="layout" default="qr_top_tag_bottom" />
- <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
- <include file="$(find ov13855_cam)/launch/ov13855.launch">
+      与同时运行的 auto_read.launch / manual_read.launch 用同一个 layout -->
+ <arg name="layout" default="qr_top_tag_bottom"
+      doc="标签版式（camera:=true 时决定 AprilTag 的 tag 边长）：qr_top_tag_bottom（默认）/ dm_top_tag_bottom / drone_vision_default。camera:=false 时 AprilTag 用 fusion 的 43.7 mm，只能配前两个" />
+ <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml"
+      doc="相机参数文件（只在 camera:=true 时用）" />
+ <arg name="vision_config" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml"
+      doc="AprilTag 视觉参数文件（只在 camera:=true 时用）" />
+ <arg name="camera_tf_config" default="$(find front_marker_control)/config/ov13855_camera_tf.yaml"
+      doc="相机相对 base_link 的静态外参" />
+ <arg name="control_config" default="$(find front_marker_control)/config/front_marker_control.yaml"
+      doc="控制参数文件（悬停目标 target_xyz_body、对准容差、速度限幅等）" />
+ <arg name="control_scene_config" default=""
+      doc="场景差异参数文件，叠加在 control_config 之后；留空不加载" />
+ <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml"
+      doc="版式文件完整路径；一般用 layout 选，不用改它" />
+ <include if="$(arg camera)" file="$(find ov13855_cam)/launch/ov13855.launch">
   <arg name="config_file" value="$(arg camera_config)" />
  </include>
- <include file="$(find ov13855_apriltag_vision)/launch/ov13855_apriltag_vision.launch">
+ <include if="$(arg camera)" file="$(find ov13855_apriltag_vision)/launch/ov13855_apriltag_vision.launch">
   <arg name="config_file" value="$(arg vision_config)" />
   <arg name="layout_file" value="$(arg layout_file)" />
  </include>

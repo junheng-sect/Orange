@@ -14,9 +14,12 @@ transform_topic: /ov13855_apriltag_vision/debug/homogeneous_transform
 marker_timeout_s: 0.5
 
 # ---- 读码 ----
-# camera: 只相机解码；serial: 只串口读码器；both: 先相机后读码器，两个都跑
-mode: both
+# mode 用 launch 参数 mode:= 指定（camera 默认 / serial / both）；
+# 串口读码器参数在 serial.yaml，只在 mode 为 serial / both 时加载。
 camera_service: /barcode_reader_camera/decode
-serial_service: /barcode_reader_serial/read
-serial_timeout_s: 0.0  # <=0 用读码器节点自己的 read_timeout_ms
 service_wait_s: 0.5    # 服务不在线时最多等多久，超时跳过该读码器
+
+# ---- 记录 ----
+# 每次到位读码往 arrival_read.csv 追加一行（tag 位置 + 结果），放在相机读码节点这次启动的文件夹里
+# （和图片、attempts.csv 一起）；只跑 serial 时在 csv_dir 下按启动时间另建文件夹。第一次读码才建文件。留空不写
+csv_dir: ~/test_data/barcode
