@@ -1,19 +1,26 @@
 <launch>
-  <arg name="config_file" default="$(find barcode_reader_camera)/config/barcode_reader_camera.yaml" />
-  <!-- 标签版式：config/layouts/<layout>.yaml（tag 边长、标签几何、expected_codes），视觉和读码共用 -->
-  <arg name="layout" default="qr_top_tag_bottom" />
-  <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
-  <arg name="require_tag" default="true" />
-  <arg name="log_strategies" default="false" />
-  <!-- 读码记录：save_frames=off/failed/all 按次保存原图、重试帧、位姿、内参和策略日志到 save_dir/<时间>_<结果>/；
-       log_attempts 每次 ~decode 在 save_dir/attempts.csv 记一行（不存图），默认开 -->
-  <arg name="save_frames" default="off" />
-  <arg name="save_dir" default="~/barcode_frames" />
-  <arg name="log_attempts" default="true" />
-  <!-- 每次最多存前 N 个重试帧的原图，另加读出码的那一帧和最后一帧（-1 = 全存）；每帧时间戳和位姿都记 -->
-  <arg name="save_retry_frames" default="2" />
-  <!-- output：screen 打到终端；log 时 INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端（manual_read 用来让终端只留汇总） -->
-  <arg name="output" default="screen" />
+  <!-- 只启动相机读码节点，不开相机。相机和 AprilTag 已经在跑（fusion / ov13855_marker_tracking.launch）时用它；
+       地面单独测试用 bringup.launch。可选值见下面的 doc。 -->
+  <arg name="layout" default="qr_top_tag_bottom"
+       doc="标签版式（config/layouts/ 下的文件名）：qr_top_tag_bottom（QR 标签，默认）/ dm_top_tag_bottom（DataMatrix 标签）/ drone_vision_default（原版，tag 12 mm）" />
+  <arg name="save_frames" default="off"
+       doc="存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次一个目录 save_dir/时间_结果/，含原图、重试帧、位姿、策略日志" />
+  <arg name="save_dir" default="~/barcode_frames"
+       doc="存图目录，attempts.csv 也在这里" />
+  <arg name="save_retry_frames" default="2"
+       doc="每次最多存几张重试帧原图（另加读出码的那帧和最后一帧）：整数，默认 2，-1 = 全存" />
+  <arg name="log_attempts" default="true"
+       doc="true（默认，每次读码在 save_dir/attempts.csv 记一行，不存图）/ false（不记）" />
+  <arg name="require_tag" default="true"
+       doc="true（默认，看不到 tag 不解码，返回 no_tag）/ false（看不到 tag 时走全图）" />
+  <arg name="log_strategies" default="false"
+       doc="false（默认）/ true（每个解码策略的日志打成 INFO，调试用）" />
+  <arg name="output" default="screen"
+       doc="screen（默认，日志打到终端）/ log（INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端）" />
+  <arg name="config_file" default="$(find barcode_reader_camera)/config/barcode_reader_camera.yaml"
+       doc="读码参数文件（ROI、预处理、换帧重试时长 retry.timeout_ms 等）" />
+  <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml"
+       doc="版式文件完整路径；一般用 layout 选，不用改它" />
   <node pkg="barcode_reader_camera" type="barcode_reader_camera_node" name="barcode_reader_camera" output="$(arg output)">
     <param name="config_file" value="$(arg config_file)" />
     <param name="layout_file" value="$(arg layout_file)" />

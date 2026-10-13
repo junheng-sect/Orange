@@ -1,7 +1,9 @@
 <launch>
-  <arg name="config_file" default="$(find barcode_reader_serial)/config/barcode_reader.yaml" />
-  <!-- output：screen 打到终端；log 时 INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端（manual_read 用来让终端只留汇总） -->
-  <arg name="output" default="screen" />
+  <!-- 串口读码器节点（/dev/ttyS1，与 DroneVision 不能同时运行）。串口、指令、超时在 config/barcode_reader.yaml 里改。 -->
+  <arg name="config_file" default="$(find barcode_reader_serial)/config/barcode_reader.yaml"
+       doc="读码器参数文件（串口、触发/释放指令、超时 read_timeout_ms 等）" />
+  <arg name="output" default="screen"
+       doc="screen（默认，日志打到终端）/ log（INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端）" />
   <node pkg="barcode_reader_serial" type="barcode_reader_node" name="barcode_reader_serial" output="$(arg output)">
     <rosparam command="load" file="$(arg config_file)" />
   </node>

@@ -1,20 +1,27 @@
 <launch>
   <!-- 读码全链路：相机 + AprilTag 位姿 + 读码节点，一条命令启动；之后用 trigger_decode 触发读码。
-       与 front_marker_control/ov13855_marker_tracking.launch 二选一（都会打开相机）；
-       已有相机和 AprilTag 在跑时，只启动 barcode_reader_camera.launch。 -->
-  <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml" />
-  <arg name="vision_config" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml" />
-  <arg name="config_file" default="$(find barcode_reader_camera)/config/barcode_reader_camera.yaml" />
-  <!-- 标签版式：config/layouts/<layout>.yaml（tag 边长、标签几何、expected_codes），视觉和读码共用 -->
-  <arg name="layout" default="qr_top_tag_bottom" />
-  <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml" />
-  <arg name="require_tag" default="true" />
-  <arg name="log_strategies" default="false" />
-  <!-- 读码记录（off/failed/all），见 barcode_reader_camera.launch -->
-  <arg name="save_frames" default="off" />
-  <arg name="save_dir" default="~/barcode_frames" />
-  <!-- 三个节点的 output（screen/log），透传给各 include -->
-  <arg name="output" default="screen" />
+       会打开相机，与 ov13855_marker_tracking.launch、带相机的 fusion 二选一；相机和 AprilTag 已在跑时只启动 barcode_reader_camera.launch。
+       可选值见下面的 doc。 -->
+  <arg name="layout" default="qr_top_tag_bottom"
+       doc="标签版式（视觉和读码共用）：qr_top_tag_bottom（QR 标签，默认）/ dm_top_tag_bottom（DataMatrix 标签）/ drone_vision_default（原版，tag 12 mm）" />
+  <arg name="save_frames" default="off"
+       doc="存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次一个目录 save_dir/时间_结果/" />
+  <arg name="save_dir" default="~/barcode_frames"
+       doc="存图目录，attempts.csv 也在这里" />
+  <arg name="require_tag" default="true"
+       doc="true（默认，看不到 tag 不解码，返回 no_tag）/ false（看不到 tag 时走全图）" />
+  <arg name="log_strategies" default="false"
+       doc="false（默认）/ true（每个解码策略的日志打成 INFO，调试用）" />
+  <arg name="output" default="screen"
+       doc="三个节点的日志：screen（默认，打到终端）/ log（INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端）" />
+  <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml"
+       doc="相机参数文件（分辨率、帧率、曝光等）" />
+  <arg name="vision_config" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml"
+       doc="AprilTag 视觉参数文件" />
+  <arg name="config_file" default="$(find barcode_reader_camera)/config/barcode_reader_camera.yaml"
+       doc="读码参数文件（ROI、预处理、换帧重试时长 retry.timeout_ms 等）" />
+  <arg name="layout_file" default="$(find barcode_reader_camera)/config/layouts/$(arg layout).yaml"
+       doc="版式文件完整路径；一般用 layout 选，不用改它" />
   <include file="$(find ov13855_cam)/launch/ov13855.launch">
     <arg name="config_file" value="$(arg camera_config)" />
     <arg name="output" value="$(arg output)" />
