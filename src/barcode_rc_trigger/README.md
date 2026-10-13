@@ -15,7 +15,7 @@
 source /opt/ros/noetic/setup.bash
 source /home/orangepi/orange/devel/setup.bash
 # 前提：MAVROS 在跑（/mavros/rc/in 有数据），读码节点已启动
-roslaunch barcode_rc_trigger barcode_rc_trigger.launch            # 用 yaml 里的 mode（默认 both）
+roslaunch barcode_rc_trigger barcode_rc_trigger.launch            # 默认 mode:=camera，只调相机
 roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=serial
 ```
 
@@ -46,8 +46,9 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=both         # 相机 + �
   ```
 
   此时不能再跑 `ov13855_marker_tracking.launch`、`bringup.launch` 或带相机的 fusion。
-- `mode`：本 launch 默认 `camera`（串口读码器效果差，日常只用相机），此时不启动串口读码器节点；
-  `mode:=both` / `mode:=serial` 才启动它。单独起 `barcode_rc_trigger.launch` 时仍用 yaml 里的 `mode`（`both`）。
+- `mode`：默认 `camera`（串口读码器效果差，日常只用相机），此时不启动串口读码器节点，也不加载 `config/serial.yaml`，
+  终端里（启动行、roslaunch 参数列表、每次拨杆汇总）没有串口相关内容；`mode:=both` / `mode:=serial` 才启动它。
+  单独起 `barcode_rc_trigger.launch` 时默认同样是 `camera`。
 - `save_frames:=failed|all`：相机读码节点按次保存原图、位姿和策略日志到 `save_dir`（默认 `~/barcode_frames`），
   每次读码另在 `attempts.csv` 记一行；见 `barcode_reader_camera` README「读码记录」。
 - `quiet:=true`（默认）：本 launch 起的相机、AprilTag、读码节点用 `output=log`，INFO 只进 `~/.ros/log`，
@@ -112,6 +113,8 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=both         # 相机 + �
 ## 参数
 
 `config/barcode_rc_trigger.yaml`，修改后重启节点生效；也可用 `config_file:=/absolute/path.yaml` 覆盖。
+`mode` 是 launch 参数（`mode:=`）；串口读码器的两项在 `config/serial.yaml`（`serial_config_file:=` 可覆盖），
+只在 `mode` 为 `serial` / `both` 时加载。
 
 | 参数 | 默认值 | 含义 |
 | --- | --- | --- |
@@ -120,9 +123,10 @@ roslaunch barcode_rc_trigger manual_read.launch mode:=both         # 相机 + �
 | `arm_below` / `trigger_above` | 1600 / 1700 | 布防 / 触发阈值（us） |
 | `hold_s` | 0.05 | 高位持续多久才算一次拨杆 |
 | `rc_timeout_s` | 1.0 | 超过这么久没有有效 CH9 视为 RC 丢失 |
-| `mode` | `both` | `camera` / `serial` / `both` |
-| `camera_service` / `serial_service` | `/barcode_reader_camera/decode` / `/barcode_reader_serial/read` | 读码服务名 |
-| `serial_timeout_s` | 0.0 | 传给 `~read` 的超时，<=0 用读码器节点的 `read_timeout_ms` |
+| `mode` | `camera` | `camera` / `serial` / `both`（launch 参数） |
+| `camera_service` | `/barcode_reader_camera/decode` | 相机读码服务名 |
+| `serial_service` | `/barcode_reader_serial/read` | 读码器服务名（`serial.yaml`） |
+| `serial_timeout_s` | 0.0 | 传给 `~read` 的超时，<=0 用读码器节点的 `read_timeout_ms`（`serial.yaml`） |
 | `service_wait_s` | 0.5 | 等服务上线的最长时间 |
 | `transform_topic` | `/ov13855_apriltag_vision/debug/homogeneous_transform` | tag 位姿来源，留空不记录位置 |
 | `tag_timeout_s` | 0.5 | 拨杆时刻最新 tag 的最大年龄 |

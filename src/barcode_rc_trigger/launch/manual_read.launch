@@ -9,7 +9,7 @@
        quiet:=true（默认）时本 launch 起的其他节点 output=log：INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端，
        终端里基本只剩触发节点每次拨杆的汇总；quiet:=false 恢复全部打印。 -->
   <arg name="config_file" default="$(find barcode_rc_trigger)/config/barcode_rc_trigger.yaml" />
-  <!-- 默认只用相机读码；mode:=both / serial 时才启动串口读码器（mode 留空则用触发节点 yaml 里的 mode） -->
+  <!-- 默认只用相机读码，终端不出现串口相关内容；mode:=both / serial 时才启动串口读码器并加载串口参数 -->
   <arg name="mode" default="camera" />
   <arg name="layout" default="qr_top_tag_bottom" />
   <arg name="camera" default="false" />

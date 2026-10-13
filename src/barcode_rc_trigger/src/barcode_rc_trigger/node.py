@@ -31,7 +31,7 @@ class BarcodeRcTriggerNode:
                                      int(rospy.get_param('~trigger_above', 1700)),
                                      float(rospy.get_param('~hold_s', 0.05)))
         self.rc_timeout_s = float(rospy.get_param('~rc_timeout_s', 1.0))
-        self.steps = parse_mode(rospy.get_param('~mode', 'both'))
+        self.steps = parse_mode(rospy.get_param('~mode', 'camera'))
         self.camera_service = rospy.get_param('~camera_service', '/barcode_reader_camera/decode')
         self.serial_service = rospy.get_param('~serial_service', '/barcode_reader_serial/read')
         self.readers = ReaderCalls(self.camera_service, self.serial_service,
@@ -62,10 +62,12 @@ class BarcodeRcTriggerNode:
             self.tag_sub = rospy.Subscriber(transform_topic, HomogeneousTransform,
                                             self.on_transform, queue_size=10)
         self.timer = rospy.Timer(rospy.Duration(0.1), self.on_timer)
-        rospy.loginfo('barcode_rc_trigger: %s CH%d arm<%d fire>%d hold=%.2fs mode=%s '
-                      'camera=%s serial=%s', rc_topic, self.rc_channel, self.policy.arm_below,
-                      self.policy.trigger_above, self.policy.hold_s, '+'.join(self.steps),
-                      self.camera_service, self.serial_service)
+        # Only the services this mode calls, so camera mode prints nothing about the serial reader.
+        services = {'camera': self.camera_service, 'serial': self.serial_service}
+        rospy.loginfo('barcode_rc_trigger: %s CH%d arm<%d fire>%d hold=%.2fs mode=%s %s', rc_topic,
+                      self.rc_channel, self.policy.arm_below, self.policy.trigger_above,
+                      self.policy.hold_s, '+'.join(self.steps),
+                      ' '.join('%s=%s' % (name, services[name]) for name in self.steps))
         rospy.loginfo('tag: %s (%.1fs) | csv: %s', transform_topic or 'off', self.tag_timeout_s,
                       self.recorder.path if self.recorder else 'off')
 

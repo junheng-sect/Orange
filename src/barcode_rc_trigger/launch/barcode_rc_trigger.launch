@@ -1,10 +1,12 @@
 <launch>
   <!-- 只启动触发节点；读码节点（barcode_reader_camera / barcode_reader_serial）和 MAVROS 需另外启动。
-       mode 留空则用 yaml 里的 mode。 -->
+       mode：camera（默认，只调相机）/ serial / both；串口参数 serial_config_file 只在 mode 不是 camera 时加载。 -->
   <arg name="config_file" default="$(find barcode_rc_trigger)/config/barcode_rc_trigger.yaml" />
-  <arg name="mode" default="" />
+  <arg name="serial_config_file" default="$(find barcode_rc_trigger)/config/serial.yaml" />
+  <arg name="mode" default="camera" />
   <node pkg="barcode_rc_trigger" type="barcode_rc_trigger_node" name="barcode_rc_trigger" output="screen">
     <rosparam command="load" file="$(arg config_file)" />
-    <param if="$(eval arg('mode') != '')" name="mode" value="$(arg mode)" />
+    <rosparam unless="$(eval arg('mode') == 'camera')" command="load" file="$(arg serial_config_file)" />
+    <param name="mode" value="$(arg mode)" />
   </node>
 </launch>

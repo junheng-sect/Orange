@@ -1,0 +1,3 @@
+# 串口读码器参数：barcode_rc_trigger.launch 只在 mode 为 serial / both 时加载（camera 模式不加载）。
+serial_service: /barcode_reader_serial/read
+serial_timeout_s: 0.0  # <=0 用读码器节点自己的 read_timeout_ms

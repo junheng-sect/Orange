@@ -8,11 +8,9 @@ trigger_above: 1700    # us
 hold_s: 0.05           # 高位持续多久才算一次拨杆（去抖）
 rc_timeout_s: 1.0      # 超过这么久收不到有效 CH9 视为 RC 丢失并撤防
 
-# camera: 只相机解码；serial: 只串口读码器；both: 先相机后读码器，两个都跑
-mode: both
+# mode 用 launch 参数 mode:= 指定（camera 默认 / serial / both）；
+# 串口读码器参数在 serial.yaml，只在 mode 为 serial / both 时加载，camera 模式下终端不出现串口相关内容。
 camera_service: /barcode_reader_camera/decode
-serial_service: /barcode_reader_serial/read
-serial_timeout_s: 0.0  # <=0 用读码器节点自己的 read_timeout_ms
 service_wait_s: 0.5    # 服务不在线时最多等多久，超时跳过该读码器
 
 # ---- tag 位置记录（看在什么位置能读成功）----
