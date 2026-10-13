@@ -37,7 +37,7 @@ roslaunch --ros-args barcode_rc_trigger manual_read.launch     # 列出每个参
 | `layout` | `qr_top_tag_bottom` | `qr_top_tag_bottom` QR 标签 / `dm_top_tag_bottom` DataMatrix 标签 / `drone_vision_default` 原版（需 `camera:=true`） |
 | `camera` | `false` | `false` fusion 已起相机 / `true` 本 launch 起相机和 AprilTag |
 | `save_frames` | `off` | `off` 不存图 / `failed` 只存失败 / `all` 都存 |
-| `save_dir` | `~/barcode_frames` | 存图目录，`attempts.csv` 也在这里 |
+| `save_dir` | `~/test_data/barcode` | 记录根目录，每次启动建一个子文件夹 |
 | `quiet` | `true` | `true` 终端只留拨杆汇总和告警 / `false` 所有节点日志都打印 |
 | `config_file` | `config/barcode_rc_trigger.yaml` | 触发节点参数文件（CH9 阈值、CSV 目录），见「参数文件」 |
 
@@ -49,12 +49,17 @@ roslaunch barcode_rc_trigger manual_read.launch layout:=dm_top_tag_bottom save_f
 
 ## 结果在哪看
 
+每次启动 `manual_read` 的结果都在一个文件夹里：`~/test_data/barcode/<启动时间>_<版式>/`
+（例如 `20261013_150000_qr_top_tag_bottom/`），第一次拨杆时才创建。
+
 | 看什么 | 在哪 |
 | --- | --- |
 | 每次拨杆的汇总 | 终端 |
-| 每次拨杆一行（tag 位置 + 结果） | `~/barcode_rc_logs/rc_read_<启动时间>.csv` |
-| 相机每次读码一行（耗时、清晰度、试了几帧） | `~/barcode_frames/attempts.csv` |
-| 原图、重试帧、位姿、策略日志 | `~/barcode_frames/<时间>_<结果>/`，`save_frames` 不是 `off` 时才有 |
+| 每次拨杆一行（tag 位置 + 结果） | 启动文件夹里的 `rc_read.csv` |
+| 相机每次读码一行（耗时、清晰度、试了几帧） | 启动文件夹里的 `attempts.csv` |
+| 原图、重试帧、位姿、策略日志 | 启动文件夹里的 `<时间>_<结果>/`，`save_frames` 不是 `off` 时才有 |
+
+只用串口读码器（`mode:=serial`）时没有相机记录，`rc_read.csv` 放在 `~/test_data/barcode/<启动时间>_serial/`。
 
 终端汇总（`mode:=camera` 时只有 `camera` 段，含 serial 时后面多一段 `serial`）：
 
@@ -119,7 +124,8 @@ roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=both
   详细结果看两个读码节点各自的 `~result`。
 - CH9 不在 800~2200（通道缺失或未使用）或超过 `rc_timeout_s` 收不到时视为 RC 无效：撤防，必须重新见到低位。
   节点启动或 RC 重连时开关已在高位不会触发。
-- CSV 每次启动一个新文件，列：
+- CSV 每次启动一个文件，第一次拨杆时才创建：位置取相机 `~decode` 返回的 `session_dir`（相机读码节点这次启动的文件夹），
+  没有时用 `csv_dir/<启动时间>_<mode>/`。列：
   `time,pulse,tag_src,marker_id,x,y,z,dist,tilt_deg,camera_ok,camera_error,camera_report,camera_codes,camera_ms,serial_ok,serial_error,serial_code,serial_ms`；
   没调用的那一路留空，服务不在线时 `*_ok=0`、`*_error=unavailable`。
 
@@ -139,7 +145,7 @@ roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=both
 | `service_wait_s` | 0.5 | 等读码服务上线的最长时间 |
 | `transform_topic` | `/ov13855_apriltag_vision/debug/homogeneous_transform` | tag 位置来源，留空不记录 |
 | `tag_timeout_s` | 0.5 | 拨杆时刻最新 tag 的最大年龄 |
-| `csv_dir` | `~/barcode_rc_logs` | CSV 目录，留空不写 |
+| `csv_dir` | `~/test_data/barcode` | 相机没给启动文件夹（只跑 serial）时 `rc_read.csv` 的根目录；留空不写 CSV |
 | `serial_service`（`serial.yaml`） | `/barcode_reader_serial/read` | 串口读码服务 |
 | `serial_timeout_s`（`serial.yaml`） | 0.0 | 传给 `~read` 的超时，<=0 用读码器节点的 `read_timeout_ms` |
 

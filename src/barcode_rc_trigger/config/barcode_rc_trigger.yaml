@@ -17,5 +17,6 @@ service_wait_s: 0.5    # 服务不在线时最多等多久，超时跳过该读�
 # 每次拨杆把 tag 位置（相机光学系 x 右/y 下/z 前，m）写进汇总日志；留空则不记录位置
 transform_topic: /ov13855_apriltag_vision/debug/homogeneous_transform
 tag_timeout_s: 0.5     # 拨杆时刻最新一帧 tag 超过这么久视为看不到 tag
-# 每次拨杆追加一行 CSV（每次启动一个新文件 rc_read_<时间>.csv）；留空不写
-csv_dir: ~/barcode_rc_logs
+# 每次拨杆往 rc_read.csv 追加一行，放在相机读码节点这次启动的文件夹里（和图片、attempts.csv 一起）；
+# 只跑 serial 时在 csv_dir 下按启动时间另建文件夹。第一次拨杆才建文件。留空不写
+csv_dir: ~/test_data/barcode

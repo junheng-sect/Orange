@@ -13,7 +13,7 @@ from std_msgs.msg import UInt32
 
 from .policy import RcPulseTrigger
 from .readers import ReaderCalls, log_summary
-from .record import CsvRecorder, csv_row
+from .record import CsvRecorder, csv_path, csv_row
 from .runner import parse_mode, run_sequence
 from .tag_pose import TagHistory, pick_tag, sample_from_matrix, tag_fields
 
@@ -31,7 +31,8 @@ class BarcodeRcTriggerNode:
                                      int(rospy.get_param('~trigger_above', 1700)),
                                      float(rospy.get_param('~hold_s', 0.05)))
         self.rc_timeout_s = float(rospy.get_param('~rc_timeout_s', 1.0))
-        self.steps = parse_mode(rospy.get_param('~mode', 'camera'))
+        self.mode = str(rospy.get_param('~mode', 'camera'))
+        self.steps = parse_mode(self.mode)
         self.camera_service = rospy.get_param('~camera_service', '/barcode_reader_camera/decode')
         self.serial_service = rospy.get_param('~serial_service', '/barcode_reader_serial/read')
         self.readers = ReaderCalls(self.camera_service, self.serial_service,
@@ -41,7 +42,7 @@ class BarcodeRcTriggerNode:
         transform_topic = str(rospy.get_param(
             '~transform_topic', '/ov13855_apriltag_vision/debug/homogeneous_transform'))
         self.tag_timeout_s = float(rospy.get_param('~tag_timeout_s', 0.5))
-        csv_dir = os.path.expanduser(str(rospy.get_param('~csv_dir', '~/barcode_rc_logs')))
+        self.csv_dir = os.path.expanduser(str(rospy.get_param('~csv_dir', '~/test_data/barcode')))
 
         self.lock = threading.Lock()
         self.busy = False
@@ -49,12 +50,12 @@ class BarcodeRcTriggerNode:
         self.last_rc = None      # monotonic receive time of the last valid sample
         self.rc_online = False
         self.started = time.monotonic()
+        self.start_time = time.time()
         self.tags = TagHistory()
+        # Opened with the first pulse, in the camera node's session directory (see record.csv_path),
+        # so a run without pulses leaves no file behind.
         self.recorder = None
-        if csv_dir:
-            self.recorder = CsvRecorder(os.path.join(
-                csv_dir, time.strftime('rc_read_%Y%m%d_%H%M%S.csv')))
-            rospy.on_shutdown(self.recorder.close)
+        rospy.on_shutdown(self._close_recorder)
 
         self.pulse_pub = rospy.Publisher('~pulse', UInt32, queue_size=10)
         self.rc_sub = rospy.Subscriber(rc_topic, RCIn, self.on_rc, queue_size=50)
@@ -69,7 +70,12 @@ class BarcodeRcTriggerNode:
                       self.policy.hold_s, '+'.join(self.steps),
                       ' '.join('%s=%s' % (name, services[name]) for name in self.steps))
         rospy.loginfo('tag: %s (%.1fs) | csv: %s', transform_topic or 'off', self.tag_timeout_s,
-                      self.recorder.path if self.recorder else 'off')
+                      'rc_read.csv in the camera session dir (else %s/<start>_%s/)'
+                      % (self.csv_dir, self.mode) if self.csv_dir else 'off')
+
+    def _close_recorder(self):
+        if self.recorder is not None:
+            self.recorder.close()
 
     def on_transform(self, message):
         sample = sample_from_matrix(message.header.stamp.to_sec(), time.monotonic(),
@@ -127,12 +133,19 @@ class BarcodeRcTriggerNode:
         try:
             results = run_sequence(self.steps, self.readers.calls)
             image_stamp = 0.0
+            session_dir = ''
             for result in results:
                 if result.name == 'camera' and result.response is not None:
                     image_stamp = result.response.header.stamp.to_sec()
+                    session_dir = result.response.session_dir
             with self.lock:
                 tag, source = pick_tag(self.tags, image_stamp, pulse_tag)
             log_summary('pulse#%d' % seq, results, [('tag', tag_fields(tag, source))])
+            # Pulses run one at a time (busy), so only this thread opens the recorder.
+            if self.recorder is None and self.csv_dir:
+                self.recorder = CsvRecorder(
+                    csv_path(session_dir, self.csv_dir, self.start_time, self.mode))
+                rospy.loginfo('csv: %s', self.recorder.path)
             if self.recorder is not None:
                 self.recorder.write(csv_row(time.time(), seq, tag, source, results))
         except Exception as error:

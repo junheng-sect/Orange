@@ -18,7 +18,8 @@
 - `~decode`（`DecodeBarcodes.srv`）：解码最新一帧，没读齐时换新帧重试。返回 `success / partial / error / elapsed_s /
   used_tag_roi / report / codes[] / header`（`header` 为结果所在那一帧的时间戳和坐标系：重试帧读出时是那一帧，否则是第一帧；
   与 `~result` 相同；没取到图像时为空），每个码是 `Barcode.msg`：`format, code, raw_hex, symbology_id, center_x/y, corners, source`，
-  角点是该帧的像素坐标。
+  角点是该帧的像素坐标。`session_dir` 是本次运行的记录文件夹（没开记录时为空），`barcode_rc_trigger` 据此把
+  `rc_read.csv` 写进同一个文件夹。
 - `~cancel`（`std_srvs/Trigger`）：中止正在进行的解码，`~decode` 返回 `cancelled`；空闲时 `success=false`。
 - `~result`（`BarcodeArray.msg`）：每次 `~decode` 结束都发布；`~image_annotated` 有订阅者时发布标注图。
 - 日志级别：成功以及 `decode_fail`、`partial` 打 INFO（定位到了但没读出，是正常结果）；`no_image`、`no_tag` 等链路问题打 WARN。
@@ -57,13 +58,14 @@
 
 ## 读码记录字段
 
-写盘在后台线程进行，`~decode` 不等待写盘，读码耗时不变。`save_dir` 不存在会自动创建；写盘失败只告警，不影响读码。
+写盘在后台线程进行，`~decode` 不等待写盘，读码耗时不变。写盘失败只告警，不影响读码。
 
+- 会话文件夹：节点启动时定名 `<save_dir>/<YYYYmmdd_HHMMSS>_<layout_file 文件名>`（没有版式时为 `_default`，同一秒重名加 `_2`），第一次读码时才创建（`frame_recorder.cpp` 的 `sessionDir()`）。
 - `attempts.csv`（`~log_attempts`，默认开）：时间、第一帧时间戳、结果、error、report、码内容、命中策略、总耗时/解码耗时、
   是否用了标签 ROI、tag 距离 `dist_m`、`z_m`、标签倾角 `tilt_deg`（标签法线与视线夹角）、ROI 外接框宽高、ROI 内平均亮度、
   ROI 内拉普拉斯方差（越大越清晰；以上都是第一帧的）、`frames`（共试了几帧：1 + 重试帧数）、
   `result_frame`（最后一个新码出自第几帧，0 = 第一帧，没读到码时为空）、记录目录名。
-- 目录名 `<save_dir>/<YYYYmmdd_HHMMSS_mmm>_<ok|partial|错误名>/`。
+- 读码目录名 `<会话文件夹>/<YYYYmmdd_HHMMSS_mmm>_<ok|partial|错误名>/`。
 - `meta.yaml`：结果（含 `frames`、`result_frame`）、码（含所在帧 `frame`）、第一帧的 tag 位姿（rvec/tvec，T_camera_tag）、
   距离和倾角、ROI 四角、定位到但没解出的框、亮度/清晰度、每个重试帧的序号/时间戳/位姿/文件名（没存图为空）、所用版式和参数文件。
 - `decode.log` 与 `decode_image --verbose` 相同；`preview.jpg` 同 `~image_annotated`，重试帧读出时画在那一帧上。

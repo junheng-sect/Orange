@@ -7,9 +7,9 @@
   <arg name="layout" default="qr_top_tag_bottom"
        doc="标签版式，必须与 ov13855_marker_tracking.launch 相同：qr_top_tag_bottom（默认）/ dm_top_tag_bottom / drone_vision_default" />
   <arg name="save_frames" default="off"
-       doc="相机读码存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次一个目录 save_dir/时间_结果/" />
-  <arg name="save_dir" default="~/barcode_frames"
-       doc="存图目录，attempts.csv 也在这里" />
+       doc="相机读码存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次读码一个目录，放在本次启动的文件夹里" />
+  <arg name="save_dir" default="~/test_data/barcode"
+       doc="记录根目录：每次启动建一个子文件夹 时间_版式/，attempts.csv、存的图（和 manual_read 的 rc_read.csv）都在里面" />
   <arg name="config_file" default="$(find barcode_arrival_trigger)/config/barcode_arrival_trigger.yaml"
        doc="到位触发节点参数文件（话题、门控、mode 等）" />
 

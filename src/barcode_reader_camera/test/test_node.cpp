@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include <cv_bridge/cv_bridge.h>
 #include <geometry_msgs/PoseStamped.h>
@@ -219,23 +220,42 @@ namespace {
 
 const char* kSaveDir = "/tmp/barcode_reader_camera_node_test";  // ~save_dir in node.test
 
-std::set<std::string> savedDirs() {
-  std::set<std::string> out;
-  if (DIR* d = opendir(kSaveDir)) {
+std::vector<std::string> listDir(const std::string& dir) {
+  std::vector<std::string> out;
+  if (DIR* d = opendir(dir.c_str())) {
     while (const dirent* e = readdir(d)) {
       const std::string n = e->d_name;
-      if (n != "." && n != ".." && n != "attempts.csv") out.insert(n);
+      if (n != "." && n != "..") out.push_back(n);
     }
     closedir(d);
   }
   return out;
 }
 
-size_t csvRows() {
-  std::ifstream f(std::string(kSaveDir) + "/attempts.csv");
-  size_t n = 0;
-  for (std::string l; std::getline(f, l);) ++n;
-  return n;
+// Attempt directories of every session (one per node run) under kSaveDir, as full paths.
+std::set<std::string> savedDirs() {
+  std::set<std::string> out;
+  for (const auto& s : listDir(kSaveDir)) {
+    const std::string session = std::string(kSaveDir) + "/" + s;
+    for (const auto& a : listDir(session))
+      if (a != "attempts.csv") out.insert(session + "/" + a);
+  }
+  return out;
+}
+
+std::vector<std::string> csvLines(const std::string& session) {
+  std::ifstream f(session + "/attempts.csv");
+  std::vector<std::string> out;
+  for (std::string l; std::getline(f, l);) out.push_back(l);
+  return out;
+}
+
+// attempts.csv has a row for the attempt directory (its last column).
+bool csvHasRow(const std::string& session, const std::string& attempt_dir) {
+  const std::string suffix = ",\"" + attempt_dir.substr(attempt_dir.find_last_of('/') + 1) + "\"";
+  for (const auto& l : csvLines(session))
+    if (l.size() >= suffix.size() && l.compare(l.size() - suffix.size(), suffix.size(), suffix) == 0) return true;
+  return false;
 }
 
 bool readable(const std::string& path) { return std::ifstream(path).good(); }
@@ -248,24 +268,28 @@ TEST(BarcodeReaderCameraNode, RecordsEachAttempt) {
   Publisher publisher(scene);
   ros::Duration(1.0).sleep();
   const auto before = savedDirs();
-  const size_t rows_before = csvRows();
 
   barcode_reader_camera::DecodeBarcodes srv;
   ASSERT_TRUE(ros::service::call("/barcode_reader_camera/decode", srv));
   ASSERT_TRUE(srv.response.success) << srv.response.error;
+  // <save_dir>/<start time>_<layout>; node.test sets no layout_file.
+  const std::string session = srv.response.session_dir;
+  ASSERT_EQ(session.rfind(std::string(kSaveDir) + "/", 0), 0u) << session;
+  EXPECT_EQ(session.substr(session.size() - 8), "_default");
 
   // Written in the background after the response: wait for the directory and the CSV row.
   std::string added;
   const ros::WallTime deadline = ros::WallTime::now() + ros::WallDuration(5.0);
   while (ros::WallTime::now() < deadline) {
     for (const auto& d : savedDirs())
-      if (!before.count(d) && readable(std::string(kSaveDir) + "/" + d + "/meta.yaml")) added = d;
-    if (!added.empty() && csvRows() > rows_before) break;
+      if (!before.count(d) && readable(d + "/meta.yaml")) added = d;
+    if (!added.empty() && csvHasRow(session, added)) break;
     ros::WallDuration(0.05).sleep();
   }
   ASSERT_FALSE(added.empty());
+  EXPECT_EQ(added.rfind(session + "/", 0), 0u) << added;  // inside this run's session
   EXPECT_EQ(added.substr(added.size() - 3), "_ok");
-  const std::string d = std::string(kSaveDir) + "/" + added;
+  const std::string& d = added;
   EXPECT_TRUE(readable(d + "/frame.png"));
   EXPECT_TRUE(readable(d + "/camera.yaml"));
   EXPECT_TRUE(readable(d + "/preview.jpg"));
@@ -273,7 +297,8 @@ TEST(BarcodeReaderCameraNode, RecordsEachAttempt) {
   const std::string text((std::istreambuf_iterator<char>(meta)), std::istreambuf_iterator<char>());
   EXPECT_NE(text.find("rvec:"), std::string::npos);
   EXPECT_NE(text.find("QR-TEST-001"), std::string::npos);
-  EXPECT_EQ(csvRows(), std::max<size_t>(rows_before, 1) + 1);  // header written on first use
+  EXPECT_TRUE(csvHasRow(session, added));
+  EXPECT_EQ(csvLines(session).at(0).rfind("time,stamp,", 0), 0u);  // header written on first use
 }
 
 TEST(BarcodeReaderCameraNode, FailedAttemptRecordsRetryFrames) {
@@ -295,12 +320,13 @@ TEST(BarcodeReaderCameraNode, FailedAttemptRecordsRetryFrames) {
   const ros::WallTime deadline = ros::WallTime::now() + ros::WallDuration(10.0);
   while (added.empty() && ros::WallTime::now() < deadline) {
     for (const auto& d : savedDirs())
-      if (!before.count(d) && readable(std::string(kSaveDir) + "/" + d + "/meta.yaml")) added = d;
+      if (!before.count(d) && readable(d + "/meta.yaml")) added = d;
     ros::WallDuration(0.05).sleep();
   }
   ASSERT_FALSE(added.empty());
+  EXPECT_EQ(added.rfind(srv.response.session_dir + "/", 0), 0u) << added;
   EXPECT_EQ(added.substr(added.size() - 12), "_decode_fail");
-  const std::string d = std::string(kSaveDir) + "/" + added;
+  const std::string& d = added;
   const YAML::Node meta = YAML::LoadFile(d + "/meta.yaml");
   const YAML::Node retries = meta["retries"];
   const int frames = meta["result"]["frames"].as<int>();

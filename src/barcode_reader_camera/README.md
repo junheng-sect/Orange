@@ -31,7 +31,7 @@ roslaunch --ros-args barcode_reader_camera barcode_reader_camera.launch
 | --- | --- | --- |
 | `layout` | `qr_top_tag_bottom` | 见「标签版式」 |
 | `save_frames` | `off` | `off` 不存图 / `failed` 只存失败 / `all` 都存，见「读码记录」 |
-| `save_dir` | `~/barcode_frames` | 存图目录，`attempts.csv` 也在这里 |
+| `save_dir` | `~/test_data/barcode` | 记录根目录，每次启动建一个子文件夹，见「读码记录」 |
 | `require_tag` | `true` | `true` 看不到 tag 不解码（返回 `no_tag`）/ `false` 看不到 tag 时扫全图 |
 | `log_strategies` | `false` | `true` 每个解码策略的日志打成 INFO（调试用） |
 | `output` | `screen` | `screen` 日志打到终端 / `log` INFO 只进 `~/.ros/log`，WARN/ERROR 仍打到终端 |
@@ -77,12 +77,20 @@ roslaunch --ros-args barcode_reader_camera barcode_reader_camera.launch
 
 ## 读码记录
 
-| 记录 | 什么时候有 | 内容 |
-| --- | --- | --- |
-| `~/barcode_frames/attempts.csv` | 默认就有 | 每次读码一行：结果、码、耗时、tag 距离和倾角、标签区域亮度和清晰度、试了几帧；不存图 |
-| `~/barcode_frames/<时间>_<结果>/` | `save_frames:=failed` 或 `all` | 一次读码一个目录，见下 |
+每次启动读码节点建一个文件夹 `~/test_data/barcode/<启动时间>_<版式>/`（例如 `20261013_150000_qr_top_tag_bottom/`），
+这次启动的记录都在里面；启动后一次都没读码就不建。`~decode` 的返回值 `session_dir` 就是这个文件夹。
 
-每个目录里（第一帧读出约 2 MB，重试到超时约 7 MB）：
+```
+~/test_data/barcode/20261013_150000_qr_top_tag_bottom/
+  attempts.csv                       # 默认就有：每次读码一行
+  rc_read.csv                        # 用 manual_read 拨杆时才有：每次拨杆一行（tag 位置 + 结果），见 barcode_rc_trigger
+  20261013_150012_345_ok/            # save_frames:=failed 或 all 时：一次读码一个目录
+  20261013_150015_901_decode_fail/
+```
+
+- `attempts.csv`：结果、码、耗时、tag 距离和倾角、标签区域亮度和清晰度、试了几帧，最后一列是对应的读码目录名；不存图。
+
+每个读码目录里（第一帧读出约 2 MB，重试到超时约 7 MB）：
 
 - `frame.png`：第一帧原图（无损 PNG）。
 - `retry_N.png`：第 N 个重试帧，只存前 `save_retry_frames` 张、读出码的那一帧和最后一帧。
@@ -90,12 +98,11 @@ roslaunch --ros-args barcode_reader_camera barcode_reader_camera.launch
 - `meta.yaml`：结果、码、tag 位姿、标签区域四角、每个重试帧的时间戳和位姿；`camera.yaml`：相机内参；`decode.log`：每个解码策略的日志。
 
 图片格式（PNG / JPEG）写死在 `src/frame_recorder.cpp`，不能用参数改。
-节点升级后 `attempts.csv` 的列变了时，启动时把旧文件改名为 `attempts_<时间>.csv`，另起新文件。
 
 复现某一次读码：
 
 ```bash
-cd ~/barcode_frames/<目录>
+cd ~/test_data/barcode/<启动文件夹>/<读码目录>
 rosrun barcode_reader_camera decode_image frame.png --camera-yaml camera.yaml --pose meta.yaml \
   --layout <meta.yaml 里的 layout_file> --config <meta.yaml 里的 config_file> --verbose --annotate /tmp/replay.jpg
 ```

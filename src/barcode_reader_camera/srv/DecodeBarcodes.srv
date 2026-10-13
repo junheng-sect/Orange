@@ -10,3 +10,6 @@ string report
 Barcode[] codes
 # Stamp/frame of the decoded image, same as ~result; empty when no frame was used (no_image/busy).
 std_msgs/Header header
+# This node run's record directory (attempts.csv, saved frames; created with the first decode);
+# empty when recording is off. barcode_rc_trigger writes its rc_read.csv here too.
+string session_dir

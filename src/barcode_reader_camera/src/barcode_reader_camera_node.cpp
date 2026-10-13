@@ -91,25 +91,32 @@ class BarcodeReaderCameraNode {
     uint64_t seq = 0;
   };
 
+  // Every node run records into its own session directory <save_dir>/<start time>_<layout>/, created
+  // with the first decode; ~decode returns it as session_dir so barcode_rc_trigger writes there too.
   // ~save_frames off/failed/all: per-attempt directory with frame, retries, pose, intrinsics, log.
   // ~save_retry_frames: retry images kept per attempt besides the one that read the code and the
   // last one (<0 = all); every retry frame's stamp and pose is recorded either way.
-  // ~log_attempts: one row per ~decode in <save_dir>/attempts.csv, independent of ~save_frames.
+  // ~log_attempts: one row per ~decode in <session>/attempts.csv, independent of ~save_frames.
   void setupRecorder(ros::NodeHandle& pnh) {
     save_retry_frames_ = pnh.param("save_retry_frames", 2);
-    std::string dir = pnh.param<std::string>("save_dir", "~/barcode_frames");
-    if (dir.rfind("~/", 0) == 0 && std::getenv("HOME")) dir = std::string(std::getenv("HOME")) + dir.substr(1);
+    std::string root = pnh.param<std::string>("save_dir", "~/test_data/barcode");
+    if (root.rfind("~/", 0) == 0 && std::getenv("HOME")) root = std::string(std::getenv("HOME")) + root.substr(1);
     const std::string mode_name = pnh.param<std::string>("save_frames", "off");
     const bool log_attempts = pnh.param("log_attempts", true);
+    // Session label: layout file name without directory and extension.
+    std::string label = layout_file_.substr(layout_file_.find_last_of('/') + 1);
+    label = label.substr(0, label.rfind(".yaml"));
+    if (label.empty()) label = "default";
     try {
-      recorder_ = std::make_unique<FrameRecorder>(dir, parseSaveFrames(mode_name), log_attempts);
+      recorder_ = std::make_unique<FrameRecorder>(sessionDir(root, label, ros::WallTime::now().toSec()),
+                                                  parseSaveFrames(mode_name), log_attempts);
     } catch (const std::exception& e) {
       ROS_ERROR("barcode_reader_camera: recording disabled: %s", e.what());
       return;
     }
     if (recorder_->enabled())
-      ROS_INFO("barcode_reader_camera: save_frames=%s log_attempts=%d dir=%s", mode_name.c_str(),
-               (int)log_attempts, dir.c_str());
+      ROS_INFO("barcode_reader_camera: save_frames=%s log_attempts=%d session=%s (created on first decode)",
+               mode_name.c_str(), (int)log_attempts, recorder_->dir().c_str());
   }
 
   void onImage(const sensor_msgs::ImageConstPtr& msg) {
@@ -165,6 +172,7 @@ class BarcodeReaderCameraNode {
   }
 
   bool onDecode(DecodeBarcodes::Request&, DecodeBarcodes::Response& res) {
+    if (recorder_ && recorder_->enabled()) res.session_dir = recorder_->dir();
     std::unique_lock<std::mutex> busy(decode_mutex_, std::try_to_lock);
     if (!busy.owns_lock()) {
       res.error = "busy";

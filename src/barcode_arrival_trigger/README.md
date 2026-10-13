@@ -24,7 +24,7 @@ roslaunch barcode_arrival_trigger auto_read.launch
 | `mode` | 空（用参数文件里的 `both`） | `camera` 只相机 / `serial` 只串口读码器 / `both` 先相机后读码器，两个都读 |
 | `layout` | `qr_top_tag_bottom` | `qr_top_tag_bottom` / `dm_top_tag_bottom` / `drone_vision_default`，必须与终端 1 相同 |
 | `save_frames` | `off` | `off` 不存图 / `failed` 只存失败 / `all` 都存 |
-| `save_dir` | `~/barcode_frames` | 存图目录，`attempts.csv` 也在这里 |
+| `save_dir` | `~/test_data/barcode` | 记录根目录，每次启动建一个子文件夹 |
 | `config_file` | `config/barcode_arrival_trigger.yaml` | 到位触发节点参数文件，见「参数文件」 |
 
 `auto_read.launch` 不管 `mode` 是什么都会启动串口读码器节点。版式说明见 `barcode_reader_camera` README「标签版式」。
@@ -47,7 +47,7 @@ roslaunch barcode_arrival_trigger auto_read.launch
 
 没有总的 `success`，按两路各自的 `success` 判断；服务不在线时对应字段的 `error` 为 `unavailable (<原因>)`。
 
-**相机读码记录**：`~/barcode_frames/attempts.csv` 和存图目录，见 `barcode_reader_camera` README「读码记录」。
+**相机读码记录**：`~/test_data/barcode/<启动时间>_<版式>/` 里的 `attempts.csv` 和存图目录，见 `barcode_reader_camera` README「读码记录」。
 
 ## 触发规则
 

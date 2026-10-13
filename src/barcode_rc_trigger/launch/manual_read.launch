@@ -1,5 +1,5 @@
 <launch>
-  <!-- 手动读码：拨一下遥控器 CH9 读一次码，终端打印汇总，结果记进 ~/barcode_rc_logs/rc_read_<时间>.csv。
+  <!-- 手动读码：拨一下遥控器 CH9 读一次码，终端打印汇总，每次启动的结果都在 ~/test_data/barcode/时间_版式/ 一个文件夹里。
        默认配合 mid360s_ws/scripts/fusion.sh（fusion 已起 MAVROS、相机、AprilTag）；不跑 fusion 时加 camera:=true，MAVROS 另起。
        每个参数的可选值见下面的 doc（命令行列出全部参数的方法见 README「快速开始」）。
        注意：camera:=false 时 AprilTag 用 fusion 的 tag 43.7 mm，layout 只能是 qr_top_tag_bottom / dm_top_tag_bottom；
@@ -11,9 +11,9 @@
   <arg name="camera" default="false"
        doc="相机和 AprilTag 谁来起：false（fusion 已起，默认）/ true（本 launch 起，不跑 fusion 的地面测试）" />
   <arg name="save_frames" default="off"
-       doc="相机读码存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次一个目录 save_dir/时间_结果/" />
-  <arg name="save_dir" default="~/barcode_frames"
-       doc="存图目录，attempts.csv（每次读码一行）也在这里" />
+       doc="相机读码存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次读码一个目录，放在本次启动的文件夹里" />
+  <arg name="save_dir" default="~/test_data/barcode"
+       doc="记录根目录：每次启动建一个子文件夹 时间_版式/，attempts.csv、存的图（和 manual_read 的 rc_read.csv）都在里面" />
   <arg name="quiet" default="true"
        doc="true（默认，终端只留每次拨杆汇总和 WARN/ERROR）/ false（所有节点日志都打到终端）" />
   <arg name="config_file" default="$(find barcode_rc_trigger)/config/barcode_rc_trigger.yaml"

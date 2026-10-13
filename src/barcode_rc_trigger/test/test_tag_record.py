@@ -3,9 +3,10 @@ import collections
 import os
 import shutil
 import tempfile
+import time
 import unittest
 
-from barcode_rc_trigger.record import HEADER, CsvRecorder, csv_row
+from barcode_rc_trigger.record import HEADER, CsvRecorder, csv_path, csv_row
 from barcode_rc_trigger.runner import StepResult
 from barcode_rc_trigger.tag_pose import (TagHistory, pick_tag, sample_from_matrix,
                                          tag_fields)
@@ -95,6 +96,15 @@ class RecordTest(unittest.TestCase):
             lines = handle.read().splitlines()
         self.assertEqual(len(lines), 3)
         self.assertEqual(lines[0], ','.join(HEADER))
+
+    def test_csv_goes_into_camera_session(self):
+        session = '/data/barcode/20261013_150000_qr_top_tag_bottom'
+        self.assertEqual(csv_path(session, '/data/barcode', 0.0, 'both'), session + '/rc_read.csv')
+
+    def test_csv_without_camera_session_gets_own_folder(self):
+        start = time.mktime((2026, 10, 13, 15, 0, 5, 0, 0, -1))  # local time, like the folder name
+        self.assertEqual(csv_path('', '/data/barcode', start, 'serial'),
+                         '/data/barcode/20261013_150005_serial/rc_read.csv')
 
 
 if __name__ == '__main__':

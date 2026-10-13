@@ -21,6 +21,10 @@ enum class SaveFrames { Off, Failed, All };
 // "off" / "failed" / "all"; throws std::invalid_argument otherwise.
 SaveFrames parseSaveFrames(const std::string& s);
 
+// Directory for one node run: <root>/<YYYYmmdd_HHMMSS>_<label> (local time t), with _2, _3 ... when it
+// already exists. Only computes the path; FrameRecorder creates it with the first record.
+std::string sessionDir(const std::string& root, const std::string& label, double t);
+
 // One retry frame scanned by decodeBarcodes (numbered like DecodedCode::frame).
 struct RetryFrameRecord {
   int index = 0;  // 1 = first retry frame
@@ -50,7 +54,8 @@ struct DecodeRecord {
 
 class FrameRecorder {
  public:
-  // dir: created if missing. log_attempts: append a row to <dir>/attempts.csv for every record.
+  // dir: created with the first record, so a run without decodes leaves nothing behind.
+  // log_attempts: append a row to <dir>/attempts.csv for every record.
   FrameRecorder(const std::string& dir, SaveFrames mode, bool log_attempts, size_t max_queue = 4);
   ~FrameRecorder();  // writes everything still queued
   FrameRecorder(const FrameRecorder&) = delete;
@@ -67,7 +72,6 @@ class FrameRecorder {
  private:
   void run();
   void write(const DecodeRecord& r);
-  void rotateStaleCsv();
 
   static constexpr double kChainErrorSaveGapS = 2.0;
 

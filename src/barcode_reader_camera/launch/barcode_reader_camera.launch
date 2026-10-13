@@ -4,13 +4,13 @@
   <arg name="layout" default="qr_top_tag_bottom"
        doc="标签版式（config/layouts/ 下的文件名）：qr_top_tag_bottom（QR 标签，默认）/ dm_top_tag_bottom（DataMatrix 标签）/ drone_vision_default（原版，tag 12 mm）" />
   <arg name="save_frames" default="off"
-       doc="存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次一个目录 save_dir/时间_结果/，含原图、重试帧、位姿、策略日志" />
-  <arg name="save_dir" default="~/barcode_frames"
-       doc="存图目录，attempts.csv 也在这里" />
+       doc="存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次读码一个目录，放在本次启动的文件夹里，含原图、重试帧、位姿、策略日志" />
+  <arg name="save_dir" default="~/test_data/barcode"
+       doc="记录根目录：每次启动建一个子文件夹 时间_版式/，attempts.csv、存的图（和 manual_read 的 rc_read.csv）都在里面" />
   <arg name="save_retry_frames" default="2"
        doc="每次最多存几张重试帧原图（另加读出码的那帧和最后一帧）：整数，默认 2，-1 = 全存" />
   <arg name="log_attempts" default="true"
-       doc="true（默认，每次读码在 save_dir/attempts.csv 记一行，不存图）/ false（不记）" />
+       doc="true（默认，每次读码在本次启动文件夹的 attempts.csv 记一行，不存图）/ false（不记）" />
   <arg name="require_tag" default="true"
        doc="true（默认，看不到 tag 不解码，返回 no_tag）/ false（看不到 tag 时走全图）" />
   <arg name="log_strategies" default="false"

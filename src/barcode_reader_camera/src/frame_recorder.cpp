@@ -228,29 +228,25 @@ SaveFrames parseSaveFrames(const std::string& s) {
   throw std::invalid_argument("save_frames must be off/failed/all, got \"" + s + "\"");
 }
 
+std::string sessionDir(const std::string& root, const std::string& label, double t) {
+  std::string r = root;
+  while (r.size() > 1 && r.back() == '/') r.pop_back();
+  const time_t s = (time_t)std::floor(t);
+  struct tm tm;
+  localtime_r(&s, &tm);
+  char stamp[32];
+  std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &tm);
+  const std::string base = r + "/" + stamp + (label.empty() ? "" : "_" + label);
+  std::string dir = base;
+  for (int i = 2; exists(dir); ++i) dir = base + "_" + std::to_string(i);
+  return dir;
+}
+
 FrameRecorder::FrameRecorder(const std::string& dir, SaveFrames mode, bool log_attempts, size_t max_queue)
     : dir_(dir), mode_(mode), log_attempts_(log_attempts), max_queue_(std::max<size_t>(1, max_queue)) {
   while (dir_.size() > 1 && dir_.back() == '/') dir_.pop_back();
   if (!enabled()) return;
-  makeDirs(dir_);
-  if (log_attempts_) rotateStaleCsv();
   thread_ = std::thread([this]() { run(); });
-}
-
-// attempts.csv written with other columns (older node): move it aside instead of appending
-// misaligned rows.
-void FrameRecorder::rotateStaleCsv() {
-  const std::string csv = dir_ + "/attempts.csv";
-  if (!exists(csv)) return;
-  std::ifstream f(csv);
-  std::string header;
-  std::getline(f, header);
-  if (header == kCsvHeader) return;
-  const std::string base = dir_ + "/attempts_" + formatTime((double)std::time(nullptr), false);
-  std::string moved = base + ".csv";
-  for (int i = 2; exists(moved); ++i) moved = base + "_" + std::to_string(i) + ".csv";
-  if (std::rename(csv.c_str(), moved.c_str()) != 0)
-    throw std::runtime_error("rename " + csv + ": " + std::strerror(errno));
 }
 
 FrameRecorder::~FrameRecorder() {
@@ -300,6 +296,7 @@ void FrameRecorder::run() {
 }
 
 void FrameRecorder::write(const DecodeRecord& r) {
+  makeDirs(dir_);
   const Metrics m = computeMetrics(r);
   bool save = !r.frame.empty() && (mode_ == SaveFrames::All || (mode_ == SaveFrames::Failed && !r.success));
   // Decoding did not run (no pose / intrinsics): callers such as trigger_decode retry every 0.5 s,

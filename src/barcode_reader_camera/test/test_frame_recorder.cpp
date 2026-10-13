@@ -1,7 +1,10 @@
-// FrameRecorder: per-attempt directories by mode, attempts.csv, and files that decode_image can replay.
+// FrameRecorder: session directory, per-attempt directories by mode, attempts.csv, and files that
+// decode_image can replay.
 #include <dirent.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
+#include <ctime>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -44,6 +47,11 @@ std::vector<std::string> lines(const std::string& path) {
 }
 
 bool readable(const std::string& path) { return std::ifstream(path).good(); }
+
+bool isDir(const std::string& path) {
+  struct stat st;
+  return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+}
 
 bool endsWith(const std::string& s, const std::string& suffix) {
   return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
@@ -184,26 +192,31 @@ TEST(FrameRecorder, ResultFromRetryFrameIsPreviewed) {
   EXPECT_TRUE(endsWith(csv[1], ",3,2,\"" + dirs[0] + "\""));
 }
 
-TEST(FrameRecorder, MovesCsvWithOtherColumnsAside) {
-  const std::string dir = makeTempDir();
-  { std::ofstream(dir + "/attempts.csv") << "time,stamp,result,retries,dir\nold,row\n"; }
+TEST(FrameRecorder, SessionDirIsNamedByStartTimeAndLabel) {
+  const std::string root = makeTempDir();
+  const double t = 1760190005.9;
+  const time_t s = (time_t)t;
+  struct tm tm;
+  localtime_r(&s, &tm);
+  char stamp[32];
+  std::strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", &tm);
+  const std::string expected = root + "/" + stamp + "_qr_top_tag_bottom";
+  const std::string first = sessionDir(root + "/", "qr_top_tag_bottom", t);
+  EXPECT_EQ(first, expected);
+  EXPECT_FALSE(isDir(first));  // only the path, nothing created
+  ASSERT_EQ(mkdir(first.c_str(), 0775), 0);
+  EXPECT_EQ(sessionDir(root, "qr_top_tag_bottom", t), expected + "_2");  // a restart within the same second
+}
+
+TEST(FrameRecorder, CreatesSessionDirWithFirstRecord) {
+  const std::string dir = makeTempDir() + "/session/run";
   {
     FrameRecorder recorder(dir, SaveFrames::Off, true);
+    EXPECT_FALSE(isDir(dir));  // a run without decodes leaves nothing behind
     ASSERT_TRUE(recorder.submit(makeRecord(true, "")));
   }
-  const auto csv = lines(dir + "/attempts.csv");
-  ASSERT_EQ(csv.size(), 2u);
-  EXPECT_NE(csv[0].find(",frames,result_frame,dir"), std::string::npos);
-  std::vector<std::string> moved;
-  if (DIR* d = opendir(dir.c_str())) {
-    while (const dirent* e = readdir(d)) {
-      const std::string n = e->d_name;
-      if (n.rfind("attempts_", 0) == 0) moved.push_back(n);
-    }
-    closedir(d);
-  }
-  ASSERT_EQ(moved.size(), 1u);
-  EXPECT_EQ(lines(dir + "/" + moved[0]), (std::vector<std::string>{"time,stamp,result,retries,dir", "old,row"}));
+  EXPECT_TRUE(isDir(dir));
+  EXPECT_EQ(lines(dir + "/attempts.csv").size(), 2u);
 }
 
 TEST(FrameRecorder, FailedModeSkipsSuccessfulFrames) {
