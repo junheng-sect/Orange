@@ -30,7 +30,7 @@ roslaunch barcode_arrival_trigger auto_read.launch
 | --- | --- | --- |
 | `mode` | `camera` | `camera` 只相机 / `serial` 只串口读码器 / `both` 先相机后读码器，两个都读 |
 | `layout` | `qr_top_tag_bottom` | `qr_top_tag_bottom` / `dm_top_tag_bottom` / `drone_vision_default`，必须与 AprilTag 那边相同 |
-| `save_frames` | `off` | `off` 不存图 / `failed` 只存失败 / `all` 都存 |
+| `save_frames` | `failed` | `failed` 只存失败（到位读码很少失败，每次失败都留图）/ `all` 都存 / `off` 不存图 |
 | `save_dir` | `~/test_data/barcode` | 记录根目录，每次启动建一个子文件夹 |
 | `config_file` | `config/barcode_arrival_trigger.yaml` | 到位触发节点参数文件，见「参数文件」 |
 
@@ -45,7 +45,7 @@ roslaunch barcode_arrival_trigger auto_read.launch
 | 每次到位的汇总 | 终端，格式同 `barcode_rc_trigger`，标题为 `arrival#N marker=M`，含 tag 段 |
 | 每次到位一行（tag 位置 + 结果 + 读码中是否退出 POS_HOLD） | 启动文件夹里的 `arrival_read.csv` |
 | 相机每次读码一行（耗时、清晰度、试了几帧） | 启动文件夹里的 `attempts.csv` |
-| 原图、重试帧、位姿、策略日志 | 启动文件夹里的 `<时间>_<结果>/`，`save_frames` 不是 `off` 时才有 |
+| 原图、重试帧、位姿、策略日志 | 启动文件夹里的 `<时间>_<结果>/`；默认只有读失败的（`save_frames:=failed`），`all` 时成功的也有 |
 
 `arrival_read.csv` 的列：`time,arrival,hold_lost` 加上和 `rc_read.csv` 相同的 tag 位置与读码结果列，可以用同一套脚本分析。
 终端汇总读到、读不到都打 INFO，只有读码服务不在线时打 WARN。

@@ -8,8 +8,8 @@
        doc="读码器：camera（只相机，默认）/ serial（只串口读码器）/ both（先相机后读码器，两个都读）" />
   <arg name="layout" default="qr_top_tag_bottom"
        doc="标签版式，必须与 AprilTag 那边相同：qr_top_tag_bottom（默认）/ dm_top_tag_bottom / drone_vision_default" />
-  <arg name="save_frames" default="off"
-       doc="相机读码存图：off（不存，默认）/ failed（只存失败）/ all（都存）；每次读码一个目录，放在本次启动的文件夹里" />
+  <arg name="save_frames" default="failed"
+       doc="相机读码存图：failed（只存失败，默认；到位读码很少失败，每次失败都留图）/ all（都存）/ off（不存）；每次读码一个目录，放在本次启动的文件夹里" />
   <arg name="save_dir" default="~/test_data/barcode"
        doc="记录根目录：每次启动建一个子文件夹 时间_版式/，attempts.csv、arrival_read.csv 和存的图都在里面" />
   <arg name="config_file" default="$(find barcode_arrival_trigger)/config/barcode_arrival_trigger.yaml"
