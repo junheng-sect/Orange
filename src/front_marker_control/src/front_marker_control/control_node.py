@@ -1,6 +1,8 @@
 """Pose-driven body-velocity controller with gated MAVROS output."""
 
+from collections import deque
 import math
+from statistics import median
 import threading
 
 from geometry_msgs.msg import PoseStamped, TwistStamped, Vector3Stamped
@@ -23,6 +25,8 @@ from front_marker_control.geometry import (
     position_error_body,
     position_hold_target,
     rotate_vector_by_quaternion,
+    rotate_vector_by_yaw,
+    yaw_from_quaternion,
 )
 from front_marker_control.refinement import DEFAULTS, FinalPoseRefiner, validate_parameters
 from front_marker_control.localization import LocalPoseBuffer
@@ -32,6 +36,10 @@ from front_marker_control.mavros_interface import (
     velocity_only_type_mask,
     velocity_absolute_yaw_type_mask,
 )
+
+# yaw 来源：fixed_face 用定位锁货架朝向；marker 用 tag yaw（原流程）；
+# off 不控 yaw（enable_yaw_control=false）。
+YAW_MODES = ('fixed_face', 'marker')
 
 
 class FrontMarkerControlNode(object):
@@ -73,6 +81,15 @@ class FrontMarkerControlNode(object):
         self.last_localization_issue = ''
         self.latest_local_pose = None
         self.latest_local_speed = float('inf')
+        # fixed_face：本次 OFFBOARD 锁定的货架朝向与斜坡中的 yaw 设定（local ENU rad）。
+        self.face_yaw = None
+        self.face_yaw_command = None
+        self.face_issue = ''
+        # 机体速度（Odometry twist 模长），仅用于 fixed_face 锁定前的静止判定。
+        self.latest_local_velocity_norm = float('inf')
+        # 最近的 Marker 观测（源时间 s, base_link 下 Marker 位置），锁定时取对准窗口中位数。
+        self.recent_markers = deque(maxlen=64)
+        self.aligned_start_stamp = None
         self.refiner = None
         if self.enable_position_hold and self.enable_yaw_control:
             self.refiner = FinalPoseRefiner(
@@ -175,7 +192,7 @@ class FrontMarkerControlNode(object):
             'front_marker_control_node started | pose=%s | base=%s | '
             'target=(%.3f, %.3f, %.3f)m | '
             'position_gains=(kp_x=%.3f, kp_y=%.3f, kp_z=%.3f) | '
-            'yaw_gain=%.3f | yaw_control=%s | '
+            'yaw_gain=%.3f | yaw_mode=%s | '
             'setpoint_rate=%.1fHz | max_accel=%.3fm/s^2 | '
             'loss_decel=%.3fm/s^2 | pose_timeout=%.3fs | '
             'max_pose_latency=%.3fs | filter_dt_max=%.3fs | setpoint_output=%s | '
@@ -191,7 +208,7 @@ class FrontMarkerControlNode(object):
             self.kp_y,
             self.kp_z,
             self.kp_yaw,
-            'ON' if self.enable_yaw_control else 'OFF',
+            self.yaw_mode,
             self.setpoint_publish_rate_hz,
             self.max_accel,
             self.loss_decel,
@@ -295,13 +312,41 @@ class FrontMarkerControlNode(object):
             'min_marker_distance_m': 0.50,
             'retreat_recover_distance_m': 0.70,
             'retreat_velocity_x': -0.10,
+            'face_yaw_max_offset_deg': 30.0,
+            'face_yaw_rate_deg_s': 10.0,
+            'lock_max_speed_mps': 0.05,
+            'lock_min_samples': 5.0,
         }
         for name, default in numeric_defaults.items():
             setattr(self, name, float(get('~' + name, default)))
 
         self.enable_setpoint_output = bool(get('~enable_setpoint_output', False))
-        self.enable_yaw_control = bool(get('~enable_yaw_control', True))
         self.enable_position_hold = bool(get('~enable_position_hold', False))
+        # enable_yaw_control 仍是总开关；开启时由 yaw_mode 选择 yaw 来源。
+        # 之后 self.enable_yaw_control 只表示“tag yaw 进入控制环”（marker 模式），
+        # fixed_face 与 off 共用其关闭时的路径（不发 yaw 角速度、不建 3 s 采样器）。
+        if bool(get('~enable_yaw_control', True)):
+            self.yaw_mode = str(get('~yaw_mode', 'fixed_face'))
+            if self.yaw_mode not in YAW_MODES:
+                raise ValueError(
+                    'yaw_mode must be one of %s, got %r' % (YAW_MODES, self.yaw_mode)
+                )
+        else:
+            self.yaw_mode = 'off'
+        self.enable_yaw_control = self.yaw_mode == 'marker'
+        if self.yaw_mode == 'fixed_face' and not self.enable_position_hold:
+            raise ValueError(
+                'yaw_mode=fixed_face 需要 enable_position_hold=true（用定位锁 yaw 与悬停点）'
+            )
+        self.face_yaws = tuple(
+            wrap_angle(math.radians(float(value)))
+            for value in get('~face_yaws_deg', [0.0, 180.0])
+        )
+        if not self.face_yaws or not all(math.isfinite(v) for v in self.face_yaws):
+            raise ValueError('face_yaws_deg must be a non-empty list of finite angles')
+        self.face_yaw_max_offset_rad = math.radians(self.face_yaw_max_offset_deg)
+        self.face_yaw_rate_rad_s = math.radians(self.face_yaw_rate_deg_s)
+        self.lock_min_samples = int(self.lock_min_samples)
         self.yaw_tolerance_rad = math.radians(self.yaw_tolerance_deg)
         self.pos_exit_yaw_tolerance_rad = math.radians(
             self.pos_exit_yaw_tolerance_deg
@@ -360,6 +405,16 @@ class FrontMarkerControlNode(object):
             )
         if self.future_stamp_tolerance_sec < 0.0 or self.tf_lookup_timeout_sec < 0.0:
             raise ValueError('timestamp and TF tolerances must be non-negative')
+        if (
+            self.face_yaw_max_offset_deg <= 0.0
+            or self.face_yaw_rate_deg_s <= 0.0
+            or self.lock_max_speed_mps <= 0.0
+            or self.lock_min_samples < 1
+        ):
+            raise ValueError(
+                'face_yaw_max_offset_deg, face_yaw_rate_deg_s, lock_max_speed_mps '
+                'and lock_min_samples must be positive'
+            )
         if any(value < 0.0 for value in (
                 self.vyz_limit,
                 self.vx_limit,
@@ -403,10 +458,14 @@ class FrontMarkerControlNode(object):
             interrupted = (self.latest_state_receive_time is not None
                            and (now-self.latest_state_receive_time).to_sec() > self.state_timeout_sec)
             self.latest_state_receive_time = now
-            if self.refiner is not None and self.enable_setpoint_output and (
-                    interrupted or not message.connected or not message.armed or message.mode != 'OFFBOARD'):
+            gated = self.enable_setpoint_output and (
+                interrupted or not message.connected or not message.armed or message.mode != 'OFFBOARD')
+            if self.refiner is not None and gated:
                 self.enter_align('FCU gate interrupted')
                 self.velocity_limiter.reset()
+            if self.yaw_mode == 'fixed_face' and gated:
+                # 退出 OFFBOARD 即释放货架朝向，下次切入按当时航向重新选择。
+                self.release_face_yaw()
 
     def _localization_rejected(self, issue):
         """定位数据被拒绝：立即把定位置为不可用，并原子清除位置目标。
@@ -419,7 +478,11 @@ class FrontMarkerControlNode(object):
         self.last_odom_issue = issue
         self.latest_local_pose = None
         self.latest_local_speed = float('inf')
+        self.latest_local_velocity_norm = float('inf')
         self.local_pose_buffer.clear()
+        if self.yaw_mode == 'fixed_face':
+            # 定位异常（含坐标系变化）后 yaw 参考可能已变，恢复后重新选择货架朝向。
+            self.release_face_yaw()
         if self.refiner is not None:
             self.refiner.reset(issue)
         self.aligned_start_time = None
@@ -493,6 +556,8 @@ class FrontMarkerControlNode(object):
                     (b-a)/interval for a, b in zip(previous_pose.position, local_pose.position)))
             # 采样期速度仅作状态展示，不再触发任何重置；
             # POSE_ALIGNING 的过渡完成判定只看轨迹自身，不设速度/位姿门。
+            twist = message.twist.twist.linear
+            self.latest_local_velocity_norm = self.velocity_norm((twist.x, twist.y, twist.z))
             self.latest_local_pose = local_pose
             self.latest_odom_receive_time = now
             self.latest_odom_source_stamp = source_stamp
@@ -551,6 +616,96 @@ class FrontMarkerControlNode(object):
         # 生成从零按 max_accel 起步后退。
         self.velocity_limiter.reset()
 
+    def release_face_yaw(self):
+        self.face_yaw = None
+        self.face_yaw_command = None
+
+    def nearest_face_yaw(self, yaw):
+        return min(self.face_yaws, key=lambda face: abs(wrap_angle(face - yaw)))
+
+    def update_face_yaw(self, dt):
+        """Latch the nearest shelf heading once per OFFBOARD and ramp the yaw setpoint.
+
+        Returns True on the tick that latched a new heading. The caller must
+        hold ``self.lock`` and guarantee a fresh ``latest_local_pose``.
+        """
+        current = yaw_from_quaternion(self.latest_local_pose.quaternion)
+        latched = False
+        if self.face_yaw is None:
+            face = self.nearest_face_yaw(current)
+            offset = wrap_angle(face - current)
+            if abs(offset) > self.face_yaw_max_offset_rad:
+                self.face_issue = '航向偏离货架朝向 %.1fdeg（上限 %.1fdeg），不进场' % (
+                    math.degrees(offset), self.face_yaw_max_offset_deg)
+                return False
+            self.face_yaw = face
+            self.face_yaw_command = current
+            self.face_issue = ''
+            latched = True
+        # 从当前航向按限定角速度转到货架朝向，避免切入瞬间的 yaw 阶跃。
+        step = self.face_yaw_rate_rad_s * dt
+        delta = wrap_angle(self.face_yaw - self.face_yaw_command)
+        if abs(delta) <= step + 1e-9:
+            self.face_yaw_command = self.face_yaw
+        else:
+            self.face_yaw_command = wrap_angle(
+                self.face_yaw_command + math.copysign(step, delta))
+        return latched
+
+    def face_velocity_target(self, body_velocity):
+        """Body FLU velocity as a local ENU velocity with the ramped absolute yaw."""
+        return (
+            rotate_vector_by_quaternion(self.latest_local_pose.quaternion, body_velocity),
+            self.face_yaw_command,
+        )
+
+    def face_status(self):
+        if self.face_yaw is None:
+            return 'face=未锁定 %s' % self.face_issue if self.face_issue else 'face=未锁定'
+        return 'face=%.1fdeg yaw_sp=%.1fdeg' % (
+            math.degrees(self.face_yaw), math.degrees(self.face_yaw_command))
+
+    def yaw_control_label(self):
+        if self.enable_yaw_control:
+            return 'ON'
+        return 'FACE' if self.yaw_mode == 'fixed_face' else 'OFF'
+
+    def face_yaw_settled(self):
+        """Yaw setpoint reached the shelf heading and the vehicle follows it."""
+        if self.face_yaw is None or self.face_yaw_command != self.face_yaw:
+            return False
+        if self.latest_local_pose is None:
+            return False
+        current = yaw_from_quaternion(self.latest_local_pose.quaternion)
+        return abs(wrap_angle(current - self.face_yaw)) <= self.yaw_tolerance_rad
+
+    def try_lock_face_target(self):
+        """Lock the hold point from the median Marker position of the aligned window.
+
+        Returns ``(p_target, face_yaw, last_marker_stamp)`` or None. The hold
+        yaw is the latched shelf heading; the tag yaw is not used.
+        """
+        markers = []
+        last_stamp = None
+        for stamp, marker_body in self.recent_markers:
+            if stamp < self.aligned_start_stamp:
+                continue
+            local_pose = self.local_pose_buffer.lookup(stamp, self.odom_interp_gap_max_sec)
+            if local_pose is None:
+                continue
+            rotated = rotate_vector_by_quaternion(local_pose.quaternion, marker_body)
+            markers.append(tuple(a + b for a, b in zip(local_pose.position, rotated)))
+            last_stamp = stamp
+        if len(markers) < self.lock_min_samples:
+            self.last_localization_issue = '锁定样本不足 %d/%d' % (
+                len(markers), self.lock_min_samples)
+            return None
+        p_marker = tuple(median(marker[axis] for marker in markers) for axis in range(3))
+        offset = rotate_vector_by_yaw(self.target_xyz_body, self.face_yaw)
+        p_target = tuple(a - b for a, b in zip(p_marker, offset))
+        self.last_localization_issue = ''
+        return (p_target, self.face_yaw, last_stamp)
+
     def position_exit_exceeded(self):
         """True when the live vision error exceeds the POS_HOLD exit band.
 
@@ -599,6 +754,8 @@ class FrontMarkerControlNode(object):
 
     def try_lock_position_target(self):
         """Compute and lock the fixed XYZ/yaw target, or return None."""
+        if self.yaw_mode == 'fixed_face':
+            return self.try_lock_face_target()
         # Legacy yaw-disabled lock also uses source-time interpolation.
         marker_stamp = self.latest_source_stamp.to_sec()
         local_pose = self.local_pose_buffer.lookup(
@@ -742,6 +899,11 @@ class FrontMarkerControlNode(object):
                 # Marker 观测照常入队等待源时间配对。
                 self.refiner.marker(message.header.stamp.to_sec(), now.to_sec(),
                                     tuple(error[i]+self.target_xyz_body[i] for i in range(3)), yaw_error)
+            if self.yaw_mode == 'fixed_face':
+                self.recent_markers.append((
+                    message.header.stamp.to_sec(),
+                    tuple(error[i] + self.target_xyz_body[i] for i in range(3)),
+                ))
             publish_snapshot = (
                 message.header.stamp,
                 tuple(float(value) for value in error),
@@ -798,15 +960,26 @@ class FrontMarkerControlNode(object):
                 not self.enable_yaw_control
                 or abs(float(self.latest_filtered_yaw_error)) <= self.yaw_tolerance_rad
             )
+            # fixed_face：yaw 只看定位，设定转到货架朝向且机体跟上后才计时。
+            and (self.yaw_mode != 'fixed_face' or self.face_yaw_settled())
         )
         if not aligned:
             self.aligned_start_time = None
             return 'ALIGN'
         if self.aligned_start_time is None:
             self.aligned_start_time = now
+            self.aligned_start_stamp = self.latest_source_stamp.to_sec()
             return 'ALIGN'
         held = (now - self.aligned_start_time).to_sec()
-        return 'ALIGNED' if held >= self.aligned_hold_sec else 'ALIGN'
+        if held < self.aligned_hold_sec:
+            return 'ALIGN'
+        if (
+            self.yaw_mode == 'fixed_face'
+            and self.latest_local_velocity_norm > self.lock_max_speed_mps
+        ):
+            # 到位不等于停稳：对准已满保持时间，等机体速度降下来再锁定。
+            return 'WAIT_STILL'
+        return 'ALIGNED'
 
     def hard_gate_reason(self, now):
         if not self.state_is_fresh(now) or not self.state.connected:
@@ -859,6 +1032,14 @@ class FrontMarkerControlNode(object):
                 self.hard_gate_reason(now) if self.enable_setpoint_output else None
             )
 
+            fixed_yaw_snapshot = None
+            if self.yaw_mode == 'fixed_face':
+                # 货架朝向先于对齐判定更新：本周期的 settled 判定用最新 yaw 设定。
+                if gate_reason is not None:
+                    self.release_face_yaw()
+                elif localization_ok and self.update_face_yaw(dt):
+                    fixed_yaw_snapshot = self.face_yaw
+
             if not localization_ok and self.enable_position_hold:
                 # 定位失效：清除位置目标与计时，锁定等待定位恢复。
                 if self.position_target is not None:
@@ -898,8 +1079,13 @@ class FrontMarkerControlNode(object):
                     near_wall = False
                 self.update_control_mode(now, pose_fresh, marker_x, near_wall)
 
-            fixed_yaw_snapshot = None
             local_velocity_snapshot = None
+            # fixed_face：速度指令转到 local 系并带绝对 yaw，由 PX4 锁航向。
+            face_output = (
+                self.yaw_mode == 'fixed_face'
+                and localization_ok
+                and self.face_yaw_command is not None
+            )
             if self.refiner is not None and self.control_mode != 'RETREAT':
                 if gate_reason is not None or not localization_ok:
                     self.enter_align(gate_reason or 'localization unavailable')
@@ -939,6 +1125,8 @@ class FrontMarkerControlNode(object):
                         target_velocity, rate_limit, dt
                     )
                     yaw_rate = 0.0
+                    if face_output:
+                        local_velocity_snapshot = self.face_velocity_target(body_velocity)
                     if pose_fresh:
                         motion_state = 'RETREAT'
                     elif self.velocity_norm(body_velocity) > 1e-9:
@@ -996,6 +1184,14 @@ class FrontMarkerControlNode(object):
                     yaw_rate = 0.0
                     motion_state = 'POS_HOLD'
                     actual_allowed = self.enable_setpoint_output
+                elif self.yaw_mode == 'fixed_face' and self.face_yaw is None:
+                    # 航向离货架朝向太远：不进场、不转向，输出零速度等飞手处理。
+                    self.velocity_limiter.reset()
+                    body_velocity = (0.0, 0.0, 0.0)
+                    yaw_rate = 0.0
+                    motion_state = 'WAIT_FACE_YAW'
+                    actual_allowed = self.enable_setpoint_output
+                    setpoint_snapshot = None
                 else:
                     if pose_fresh:
                         target_body_velocity = tuple(self.latest_body_velocity)
@@ -1010,6 +1206,8 @@ class FrontMarkerControlNode(object):
                     body_velocity = self.velocity_limiter.update(
                         target_body_velocity, rate_limit, dt
                     )
+                    if face_output:
+                        local_velocity_snapshot = self.face_velocity_target(body_velocity)
                     if pose_fresh:
                         motion_state = 'TRACKING'
                     elif self.velocity_norm(body_velocity) > 1e-9:
@@ -1032,6 +1230,8 @@ class FrontMarkerControlNode(object):
             )
             if self.refiner is not None:
                 preview_text += ' | ' + self.refiner.status()
+            if self.yaw_mode == 'fixed_face':
+                preview_text += ' | ' + self.face_status()
             if not self.enable_setpoint_output:
                 status_text = 'PREVIEW_ONLY | ' + preview_text
             elif gate_reason is not None:
@@ -1044,8 +1244,8 @@ class FrontMarkerControlNode(object):
                 status_text = 'SETPOINT_BRAKING | ' + preview_text
             elif setpoint_snapshot is not None:
                 status_text = 'SETPOINT_POSITION | ' + preview_text
-            elif motion_state == 'WAIT_LOCAL_POSITION':
-                status_text = 'WAIT_LOCAL_POSITION | actual=zero | ' + preview_text
+            elif motion_state in ('WAIT_LOCAL_POSITION', 'WAIT_FACE_YAW'):
+                status_text = '%s | actual=zero | %s' % (motion_state, preview_text)
             elif motion_state == 'SAMPLING_WAIT_POSE':
                 status_text = 'WAIT_POSE | actual=zero | ' + preview_text
             elif motion_state == 'RETREAT':
@@ -1100,7 +1300,7 @@ class FrontMarkerControlNode(object):
                 % (
                     motion_state,
                     mode_segment,
-                    'ON' if self.enable_yaw_control else 'OFF',
+                    self.yaw_control_label(),
                     p_target[0],
                     p_target[1],
                     p_target[2],
@@ -1121,7 +1321,7 @@ class FrontMarkerControlNode(object):
                 % (
                     state_segment,
                     mode_segment,
-                    'ON' if self.enable_yaw_control else 'OFF',
+                    self.yaw_control_label(),
                     body_error[0],
                     body_error[1],
                     body_error[2],
@@ -1144,7 +1344,7 @@ class FrontMarkerControlNode(object):
             % (
                 motion_state,
                 mode_segment,
-                'ON' if self.enable_yaw_control else 'OFF',
+                self.yaw_control_label(),
                 issue,
                 body_velocity[0],
                 body_velocity[1],

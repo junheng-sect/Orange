@@ -24,7 +24,7 @@ def odom_message(stamp, position, yaw):
 class RefinementNodeTest(unittest.TestCase):
     def node(self, yaw=True, position=True):
         params = {'~enable_setpoint_output': True, '~enable_yaw_control': yaw,
-                  '~enable_position_hold': position}
+                  '~yaw_mode': 'marker', '~enable_position_hold': position}
         with mock.patch.object(rospy, 'get_param', side_effect=lambda key, default: params.get(key, default)), \
              mock.patch.object(rospy, 'Publisher', side_effect=lambda *a, **k: mock.MagicMock()), \
              mock.patch.object(rospy, 'Subscriber'), mock.patch.object(rospy, 'Timer'), \

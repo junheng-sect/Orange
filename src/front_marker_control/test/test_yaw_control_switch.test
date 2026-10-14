@@ -36,6 +36,7 @@
     <param name="status_topic" value="/test_yaw_control/on/status" />
     <param name="enable_setpoint_output" value="false" />
     <param name="enable_yaw_control" value="true" />
+    <param name="yaw_mode" value="marker" />
     <param name="enable_position_hold" value="false" />
     <param name="aligned_hold_sec" value="0.25" />
   </node>

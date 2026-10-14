@@ -42,6 +42,12 @@ yaw_error_deadband: 0.06
 # ---- 输出开关 ----
 # 是否启用 yaw 控制（RViz 场景在 front_marker_control_rviz.yaml 中关闭）
 enable_yaw_control: true
+# yaw 来源（enable_yaw_control=true 时生效）：
+#   fixed_face（默认）：yaw 只用定位锁到货架朝向（face_yaws_deg），tag 只管 XYZ；
+#     流程 ALIGN -> POS_HOLD：XYZ 对准且 yaw 到位持续 aligned_hold_sec、机体速度
+#     低于 lock_max_speed_mps 后，取对准窗口内 Marker 位置中位数锁定悬停点。
+#   marker：原流程，ALIGN 用 tag yaw 发 yaw 角速度，再走 3 秒采样与 POSE_ALIGNING。
+yaw_mode: fixed_face
 # 是否向 MAVROS 发布 setpoint 输出（false 时仅计算不输出）
 enable_setpoint_output: true
 # 是否启用位置锁定（ALIGN -> POS_HOLD）与近墙后退（RETREAT）
@@ -88,10 +94,24 @@ control_mode_topic: /front_marker_control/control_mode
 lateral_tolerance_m: 0.08
 vertical_tolerance_m: 0.08
 distance_tolerance_m: 0.12
-# yaw 对准容差（deg）
+# yaw 对准容差（deg）：marker 模式比 tag yaw；fixed_face 模式比机体 yaw 与货架朝向
 yaw_tolerance_deg: 6.0
 # 全部对准后的保持时长（s）
 aligned_hold_sec: 1.0
+
+# ---- fixed_face 货架朝向（yaw_mode=fixed_face 时生效）----
+# 货架朝向，local ENU yaw（deg）。v0 约定：起飞前机头正对第一面货架摆放，
+# 此时 FAST-LIO/PX4 的 local yaw 约为 0，背后那面货架为 180。
+face_yaws_deg: [0.0, 180.0]
+# 每次切入 OFFBOARD 选离当前航向最近的朝向并锁定到退出 OFFBOARD；
+# 偏差超过该值（deg）不进场，输出零速度（WAIT_FACE_YAW）
+face_yaw_max_offset_deg: 30.0
+# yaw 设定从当前航向转到货架朝向的速率（deg/s），避免切入瞬间的 yaw 阶跃
+face_yaw_rate_deg_s: 10.0
+# 锁定悬停点时机体速度上限（m/s）；对准已满保持时间但速度超限时显示 WAIT_STILL
+lock_max_speed_mps: 0.05
+# 锁定所需的最少 Marker 帧数（对准窗口内，能与定位配对的帧）
+lock_min_samples: 5
 
 # ---- 位置锁定与近墙保护（enable_position_hold=true 时生效）----
 # 定位输入话题（Odometry，body 在 local ENU 的位姿）
@@ -102,7 +122,8 @@ odom_timeout_sec: 0.20
 odom_interp_gap_max_sec: 0.10
 # 定位源时间戳最大允许年龄（s）：超龄/重放帧一律拒绝
 odom_source_max_age_sec: 0.50
-# POS_HOLD 退出带宽（m/deg，须 >= 对准进入带宽）
+# POS_HOLD 退出带宽（m/deg，须 >= 对准进入带宽）。fixed_face/off 下只比 XYZ，
+# 超限持续 pos_exit_hold_sec 退回 ALIGN；marker 流程锁定后不按视觉退出。
 pos_exit_distance_tolerance_m: 0.18
 pos_exit_lateral_tolerance_m: 0.12
 pos_exit_vertical_tolerance_m: 0.12
@@ -121,7 +142,7 @@ retreat_recover_distance_m: 0.70
 retreat_velocity_x: -0.10
 
 # ---- 固定 3 秒采样与最终 XYZ+yaw 精对准 ----
-# 仅 enable_position_hold 与 enable_yaw_control 同时开启时生效。
+# 仅 yaw_mode=marker 且 enable_position_hold=true 时生效。
 # XYZ 进入容差即开始固定 3 秒计时：缺帧、速度超限、XYZ 偏离均不暂停、
 # 不清零；截止周期用窗口内全部可配对样本计算固定 XYZ+yaw 目标。
 yaw_sampling_duration_sec: 3.0

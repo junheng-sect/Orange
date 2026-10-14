@@ -1,0 +1,33 @@
+<launch>
+  <node pkg="tf2_ros"
+        type="static_transform_publisher"
+        name="fixed_face_camera_tf"
+        args="0 0 0 -0.5 0.5 -0.5 0.5 base_link usb_camera_optical_frame" />
+
+  <!-- yaw_mode 不覆盖：验证主 YAML 默认即 fixed_face。 -->
+  <node pkg="front_marker_control"
+        type="front_marker_control_node"
+        name="fixed_face_front_marker_control"
+        clear_params="true"
+        output="screen">
+    <rosparam command="load" file="$(find front_marker_control)/config/front_marker_control.yaml" />
+    <param name="pose_topic" value="/test_fixed_face/pose" />
+    <param name="state_topic" value="/test_fixed_face/state" />
+    <param name="setpoint_raw_topic" value="/test_fixed_face/actual" />
+    <param name="odom_topic" value="/test_fixed_face/odom" />
+    <param name="position_error_topic" value="/test_fixed_face/error" />
+    <param name="yaw_error_topic" value="/test_fixed_face/yaw_error" />
+    <param name="command_topic" value="/test_fixed_face/cmd_vel" />
+    <param name="setpoint_preview_topic" value="/test_fixed_face/preview" />
+    <param name="status_topic" value="/test_fixed_face/status" />
+    <param name="control_mode_topic" value="/test_fixed_face/control_mode" />
+    <param name="enable_setpoint_output" value="true" />
+    <param name="enable_position_hold" value="true" />
+    <param name="aligned_hold_sec" value="0.3" />
+  </node>
+
+  <test test-name="fixed_face"
+        pkg="front_marker_control"
+        type="test_fixed_face_integration.py"
+        time-limit="90.0" />
+</launch>

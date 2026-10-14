@@ -26,6 +26,9 @@ roslaunch front_marker_control front_marker_tracking.launch
 - Marker 位姿时间戳异常、四元数非有限或不可归一化时拒绝输入。
 - `enable_yaw_control=false` 时保留原有机体系 FLU XYZ 跟踪，同时屏蔽 yaw 与
   yaw-rate 字段。
+- `enable_yaw_control=true` 时由 `yaw_mode` 选择 yaw 来源，默认 `fixed_face`：
+  yaw 只用定位锁到货架朝向，tag 只管 XYZ（见下文“货架朝向锁定”）；`marker` 为原
+  tag yaw 流程。
 
 ## 启动
 
@@ -129,14 +132,42 @@ XYZ 位置误差在进入比例控制、速度限幅和速度滞回死区之前�
 
 `/front_marker_control/control_mode` 发布当前控制模式（`std_msgs/String`，latch），
 话题名由公共 YAML 话题段（`status_topic` 下方）的 `control_mode_topic` 配置。取值
-`ALIGN` / `YAW_SAMPLING` / `POSE_ALIGNING` / `POS_HOLD` / `RETREAT`，只在模式变化时发布；
+`ALIGN` / `YAW_SAMPLING` / `POSE_ALIGNING` / `POS_HOLD` / `RETREAT`（`fixed_face` 只用
+`ALIGN` / `POS_HOLD` / `RETREAT`），只在模式变化时发布；
 控制循环每周期检查一次，最迟晚一个控制周期（20 Hz）发出。不论是否启用 yaw 精对准都会
-发布：到位自动读码（`barcode_arrival_trigger`）按它的 `POS_HOLD` 跳变触发，精对准与
-旧的单帧锁定（`enable_yaw_control=false`）两条到位路径共用这一条话题。
+发布：到位自动读码（`barcode_arrival_trigger`）按它的 `POS_HOLD` 跳变触发，各条到位
+路径共用这一条话题。
 
-## 连续采样的最终 XYZ+yaw 对准
+## 货架朝向锁定（yaw_mode: fixed_face，默认）
 
-当 `enable_position_hold=true` 且 `enable_yaw_control=true` 时，原单帧锁定由
+单帧 tag yaw 噪声与真实转动幅度相当（10.14 bag 39：单帧误差 RMSE 约 9°，tag 位置
+误差 RMSE 1.3~1.7 cm），因此默认不让 tag yaw 进入控制环：yaw 只用定位（FAST-LIO →
+PX4 local）锁到货架朝向，tag 只负责 XYZ。要求 `enable_position_hold=true`。
+
+v0 约定：起飞前机头正对第一面货架摆放，此时 local yaw 约为 0；`face_yaws_deg`
+默认 `[0, 180]`，即正对与背对两面货架。
+
+1. 每次切入 OFFBOARD，从 `face_yaws_deg` 中选离当前航向最近的朝向并锁定，直到退出
+   OFFBOARD 或定位异常才释放。偏差超过 `face_yaw_max_offset_deg`（30°）不进场：
+   输出零速度，状态 `WAIT_FACE_YAW`。
+2. `ALIGN`：tag XYZ 误差照常做比例速度控制，速度转到 local ENU 后与绝对 yaw 一起发出；
+   yaw 设定从当前航向按 `face_yaw_rate_deg_s`（10°/s）转到货架朝向，之后保持不变。
+   丢标刹车、近墙后退同样带这个绝对 yaw。
+3. 锁定条件：XYZ 在对准容差内、yaw 设定已到货架朝向且机体 yaw 与之相差不超过
+   `yaw_tolerance_deg`，连续 `aligned_hold_sec`（1 s）；此时若机体速度（Odometry
+   twist）高于 `lock_max_speed_mps`（0.05 m/s），状态显示 `WAIT_STILL`，等降速再锁。
+4. 锁定：对准窗口内每帧 Marker 位置按源时间戳与 Odometry 插值配对，换算到 local 后
+   逐轴取中位数（至少 `lock_min_samples` 帧），悬停点 = Marker 位置 −
+   Rz(货架朝向)·`target_xyz_body`，yaw = 货架朝向。进入 `POS_HOLD`，以 local 位置 +
+   绝对 yaw 保持；tag XYZ 误差超出退出带宽并持续 `pos_exit_hold_sec` 退回 `ALIGN`。
+
+状态行中 `yaw_control=FACE`，并附 `face=<货架朝向> yaw_sp=<当前 yaw 设定>`；
+`/front_marker_control/fixed_yaw_target` 在锁定货架朝向时发布该朝向。tag yaw
+（`yaw_raw`）仍照常计算和显示，只作观测，不进控制。
+
+## marker 模式：连续采样的最终 XYZ+yaw 对准
+
+当 `enable_position_hold=true` 且 `yaw_mode=marker` 时，原单帧锁定由
 `ALIGN -> YAW_SAMPLING -> POSE_ALIGNING -> POS_HOLD` 替代。
 
 1. XYZ 进入现有容差且 local 位置差分速度 < 0.05 m/s，持续 1 秒后开始采样。

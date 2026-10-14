@@ -95,6 +95,7 @@ class LockScopeTest(unittest.TestCase):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
         node.refiner = None
         node.lock = threading.RLock()
+        node.yaw_mode = 'off'
         node.last_accepted_source_stamp = None
         node.last_filter_stamp = None
         node.max_pose_latency_sec = 0.5
@@ -127,6 +128,7 @@ class LockScopeTest(unittest.TestCase):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
         node.refiner = None
         node.lock = threading.RLock()
+        node.yaw_mode = 'off'
         node.setpoint_publish_rate_hz = 20.0
         node.last_control_time = None
         node.latest_position_error = (0.2, 0.0, 0.0)
@@ -283,6 +285,7 @@ class PositionHoldRegressionTest(unittest.TestCase):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
         node.refiner = None
         node.lock = threading.RLock()
+        node.yaw_mode = 'off'
         node.setpoint_publish_rate_hz = 20.0
         node.last_control_time = None
         node.latest_position_error = (error_x, 0.0, 0.0)
@@ -440,6 +443,7 @@ class LocalizationRejectRegressionTest(unittest.TestCase):
         node = FrontMarkerControlNode.__new__(FrontMarkerControlNode)
         node.refiner = None
         node.lock = threading.RLock()
+        node.yaw_mode = 'off'
         node.odom_source_max_age_sec = 0.5
         node.odom_interp_gap_max_sec = 0.1
         node.future_stamp_tolerance_sec = 0.1
