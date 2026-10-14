@@ -8,5 +8,5 @@ camera_frame_id: ov13855_optical_frame
 camera_info_url: package://ov13855_cam/config/ov13855_2560x1440.yaml
 image_topic: /ov13855/image_raw
 camera_info_topic: /ov13855/camera_info
-# 检测使用亮度 mono8；不翻转，不缩放采集图像。
+# 发布 NV12 的 Y 平面（亮度）作为 mono8；不翻转，不缩放采集图像。
 frame_timeout_sec: 5.0

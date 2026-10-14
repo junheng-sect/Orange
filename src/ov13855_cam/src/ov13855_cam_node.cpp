@@ -103,9 +103,11 @@ void run() {
   auto image_pub = transport.advertise(image_topic, 1);
   auto info_pub = nh.advertise<sensor_msgs::CameraInfo>(info_topic, 1);
   Pipeline stream; GError* error = nullptr;
+  // No videoconvert: the NV12 Y plane is already the mono8 image. videoconvert recomputed luma through a
+  // colour-matrix conversion on one CPU core (~0.9 core at 2560x1440, 5.4 fps at 4224x3136).
   const std::string description = "v4l2src name=source ! video/x-raw,format=NV12,width=" + std::to_string(width) +
     ",height=" + std::to_string(height) + ",framerate=" + std::to_string(fps) +
-    "/1 ! videoconvert ! video/x-raw,format=GRAY8 ! appsink name=frames sync=false drop=true max-buffers=1 wait-on-eos=false";
+    "/1 ! appsink name=frames sync=false drop=true max-buffers=1 wait-on-eos=false";
   stream.pipeline = gst_parse_launch(description.c_str(), &error);
   if (error || !stream.pipeline) {
     std::string detail = error ? error->message : "cannot create pipeline";
@@ -135,9 +137,13 @@ void run() {
     last_frame = ros::WallTime::now(); GstVideoInfo video; gst_video_info_init(&video);
     if (!gst_video_info_from_caps(&video, gst_sample_get_caps(sample.get())) ||
         GST_VIDEO_INFO_WIDTH(&video) != width || GST_VIDEO_INFO_HEIGHT(&video) != height ||
-        GST_VIDEO_INFO_FORMAT(&video) != GST_VIDEO_FORMAT_GRAY8 || GST_VIDEO_INFO_FPS_D(&video) <= 0 ||
+        GST_VIDEO_INFO_FORMAT(&video) != GST_VIDEO_FORMAT_NV12 || GST_VIDEO_INFO_FPS_D(&video) <= 0 ||
         GST_VIDEO_INFO_FPS_N(&video) != fps * GST_VIDEO_INFO_FPS_D(&video))
       throw std::runtime_error("negotiated camera caps differ from requested width/height/fps/format");
+    // Publishing Y as mono8 assumes full-range (0-255) luma; limited range (16-235) would lose contrast.
+    const auto range = GST_VIDEO_INFO_COLORIMETRY(&video).range;
+    if (range == GST_VIDEO_COLOR_RANGE_16_235) throw std::runtime_error("limited-range NV12; Y plane is not full-range mono8");
+    if (range != GST_VIDEO_COLOR_RANGE_0_255) ROS_WARN_ONCE("NV12 colour range unknown; assuming full-range Y plane");
     auto info = manager.getCameraInfo(); validateInfo(info, width, height);
     sensor_msgs::Image image; image.header.stamp = captureStamp(stream.pipeline, sample.get());
     image.header.frame_id = frame; image.width = width; image.height = height; image.encoding = "mono8";
@@ -145,6 +151,7 @@ void run() {
     GstVideoFrame mapped;
     if (!gst_video_frame_map(&mapped, &video, gst_sample_get_buffer(sample.get()), GST_MAP_READ))
       throw std::runtime_error("cannot map camera frame");
+    // Plane 0 of NV12 is the full-resolution Y plane; the UV plane is never read.
     const auto* data = static_cast<const unsigned char*>(GST_VIDEO_FRAME_PLANE_DATA(&mapped, 0));
     const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&mapped, 0);
     if (stride < width) { gst_video_frame_unmap(&mapped); throw std::runtime_error("invalid frame stride"); }
@@ -152,7 +159,12 @@ void run() {
       std::memcpy(image.data.data() + static_cast<size_t>(row) * width, data + static_cast<size_t>(row) * stride, width);
     gst_video_frame_unmap(&mapped); info.header = image.header;
     info_pub.publish(info); image_pub.publish(image);
-    if (first) { ROS_INFO("Streaming %dx%d @ %d caps fps, mono8, frame=%s", width, height, fps, frame.c_str()); first = false; }
+    if (first) {
+      gchar* colorimetry = gst_video_colorimetry_to_string(&GST_VIDEO_INFO_COLORIMETRY(&video));
+      ROS_INFO("Streaming %dx%d @ %d caps fps, NV12 Y plane as mono8 (colorimetry %s), frame=%s",
+               width, height, fps, colorimetry ? colorimetry : "unknown", frame.c_str());
+      g_free(colorimetry); first = false;
+    }
   }
 }
 }
