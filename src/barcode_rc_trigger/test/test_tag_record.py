@@ -50,6 +50,16 @@ class TagPoseTest(unittest.TestCase):
         self.assertEqual(pick_tag(history, 0.0, new), (new, 'pulse'))
         self.assertEqual(pick_tag(history, 0.0, None), (None, ''))
 
+    def test_at_matches_nearest_within_tolerance(self):
+        # 位姿来自自通路、读码图来自主通路：同一帧时间戳差约 0.01 ms，帧间隔 66.7 ms。
+        history = TagHistory()
+        frames = [sample_from_matrix(10.0 + i / 15.0, 1.0, i, FACING) for i in range(3)]
+        for sample in frames:
+            history.add(sample)
+        self.assertIs(history.at(10.0 + 1 / 15.0 + 2e-5), frames[1])
+        self.assertIs(history.at(10.0 + 1 / 15.0 - 0.009), frames[1])
+        self.assertIsNone(history.at(10.0 + 1 / 15.0 + 0.03))
+
     def test_format(self):
         sample = sample_from_matrix(10.0, 1.0, 0, FACING)
         self.assertEqual([(k, str(v)) for k, v in tag_fields(sample, 'img')],

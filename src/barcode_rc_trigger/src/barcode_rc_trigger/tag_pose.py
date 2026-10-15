@@ -29,12 +29,18 @@ class TagHistory(object):
     def add(self, sample):
         self.samples.append(sample)
 
-    def at(self, stamp, tolerance_s=1e-4):
-        """与图像时间戳相同的那一帧；相机读码用的就是这一帧的位姿。"""
-        for sample in reversed(self.samples):
-            if abs(sample.stamp - stamp) <= tolerance_s:
-                return sample
-        return None
+    def at(self, stamp, tolerance_s=0.01):
+        """与图像同一传感器帧的位姿；相机读码用的就是这一帧的位姿。
+
+        位姿来自 1280x960 自通路，读码图像来自 4224x3136 主通路，同一帧两路时间戳差约 0.01 ms
+        （帧间隔 66.7 ms），取 tolerance_s 以内最近的一帧。
+        """
+        best, best_dt = None, tolerance_s
+        for sample in self.samples:
+            dt = abs(sample.stamp - stamp)
+            if dt <= best_dt:
+                best, best_dt = sample, dt
+        return best
 
     def latest(self, now, max_age_s):
         """now 时刻 max_age_s 以内收到的最新一帧，没有则 None。"""

@@ -1,7 +1,8 @@
-// ROS adapter for decodeBarcodes(): ~decode decodes the latest camera frame that has a pose with the
-// same stamp from ov13855_apriltag_vision (waiting briefly for it), using the label ROI. While codes
-// are missing it retries on newer frames that have their own pose, until retry.timeout_ms; ~cancel
-// interrupts it. Every attempt can be recorded for offline analysis (~save_frames, ~log_attempts).
+// ROS adapter for decodeBarcodes(): ~decode subscribes to the full-resolution image for the duration of the
+// call and decodes the newest frame that has the pose of the same sensor frame from ov13855_apriltag_vision
+// (nearest stamp within ~pose_match_s; waiting briefly for it), using the label ROI. While codes are missing
+// it retries on newer frames that have their own pose, until retry.timeout_ms; ~cancel interrupts it.
+// Every attempt can be recorded for offline analysis (~save_frames, ~log_attempts).
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -63,24 +64,24 @@ class BarcodeReaderCameraNode {
     vision_tag_size_param_ = pnh.param<std::string>(
         "vision_tag_size_param", "/ov13855_apriltag_vision_node/target_marker_size_m");
     require_tag_ = pnh.param("require_tag", true);
-    max_frame_age_s_ = pnh.param("max_frame_age_s", 1.0);
+    image_wait_s_ = std::max(0.0, pnh.param("image_wait_s", 1.0));
     pose_wait_s_ = std::max(0.0, pnh.param("pose_wait_s", 0.2));
-    pose_fallback_s_ = std::max(0.0, pnh.param("pose_fallback_s", 0.2));
+    pose_match_s_ = std::max(0.0, pnh.param("pose_match_s", 0.01));
     log_strategies_ = pnh.param("log_strategies", false);
     setupRecorder(pnh);
-    const auto image_topic = pnh.param<std::string>("image_topic", "/ov13855/image_raw");
-    const auto info_topic = pnh.param<std::string>("camera_info_topic", "/ov13855/camera_info");
+    nh_ = nh;
+    image_topic_ = pnh.param<std::string>("image_topic", "/ov13855_full/image_raw");
+    const auto info_topic = pnh.param<std::string>("camera_info_topic", "/ov13855_full/camera_info");
     const auto pose_topic = pnh.param<std::string>("pose_topic", "/front_marker/pose");
 
     result_pub_ = pnh.advertise<BarcodeArray>("result", 10);
     annotated_pub_ = pnh.advertise<sensor_msgs::Image>("image_annotated", 1);
-    image_sub_ = nh.subscribe(image_topic, 2, &BarcodeReaderCameraNode::onImage, this);
     info_sub_ = nh.subscribe(info_topic, 1, &BarcodeReaderCameraNode::onInfo, this);
     pose_sub_ = nh.subscribe(pose_topic, 10, &BarcodeReaderCameraNode::onPose, this);
     decode_srv_ = pnh.advertiseService("decode", &BarcodeReaderCameraNode::onDecode, this);
     cancel_srv_ = pnh.advertiseService("cancel", &BarcodeReaderCameraNode::onCancel, this);
-    ROS_INFO("barcode_reader_camera: config=%s image=%s pose=%s require_tag=%d",
-             config_file.c_str(), image_topic.c_str(), pose_topic.c_str(), (int)require_tag_);
+    ROS_INFO("barcode_reader_camera: config=%s image=%s (subscribed only during ~decode) pose=%s require_tag=%d",
+             config_file.c_str(), image_topic_.c_str(), pose_topic.c_str(), (int)require_tag_);
   }
 
  private:
@@ -151,12 +152,49 @@ class BarcodeReaderCameraNode {
     update_cv_.notify_all();
   }
 
-  // Caller holds mutex_.
+  // Caller holds mutex_. The pose of the same sensor frame: poses come from the 1280x960 self path, images
+  // from the 4224x3136 main path; their stamps differ by ~0.01 ms (frame period 66.7 ms), so the nearest
+  // pose within pose_match_s_ is taken.
   const geometry_msgs::PoseStamped* findPose(const ros::Time& stamp) const {
-    for (auto it = poses_.rbegin(); it != poses_.rend(); ++it)
-      if (it->header.stamp == stamp) return &*it;
+    const geometry_msgs::PoseStamped* best = nullptr;
+    double best_dt = pose_match_s_;
+    for (const auto& p : poses_) {
+      const double dt = std::abs((p.header.stamp - stamp).toSec());
+      if (dt <= best_dt) {
+        best = &p;
+        best_dt = dt;
+      }
+    }
+    return best;
+  }
+
+  // Caller holds mutex_. Newest received frame whose pose has arrived.
+  const Frame* newestFrameWithPose() const {
+    for (auto it = frames_.rbegin(); it != frames_.rend(); ++it)
+      if (findPose(it->stamp)) return &*it;
     return nullptr;
   }
+
+  // The full-resolution image (13 MB per frame) is subscribed only while ~decode runs, and the camera node
+  // copies frames only while someone subscribes. Frames received outside a decode are dropped.
+  class ImageSubscription {
+   public:
+    explicit ImageSubscription(BarcodeReaderCameraNode& node) : node_(node) {
+      {
+        std::lock_guard<std::mutex> lock(node_.mutex_);
+        node_.frames_.clear();
+      }
+      node_.image_sub_ = node_.nh_.subscribe(node_.image_topic_, 2, &BarcodeReaderCameraNode::onImage, &node_);
+    }
+    ~ImageSubscription() {
+      node_.image_sub_.shutdown();
+      std::lock_guard<std::mutex> lock(node_.mutex_);
+      node_.frames_.clear();
+    }
+
+   private:
+    BarcodeReaderCameraNode& node_;
+  };
 
   static TagPose toTagPose(const geometry_msgs::Pose& p) {
     const double x = p.orientation.x, y = p.orientation.y, z = p.orientation.z, w = p.orientation.w;
@@ -190,36 +228,35 @@ class BarcodeReaderCameraNode {
     CameraModel camera;
     bool have_pose = false;
     TagPose pose;
+    const ImageSubscription subscription(*this);
     {
       std::unique_lock<std::mutex> lock(mutex_);
-      if (frames_.empty() || (ros::Time::now() - frames_.back().stamp).toSec() > max_frame_age_s_) {
-        result.error = "no_image";
+      // First frame arrives ~0.2 s after subscribing (connection setup plus up to one frame period).
+      update_cv_.wait_for(lock, std::chrono::duration<double>(image_wait_s_),
+                          [&]() { return !frames_.empty() || cancel_.load(); });
+      if (frames_.empty()) {
+        result.error = cancel_.load() ? "cancelled" : "no_image";
       } else {
-        // The vision node publishes a frame's pose ~40 ms after the image. Wait for the latest
-        // frame's pose, but stop early once a newer pose shows the vision node skipped this frame.
-        const Frame latest = frames_.back();
-        const ros::Time latest_stamp = latest.stamp;
-        update_cv_.wait_for(lock, std::chrono::duration<double>(pose_wait_s_), [&]() {
-          return findPose(latest_stamp) || (!poses_.empty() && poses_.back().header.stamp > latest_stamp);
-        });
-        // Newest frame with a pose, at most pose_fallback_s_ older than the latest frame.
-        frame = latest;
-        for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
-          if ((latest_stamp - it->stamp).toSec() > pose_fallback_s_) break;
-          if (const auto* p = findPose(it->stamp)) {
-            frame = *it;
-            pose = toTagPose(p->pose);
-            have_pose = true;
-            if (p->header.frame_id != frame.frame_id)
-              ROS_WARN_THROTTLE(10.0, "barcode_reader_camera: pose frame %s != image frame %s",
-                                p->header.frame_id.c_str(), frame.frame_id.c_str());
-            break;
-          }
+        // The vision node publishes a frame's pose ~50 ms after the image. Wait for any received frame
+        // (more keep arriving meanwhile) to get its pose and decode the newest such frame.
+        const double first_ms = (ros::WallTime::now() - started).toSec() * 1000.0;
+        update_cv_.wait_for(lock, std::chrono::duration<double>(pose_wait_s_),
+                            [&]() { return newestFrameWithPose() || cancel_.load(); });
+        frame = frames_.back();
+        if (const Frame* with_pose = newestFrameWithPose()) {
+          frame = *with_pose;
+          const auto* p = findPose(frame.stamp);
+          pose = toTagPose(p->pose);
+          have_pose = true;
+          if (p->header.frame_id != frame.frame_id)
+            ROS_WARN_THROTTLE(10.0, "barcode_reader_camera: pose frame %s != image frame %s",
+                              p->header.frame_id.c_str(), frame.frame_id.c_str());
         }
         if (camera_.valid() && info_size_ == frame.gray.size()) camera = camera_;
-        ROS_DEBUG("barcode_reader_camera: frame %.3f (latest %.3f) pose=%d after %.0f ms wait",
-                  frame.stamp.toSec(), latest_stamp.toSec(), (int)have_pose,
-                  (ros::WallTime::now() - started).toSec() * 1000.0);
+        if (cancel_.load()) result.error = "cancelled";
+        ROS_DEBUG("barcode_reader_camera: frame %.3f (latest %.3f) pose=%d, first image after %.0f ms, "
+                  "decoding after %.0f ms", frame.stamp.toSec(), frames_.back().stamp.toSec(), (int)have_pose,
+                  first_ms, (ros::WallTime::now() - started).toSec() * 1000.0);
       }
     }
     if (result.error.empty() && require_tag_ && !camera.valid()) result.error = "no_camera_info";
@@ -389,10 +426,12 @@ class BarcodeReaderCameraNode {
   double layout_tag_size_m_ = 0.0;  // 0 = no layout file
   std::string vision_tag_size_param_;
   bool require_tag_ = true;
-  double max_frame_age_s_ = 1.0;
-  double pose_wait_s_ = 0.2;      // max wait for the latest frame's pose
-  double pose_fallback_s_ = 0.2;  // how far back a frame with a pose may be used instead
+  double image_wait_s_ = 1.0;   // max wait for the first image after subscribing
+  double pose_wait_s_ = 0.2;    // max wait after the first image for a received frame's pose
+  double pose_match_s_ = 0.01;  // max |pose stamp - image stamp| for the same sensor frame
   bool log_strategies_ = false;
+  ros::NodeHandle nh_;
+  std::string image_topic_;
   std::unique_ptr<FrameRecorder> recorder_;  // background writer; drains its queue on shutdown
   int save_retry_frames_ = 2;
 

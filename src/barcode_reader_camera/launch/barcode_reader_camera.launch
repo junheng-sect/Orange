@@ -30,8 +30,8 @@
     <param name="save_dir" value="$(arg save_dir)" />
     <param name="log_attempts" value="$(arg log_attempts)" />
     <param name="save_retry_frames" value="$(arg save_retry_frames)" />
-    <param name="image_topic" value="/ov13855/image_raw" />
-    <param name="camera_info_topic" value="/ov13855/camera_info" />
+    <param name="image_topic" value="/ov13855_full/image_raw" />
+    <param name="camera_info_topic" value="/ov13855_full/camera_info" />
     <param name="pose_topic" value="/front_marker/pose" />
   </node>
 </launch>

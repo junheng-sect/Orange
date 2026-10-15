@@ -129,7 +129,7 @@ roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=both
 - `both` 先相机后读码器，两个都读（不是失败才用读码器），同一次拨杆拿两份结果对比。先相机是为了不把读码器的补光/瞄准光拍进图里。
 - 某个读码服务 `service_wait_s` 内不在线就跳过它，另一个照常读；这一段写 `ok: false`、`error: unavailable`，整块汇总打 WARN。
   读到、读不到都打 INFO（读不到是测距实验的正常结果）。
-- `tag.source`：`img` 是相机读码所用那一帧的位姿（重试帧读出时是那一帧）；相机没取到图或只跑 serial 时用拨杆时刻最新一帧，记为 `pulse`。
+- `tag.source`：`img` 是相机读码所用那一帧的位姿（重试帧读出时是那一帧；读码图是 4224×3136 主通路，位姿取自通路同一传感器帧，时间戳差 10 ms 内最近的一帧）；相机没取到图或只跑 serial 时用拨杆时刻最新一帧，记为 `pulse`。
   both 模式下读码器在相机之后才读，期间若在移动，位置以相机那一帧为准。
 - 每次开始读码发布 `~pulse`（`std_msgs/UInt32`，拨杆序号；被忽略的拨杆也占号但不发布），用来在 bag 里对齐；
   详细结果看两个读码节点各自的 `~result`。

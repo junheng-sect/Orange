@@ -1,6 +1,7 @@
 # barcode_reader_camera
 
-相机读码：用 AprilTag 位姿框出标签区域，在 OV13855 图像上解 QR / DataMatrix / Code128。
+相机读码：用 AprilTag 位姿框出标签区域，在 OV13855 全分辨率（4224×3136）图像上解 QR / DataMatrix / Code128。
+全分辨率图只在读码时订阅（相机主通路 `/ov13855_full/image_raw`），tag 位姿来自自通路 1280×960，见 `ov13855_cam` README。
 提供 `~decode` 服务，平时由 `barcode_rc_trigger`（拨 CH9 手动读）或 `barcode_arrival_trigger`（到位自动读）调用。
 ROS 接口全集、读码流程、与 Drone-Vision 原实现的差异见 [DETAILS.md](DETAILS.md)。
 
@@ -57,9 +58,9 @@ roslaunch --ros-args barcode_reader_camera barcode_reader_camera.launch
 
 ## 读码结果
 
-读码过程：先等最新一帧的 tag 位姿，按版式框出标签区域解码；没读齐就换新帧重试，每帧用自己的位姿只扫标签区域，
-直到读齐或解码开始后 2 s（参数文件里的 `retry.timeout_ms`）。所以读到时一般几十 ms，读不出时约 2 s。
-最近 0.2 s 的帧都没有 tag 位姿时直接返回 `no_tag`，不重试。
+读码过程：订阅全分辨率图，约 0.2 s 后收到第一帧；取位姿已到的最新一帧，按版式框出标签区域解码；没读齐就换新帧重试，
+每帧用自己的位姿只扫标签区域，直到读齐或解码开始后 2 s（参数文件里的 `retry.timeout_ms`），结束后退订。
+所以第一帧就读出时约 0.2~0.3 s（主要是等第一帧），读不出时约 2.3 s。收到第一帧后 0.2 s 内的帧都没有 tag 位姿时返回 `no_tag`（共约 0.4~0.5 s），不重试。
 
 `~decode` 返回的 `error`：
 
@@ -69,7 +70,7 @@ roslaunch --ros-args barcode_reader_camera barcode_reader_camera.launch
 | `partial` | 读到了，但没达到版式要求的个数 |
 | `decode_fail` | 看到标签了，没读出码 |
 | `no_tag` | 最近的帧都没有 tag 位姿（看不到 tag） |
-| `no_image` | 1 s 内没有新图像 |
+| `no_image` | 订阅后 1 s 内没收到全分辨率图像（主通路节点 `ov13855_full_cam` 没在跑） |
 | `no_camera_info` | 没收到相机内参 |
 | `busy` | 上一次读码还没结束 |
 | `cancelled` | 被 `~cancel` 中止 |
@@ -90,7 +91,7 @@ roslaunch --ros-args barcode_reader_camera barcode_reader_camera.launch
 
 - `attempts.csv`：结果、码、耗时、tag 距离和倾角、标签区域亮度和清晰度、试了几帧，最后一列是对应的读码目录名；不存图。
 
-每个读码目录里（第一帧读出约 2 MB，重试到超时约 7 MB）：
+每个读码目录里（全分辨率 PNG 约 5 MB 一张：第一帧读出约 5 MB，重试到超时约 20 MB）：
 
 - `frame.png`：第一帧原图（无损 PNG）。
 - `retry_N.png`：第 N 个重试帧，只存前 `save_retry_frames` 张、读出码的那一帧和最后一帧。

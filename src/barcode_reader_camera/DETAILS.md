@@ -11,10 +11,13 @@
 
 ## ROS 接口
 
-- 订阅 `/ov13855/image_raw`、`/ov13855/camera_info`、`/front_marker/pose`。位姿沿用源图像时间戳，节点按时间戳精确配对，
-  转回 rvec/tvec 投影 ROI。视觉节点要算 AprilTag，位姿比图像晚约 30–50 ms；`~decode` 先等最新帧的位姿（最多
-  `~pose_wait_s`，收到更新帧的位姿说明这帧被视觉节点跳过，提前停止等待），再选最近一帧有位姿的图像（最多比最新帧早
-  `~pose_fallback_s`），都没有才返回 `no_tag`。
+- 图像用相机主通路的全分辨率 `/ov13855_full/image_raw`（4224×3136，`/ov13855_full/camera_info`），位姿用
+  `/front_marker/pose`（视觉节点在自通路 1280×960 上算，见 `ov13855_cam` README）。全图每帧 13 MB，只在 `~decode`
+  期间订阅，返回前退订并丢掉缓存的帧；相机节点没有订阅者时不拷贝图像。订阅后约 0.2 s 收到第一帧
+  （订阅握手 + 最多一帧间隔），最多等 `~image_wait_s`，没等到返回 `no_image`。`camera_info` 一直订阅。
+- 位姿沿用自通路图像的时间戳，同一传感器帧两路时间戳差约 0.01 ms，节点取与图像时间戳相差 `~pose_match_s` 以内最近的
+  位姿，转回 rvec/tvec 按全分辨率内参投影 ROI。视觉节点要算 AprilTag，位姿比图像晚约 50 ms；收到第一帧后最多再等
+  `~pose_wait_s`，期间到的帧都算，取其中位姿已到的最新一帧；都没有才返回 `no_tag`（看不到 tag 时约 0.4~0.5 s 返回）。
 - `~decode`（`DecodeBarcodes.srv`）：解码最新一帧，没读齐时换新帧重试。返回 `success / partial / error / elapsed_s /
   used_tag_roi / report / codes[] / header`（`header` 为结果所在那一帧的时间戳和坐标系：重试帧读出时是那一帧，否则是第一帧；
   与 `~result` 相同；没取到图像时为空），每个码是 `Barcode.msg`：`format, code, raw_hex, symbology_id, center_x/y, corners, source`，
@@ -31,9 +34,11 @@
 | `~layout_file` | launch 默认 `config/layouts/qr_top_tag_bottom.yaml` | 标签版式；为空时用代码默认值并警告 |
 | `~vision_tag_size_param` | `/ov13855_apriltag_vision_node/target_marker_size_m` | 与版式 tag 边长不一致时每 10 s 警告一次，不阻断解码 |
 | `~require_tag` | `true` | 与原实现一样没有 tag 不解码；`false` 时没有 tag 走全图 |
-| `~max_frame_age_s` | 1.0 | 最新图像超过这么久返回 `no_image` |
-| `~pose_wait_s` | 0.2 | 等最新帧位姿的最长时间 |
-| `~pose_fallback_s` | 0.2 | 没等到时，最多往前找多久有位姿的帧 |
+| `~image_topic` / `~camera_info_topic` | `/ov13855_full/image_raw` / `/ov13855_full/camera_info` | 读码用的图像和内参 |
+| `~pose_topic` | `/front_marker/pose` | tag 位姿 |
+| `~image_wait_s` | 1.0 | 订阅图像后等第一帧的最长时间，超时返回 `no_image` |
+| `~pose_wait_s` | 0.2 | 收到第一帧后，等任一帧位姿的最长时间 |
+| `~pose_match_s` | 0.01 | 位姿与图像算同一帧的最大时间戳差（帧间隔 66.7 ms） |
 | `~log_strategies` | `false` | `true` 时每个策略的日志打成 INFO |
 | `~save_frames` / `~save_dir` / `~log_attempts` / `~save_retry_frames` | 见 README | 读码记录 |
 
@@ -46,7 +51,7 @@
 第一帧没读齐时，节点把之后的新帧一帧一帧送进解码，直到读齐或解码开始后 `barcode_decoder.retry.timeout_ms`（默认 2000 ms，
 0 = 不重试）；最后一帧不打断，最多超出一帧的耗时：
 
-- 每个重试帧用它自己的 tag 位姿（同时间戳的 `/front_marker/pose`）重新投影 ROI，只跑标签 ROI 策略（`RT-WARP-2d`、
+- 每个重试帧用它自己的 tag 位姿（同一传感器帧的 `/front_marker/pose`）重新投影 ROI，只跑标签 ROI 策略（`RT-WARP-2d`、
   `RT-ROI-raw` …，按缺的码型补），不跑全图金字塔和去畸变。只有 QR/DM 时每帧约 30–50 ms，相机 15 fps 基本每帧都能试到；
   版式里有 Code128 时 1D 策略要多跑，每帧可能到几百 ms，2 s 内试的帧数少很多。
 - 取帧规则：上一帧之后、位姿已到的最新一帧；位姿约晚 40 ms 到，所以重试帧通常是刚拍的那一帧。视觉节点没检测到 tag 的帧
@@ -55,6 +60,9 @@
   是把整帧缩到 512 扫两次（`RT-2d-small`），实飞 18 次失败一次也没读出；全图金字塔和去畸变每帧 100 ms 以上，实飞也从未读出。
   用实飞记录回放（每次只有主帧和 2 张重试帧）：36 次中成功从 16 次升到 25 次，救回的约 0.3 s 内读出。
 - 读不出时 `~decode` 要等满 `timeout_ms` 才返回；`barcode_rc_trigger` 在这期间再拨杆会被忽略。
+- 全分辨率下第一帧整条链路（读不出时）约 0.68 s，2560×1440 时约 0.24 s（2026-10-14 用 34 个历史读码帧放大到 4224×3136 离线测）；
+  多出的主要是整图金字塔的 FULL 层和整图去畸变，标签 ROI 策略几乎不变，第一帧就读出的仍是 11~22 ms。
+  这部分占用 2 s 重试预算，留给换帧重试的时间相应变少。
 
 ## 读码记录字段
 

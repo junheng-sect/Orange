@@ -1,4 +1,4 @@
-// rostest: publish a synthetic label (image + camera_info + tag pose with the same stamp),
+// rostest: publish a synthetic label (image + camera_info + tag pose of the same frame),
 // then exercise ~decode, ~result and ~cancel of barcode_reader_camera_node.
 #include <dirent.h>
 
@@ -91,6 +91,9 @@ class Publisher {
   std::atomic<bool> publish_pose{true};
   std::atomic<int> pose_delay_ms{0};  // > 0: pose after its image, like the real vision node
   std::atomic<bool> blurred{false};   // publish motion-blurred frames (the pose is still published)
+  // Pose stamp minus image stamp: the real pose comes from the self path, whose stamp differs slightly.
+  std::atomic<int> pose_offset_us{0};
+  uint32_t imageSubscribers() const { return image_pub_.getNumSubscribers(); }
 
  private:
   void run() {
@@ -108,6 +111,7 @@ class Publisher {
       info_pub_.publish(info);
       geometry_msgs::PoseStamped pose;
       pose.header = header;
+      pose.header.stamp += ros::Duration(pose_offset_us * 1e-6);
       pose.pose = pose_;
       const int delay_ms = pose_delay_ms;
       if (publish_pose && delay_ms <= 0) pose_pub_.publish(pose);  // pose buffered before its image
@@ -190,6 +194,37 @@ TEST(BarcodeReaderCameraNode, WaitsForPoseThatArrivesAfterImage) {
     EXPECT_TRUE(srv.response.used_tag_roi) << i;
     ros::Duration(0.037 * (i + 1)).sleep();  // vary the phase against the frame period
   }
+}
+
+TEST(BarcodeReaderCameraNode, SubscribesImageOnlyDuringDecode) {
+  const auto scene = synthetic::makeScene();
+  ASSERT_TRUE(ros::service::waitForService("/barcode_reader_camera/decode", 20000));
+  Publisher publisher(scene);
+  ros::Duration(1.0).sleep();
+  EXPECT_EQ(publisher.imageSubscribers(), 0u);
+  barcode_reader_camera::DecodeBarcodes srv;
+  ASSERT_TRUE(ros::service::call("/barcode_reader_camera/decode", srv));
+  EXPECT_TRUE(srv.response.success) << srv.response.error << " " << srv.response.report;
+  const ros::WallTime deadline = ros::WallTime::now() + ros::WallDuration(2.0);
+  while (publisher.imageSubscribers() > 0 && ros::WallTime::now() < deadline) ros::WallDuration(0.05).sleep();
+  EXPECT_EQ(publisher.imageSubscribers(), 0u);
+}
+
+TEST(BarcodeReaderCameraNode, MatchesPoseByNearestStamp) {
+  const auto scene = synthetic::makeScene();
+  ASSERT_TRUE(ros::service::waitForService("/barcode_reader_camera/decode", 20000));
+  Publisher publisher(scene);
+  publisher.pose_offset_us = 300;  // self/main path stamps of one sensor frame differ by ~0.01 ms
+  ros::Duration(1.0).sleep();
+  barcode_reader_camera::DecodeBarcodes srv;
+  ASSERT_TRUE(ros::service::call("/barcode_reader_camera/decode", srv));
+  EXPECT_TRUE(srv.response.success) << srv.response.error << " " << srv.response.report;
+  EXPECT_TRUE(srv.response.used_tag_roi);
+
+  publisher.pose_offset_us = 30000;  // beyond pose_match_s (10 ms): another sensor frame's pose
+  ros::Duration(0.3).sleep();
+  ASSERT_TRUE(ros::service::call("/barcode_reader_camera/decode", srv));
+  EXPECT_EQ(srv.response.error, "no_tag");
 }
 
 TEST(BarcodeReaderCameraNode, RetriesNewFramesUntilDecoded) {
