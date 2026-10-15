@@ -17,6 +17,7 @@ import auto_save_calibrator  # noqa: E402
 import generate_checkerboard  # noqa: E402
 import recalibrate  # noqa: E402
 import save_calibration  # noqa: E402
+import scale_calibration  # noqa: E402
 
 OST = """image_width: %d
 image_height: %d
@@ -57,7 +58,9 @@ class SaveCalibrationTest(unittest.TestCase):
             tar = os.path.join(tmp, 'calibrationdata.tar.gz')
             make_tar(tar)
             out = os.path.join(tmp, 'out')
-            self.assertEqual(save_calibration.main(['--tar', tar, '--out-dir', out, '--reference', '']), 0)
+            self.assertEqual(save_calibration.main(['--tar', tar, '--out-dir', out, '--reference', '',
+                                                    '--camera-name', 'ov13855_2560x1440',
+                                                    '--width', '2560', '--height', '1440']), 0)
             saved = sorted(os.listdir(out))
             self.assertEqual(len(saved), 2)
             self.assertTrue(saved[0].startswith('ov13855_2560x1440_') and saved[0].endswith('.tar.gz'))
@@ -163,7 +166,8 @@ class RecalibrateTest(unittest.TestCase):
                     info.size = len(data)
                     archive.addfile(info, io.BytesIO(data))
             self.assertEqual(recalibrate.main(['--size', '7x5', '--square', '0.041', '--k', '2',
-                                               '--min-images', '3', '--out-dir', out, '--reference', '']), 0)
+                                               '--min-images', '3', '--out-dir', out, '--reference', '',
+                                               '--camera-name', 'ov13855_2560x1440']), 0)
             saved = [n for n in os.listdir(out) if n.endswith('_k2.yaml')]
             self.assertEqual(len(saved), 1)
             with open(os.path.join(out, saved[0])) as f:
@@ -179,6 +183,44 @@ class RecalibrateTest(unittest.TestCase):
             make_tar(tar)
             self.assertEqual(recalibrate.main(['--size', '7x5', '--square', '0.041', '--tar', tar,
                                                '--out-dir', tmp]), 1)
+
+
+class ScaleCalibrationTest(unittest.TestCase):
+    def test_scales_intrinsics_and_keeps_distortion(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, 'src.yaml')
+            with open(src, 'w') as f:
+                f.write('# 源标定注释\n' + OST % (2560, 1440))
+            out = os.path.join(tmp, 'out.yaml')
+            self.assertEqual(scale_calibration.main([src, '--width', '1280', '--height', '960',
+                                                     '--camera-name', 'ov13855_1280x960', '--out', out]), 0)
+            with open(out) as f:
+                text = f.read()
+            self.assertIn('源标定注释', text)
+            calib = yaml.safe_load(text)
+            self.assertEqual((calib['image_width'], calib['image_height']), (1280, 960))
+            self.assertEqual(calib['camera_name'], 'ov13855_1280x960')
+            k = calib['camera_matrix']['data']
+            # fx,cx 乘 0.5，fy,cy 乘 2/3；主点按像素中心 (c+0.5)*s-0.5
+            self.assertAlmostEqual(k[0], 1000.0, places=3)
+            self.assertAlmostEqual(k[4], 2000.0 * 2 / 3, places=3)
+            self.assertAlmostEqual(k[2], 1280.5 * 0.5 - 0.5, places=3)
+            self.assertAlmostEqual(k[5], 720.5 * 2 / 3 - 0.5, places=3)
+            self.assertEqual(calib['distortion_coefficients']['data'], [0.1, -0.2, 0.0, 0.0, 0.0])
+            p = calib['projection_matrix']['data']
+            self.assertAlmostEqual(p[0], 1000.0, places=3)
+            self.assertAlmostEqual(p[6], 720.5 * 2 / 3 - 0.5, places=3)
+
+    def test_round_trip(self):
+        calib = yaml.safe_load(OST % (2560, 1440))
+        k, _, _, p, _, _ = scale_calibration.scale(calib, 4224, 3136)
+        back = {'image_width': 4224, 'image_height': 3136, 'camera_matrix': {'data': k.ravel().tolist()},
+                'projection_matrix': {'data': p.ravel().tolist()},
+                'distortion_coefficients': calib['distortion_coefficients'],
+                'rectification_matrix': calib['rectification_matrix']}
+        k2, _, _, _, _, _ = scale_calibration.scale(back, 2560, 1440)
+        for got, want in zip(k2.ravel(), calib['camera_matrix']['data']):
+            self.assertAlmostEqual(got, want, places=9)
 
 
 if __name__ == '__main__':

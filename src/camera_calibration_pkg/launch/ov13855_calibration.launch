@@ -2,29 +2,36 @@
  <!-- 棋盘格：size 为内角点数（列x行），square 为单格边长（米），按实际标定板修改。 -->
  <arg name="size" default="7x5" />
  <arg name="square" default="0.041" />
+ <!-- 标哪一路：full 主通路 4224x3136（默认；标完用 scale_calibration.py 换算 1280x960）/ self 自通路 1280x960。
+      两路是同一画幅的整幅缩放，标一路即可换算另一路。 -->
+ <arg name="stream" default="full" />
  <arg name="start_camera" default="true" />
- <arg name="camera_config" default="$(find ov13855_cam)/config/ov13855.yaml" />
+ <arg name="camera_config" default="$(eval find('ov13855_cam') + ('/config/ov13855_full.yaml' if arg('stream') == 'full' else '/config/ov13855.yaml'))" />
  <!-- 与 ov13855_cam 的 camera_name 一致，ost.yaml 才能直接替换包内标定。 -->
- <arg name="camera_name" default="ov13855_2560x1440" />
+ <arg name="camera_name" default="$(eval 'ov13855_4224x3136' if arg('stream') == 'full' else 'ov13855_1280x960')" />
  <!-- 径向畸变项数；官方默认 2 不够，本镜头边缘需要 k3。 -->
  <arg name="k_coefficients" default="3" />
  <arg name="queue_size" default="1" />
- <!-- 采样时允许的角点平均位移，单位为 2560x1440 原图像素/帧；0.5 对手持标定板过严，几乎不采样。
+ <!-- 采样时允许的角点平均位移，单位为原图像素/帧（按 2560 宽 3.0 换算）；过小几乎不采样。
       -1 关闭检查（易混入运动模糊样本）。 -->
- <arg name="max_chessboard_speed" default="3.0" />
+ <arg name="max_chessboard_speed" default="$(eval 5.0 if arg('stream') == 'full' else 1.5)" />
  <!-- CALIBRATE 后自动 SAVE 并另存到此目录，文件名带时间戳。 -->
  <arg name="out_dir" default="$(env HOME)/.ros/camera_info" />
+ <arg name="camera_node" value="$(eval 'ov13855_full_cam' if arg('stream') == 'full' else 'ov13855_cam')" />
+ <arg name="image_topic" value="$(eval '/ov13855_full/image_raw' if arg('stream') == 'full' else '/ov13855/image_raw')" />
 
- <include if="$(arg start_camera)" file="$(find ov13855_cam)/launch/ov13855.launch">
-  <arg name="config_file" value="$(arg camera_config)" />
- </include>
+ <!-- 只起被标定的那一路；节点名与 ov13855.launch 一致。 -->
+ <node if="$(arg start_camera)" pkg="ov13855_cam" type="ov13855_cam_node" name="$(arg camera_node)" output="screen">
+  <rosparam command="load" file="$(arg camera_config)" />
+ </node>
 
  <node pkg="camera_calibration_pkg" type="auto_save_calibrator.py" name="ov13855_calibrator" output="screen"
        args="--size $(arg size) --square $(arg square) --camera_name $(arg camera_name) -k $(arg k_coefficients)
              --queue-size $(arg queue_size) --max-chessboard-speed $(arg max_chessboard_speed)">
   <param name="out_dir" value="$(arg out_dir)" />
-  <remap from="image" to="/ov13855/image_raw" />
-  <!-- 服务检查走 ov13855_cam 私有 set_camera_info；不要点 COMMIT，会覆盖 git 跟踪的包内标定。 -->
-  <remap from="camera" to="/ov13855_cam" />
+  <param name="reference" value="$(find ov13855_cam)/config/$(arg camera_name).yaml" />
+  <remap from="image" to="$(arg image_topic)" />
+  <!-- 服务检查走相机节点私有 set_camera_info；不要点 COMMIT，会覆盖 git 跟踪的包内标定。 -->
+  <remap from="camera" to="/$(arg camera_node)" />
  </node>
 </launch>

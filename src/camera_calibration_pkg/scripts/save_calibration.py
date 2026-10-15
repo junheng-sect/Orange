@@ -14,7 +14,7 @@ import tarfile
 
 import yaml
 
-DEFAULT_REFERENCE = '/home/orangepi/orange/src/ov13855_cam/config/ov13855_2560x1440.yaml'
+DEFAULT_REFERENCE = '/home/orangepi/orange/src/ov13855_cam/config/ov13855_4224x3136.yaml'
 
 
 def load_result(tar_path):
@@ -91,10 +91,10 @@ def save(tar, camera_name, out_dir, width, height, reference=DEFAULT_REFERENCE, 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--tar', default='/tmp/calibrationdata.tar.gz')
-    parser.add_argument('--camera-name', default='ov13855_2560x1440')
+    parser.add_argument('--camera-name', default='ov13855_4224x3136')
     parser.add_argument('--out-dir', default=os.path.expanduser('~/.ros/camera_info'))
-    parser.add_argument('--width', type=int, default=2560)
-    parser.add_argument('--height', type=int, default=1440)
+    parser.add_argument('--width', type=int, default=4224)
+    parser.add_argument('--height', type=int, default=3136)
     parser.add_argument('--reference', default=DEFAULT_REFERENCE, help='用于对比的当前标定 yaml')
     parser.add_argument('--size', help='内角点数如 7x5；与 --square 同时给出时逐图计算重投影误差')
     parser.add_argument('--square', type=float, help='单格边长（米）')

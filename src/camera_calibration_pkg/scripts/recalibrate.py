@@ -59,7 +59,7 @@ def main(argv=None):
     parser.add_argument('--k', type=int, default=3, choices=[2, 3], help='径向畸变项数')
     parser.add_argument('--max-image-error', type=float, default=0.5, help='单张 RMS 上限（像素）')
     parser.add_argument('--min-images', type=int, default=15)
-    parser.add_argument('--camera-name', default='ov13855_2560x1440')
+    parser.add_argument('--camera-name', default='ov13855_4224x3136')
     parser.add_argument('--out-dir', default=os.path.expanduser('~/.ros/camera_info'))
     parser.add_argument('--reference', default=save_calibration.DEFAULT_REFERENCE)
     args = parser.parse_args(argv)
