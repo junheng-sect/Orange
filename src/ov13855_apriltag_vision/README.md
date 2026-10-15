@@ -12,7 +12,7 @@ roslaunch ov13855_apriltag_vision ov13855_apriltag_vision.launch
 
 ## 实际处理流程
 
-1. 将图像转换为灰度；检测输入最长边缩至 1280，使用原生 AprilTag 检测。
+1. 将图像转换为灰度；检测输入最长边缩至 1280（相机自通路已是 1280×960，不再缩放），使用原生 AprilTag 检测。
 2. 角点按实际 X/Y 缩放比例还原至原图，保留 AprilTag 原生 `p[0..3]` 顺序。
 3. 默认选择面积最大的标签，也可配置固定 ID。
 4. 使用物体角点 `(-h,-h,0)、(h,-h,0)、(h,h,0)、(-h,h,0)`，其中 h=码边长/2，
@@ -37,7 +37,7 @@ CameraInfo 必须有效，图像尺寸和 frame 必须与其匹配；无目标�
 - `selection_mode: largest`：全图最大面积；同面积选择较小 ID。
   `selection_mode: fixed`：仅使用 `target_marker_id`，默认值 0。
 - 检测器默认最长边 1280、quad_decimate=1.5、4 线程、refine_edges=true。
-- 输入 `/ov13855/image_raw`、`/ov13855/camera_info`；mono8/rgb8/bgr8。
+- 输入 `/ov13855/image_raw`、`/ov13855/camera_info`（相机自通路 1280×960）；mono8/rgb8/bgr8。
 - 输出 `/front_marker/pose`：geometry_msgs/PoseStamped，语义 `^header.frame_id T_marker`，继承源图像时间戳。
 - 同时间戳发布 `pose.header.frame_id -> front_marker` 动态 TF。
 - 调试前缀 `/ov13855_apriltag_vision/`：`status`、`image_annotated`（原分辨率，默认 5Hz、有订阅者时生成）、
@@ -82,5 +82,5 @@ python3 /home/orangepi/orange/src/ov13855_apriltag_vision/test/live_camera_check
 固定/最大面积选择、首帧及 ID 切换立即发布、基本无效输入停发、Pose/TF/矩阵一致和控制输入外参。
 合成测试还确认：只要解算结果符合基本有效性条件，不会因为重投影 RMS 大于 1 px 而拒绝。
 
-参考内参仍按 2560×1440 使用，但原 JSON 没有标定分辨率记录。
+内参来自相机包的 CameraInfo：当前 1280×960 由 2026-10-11 的 2560×1440 棋盘格标定按比例换算，见 `ov13855_cam` README。
 当前软件是否发布位姿与实物尺度是否准确是两项验证，最新结果见 `VALIDATION.md`。

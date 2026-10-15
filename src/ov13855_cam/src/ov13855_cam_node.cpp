@@ -84,13 +84,13 @@ void run() {
   ros::NodeHandle nh, pnh("~");
   std::string device, name, frame, url, image_topic, info_topic;
   int width, height, fps; double timeout;
-  pnh.param<std::string>("video_device", device, "/dev/video11");
-  pnh.param<std::string>("camera_name", name, "ov13855_2560x1440");
+  pnh.param<std::string>("video_device", device, "/dev/video12");
+  pnh.param<std::string>("camera_name", name, "ov13855_1280x960");
   pnh.param<std::string>("camera_frame_id", frame, "ov13855_optical_frame");
-  pnh.param<std::string>("camera_info_url", url, "package://ov13855_cam/config/ov13855_2560x1440.yaml");
+  pnh.param<std::string>("camera_info_url", url, "package://ov13855_cam/config/ov13855_1280x960.yaml");
   pnh.param<std::string>("image_topic", image_topic, "/ov13855/image_raw");
   pnh.param<std::string>("camera_info_topic", info_topic, "/ov13855/camera_info");
-  pnh.param("image_width", width, 2560); pnh.param("image_height", height, 1440);
+  pnh.param("image_width", width, 1280); pnh.param("image_height", height, 960);
   pnh.param("framerate", fps, 15); pnh.param("frame_timeout_sec", timeout, 5.0);
   if (width <= 0 || height <= 0 || fps <= 0 || frame.empty() || !std::isfinite(timeout) || timeout <= 0 || device.empty())
     throw std::runtime_error("invalid camera configuration");
@@ -145,24 +145,31 @@ void run() {
     if (range == GST_VIDEO_COLOR_RANGE_16_235) throw std::runtime_error("limited-range NV12; Y plane is not full-range mono8");
     if (range != GST_VIDEO_COLOR_RANGE_0_255) ROS_WARN_ONCE("NV12 colour range unknown; assuming full-range Y plane");
     auto info = manager.getCameraInfo(); validateInfo(info, width, height);
-    sensor_msgs::Image image; image.header.stamp = captureStamp(stream.pipeline, sample.get());
-    image.header.frame_id = frame; image.width = width; image.height = height; image.encoding = "mono8";
-    image.is_bigendian = false; image.step = width; image.data.resize(static_cast<size_t>(width) * height);
-    GstVideoFrame mapped;
-    if (!gst_video_frame_map(&mapped, &video, gst_sample_get_buffer(sample.get()), GST_MAP_READ))
-      throw std::runtime_error("cannot map camera frame");
-    // Plane 0 of NV12 is the full-resolution Y plane; the UV plane is never read.
-    const auto* data = static_cast<const unsigned char*>(GST_VIDEO_FRAME_PLANE_DATA(&mapped, 0));
-    const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&mapped, 0);
-    if (stride < width) { gst_video_frame_unmap(&mapped); throw std::runtime_error("invalid frame stride"); }
-    for (int row = 0; row < height; ++row)
-      std::memcpy(image.data.data() + static_cast<size_t>(row) * width, data + static_cast<size_t>(row) * stride, width);
-    gst_video_frame_unmap(&mapped); info.header = image.header;
-    info_pub.publish(info); image_pub.publish(image);
+    info.header.stamp = captureStamp(stream.pipeline, sample.get()); info.header.frame_id = frame;
+    info_pub.publish(info);
+    // Without image subscribers (the full-resolution path between barcode reads) the frame is still pulled so
+    // the ISP keeps streaming, but the Y plane is neither copied nor published.
+    if (image_pub.getNumSubscribers() > 0) {
+      sensor_msgs::Image image; image.header = info.header;
+      image.width = width; image.height = height; image.encoding = "mono8";
+      image.is_bigendian = false; image.step = width; image.data.resize(static_cast<size_t>(width) * height);
+      GstVideoFrame mapped;
+      if (!gst_video_frame_map(&mapped, &video, gst_sample_get_buffer(sample.get()), GST_MAP_READ))
+        throw std::runtime_error("cannot map camera frame");
+      // Plane 0 of NV12 is the full-resolution Y plane; the UV plane is never read.
+      const auto* data = static_cast<const unsigned char*>(GST_VIDEO_FRAME_PLANE_DATA(&mapped, 0));
+      const int stride = GST_VIDEO_FRAME_PLANE_STRIDE(&mapped, 0);
+      if (stride < width) { gst_video_frame_unmap(&mapped); throw std::runtime_error("invalid frame stride"); }
+      for (int row = 0; row < height; ++row)
+        std::memcpy(image.data.data() + static_cast<size_t>(row) * width, data + static_cast<size_t>(row) * stride, width);
+      gst_video_frame_unmap(&mapped);
+      image_pub.publish(image);
+    }
     if (first) {
       gchar* colorimetry = gst_video_colorimetry_to_string(&GST_VIDEO_INFO_COLORIMETRY(&video));
-      ROS_INFO("Streaming %dx%d @ %d caps fps, NV12 Y plane as mono8 (colorimetry %s), frame=%s",
-               width, height, fps, colorimetry ? colorimetry : "unknown", frame.c_str());
+      ROS_INFO("Streaming %s %dx%d @ %d caps fps, NV12 Y plane as mono8 (colorimetry %s) to %s while subscribed, "
+               "frame=%s", device.c_str(), width, height, fps, colorimetry ? colorimetry : "unknown",
+               image_topic.c_str(), frame.c_str());
       g_free(colorimetry); first = false;
     }
   }

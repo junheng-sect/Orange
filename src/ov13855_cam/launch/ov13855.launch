@@ -1,7 +1,17 @@
 <launch>
- <arg name="config_file" default="$(find ov13855_cam)/config/ov13855.yaml" />
+ <!-- OV13855 双路：自通路 1280x960 发 /ov13855/*（AprilTag），主通路 4224x3136 发 /ov13855_full/*（读码按需订阅）。
+      两路是同一传感器的同一帧，各自一个节点，可单独启停。 -->
+ <arg name="config_file" default="$(find ov13855_cam)/config/ov13855.yaml"
+      doc="自通路参数文件（tag 跟踪用的 1280x960）" />
+ <arg name="full" default="true"
+      doc="是否同时起主通路全分辨率节点：true（默认，读码需要）/ false（只跟踪 tag，不读码）" />
+ <arg name="full_config_file" default="$(find ov13855_cam)/config/ov13855_full.yaml"
+      doc="主通路参数文件（读码用的 4224x3136）" />
  <arg name="output" default="screen" />
  <node pkg="ov13855_cam" type="ov13855_cam_node" name="ov13855_cam" output="$(arg output)">
   <rosparam command="load" file="$(arg config_file)" />
+ </node>
+ <node if="$(arg full)" pkg="ov13855_cam" type="ov13855_cam_node" name="ov13855_full_cam" output="$(arg output)">
+  <rosparam command="load" file="$(arg full_config_file)" />
  </node>
 </launch>

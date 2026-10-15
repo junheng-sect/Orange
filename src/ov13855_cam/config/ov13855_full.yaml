@@ -1,0 +1,13 @@
+# OV13855 RKISP 主通路：传感器原生 4224×3136，供读码按需订阅；不设置 UVC 曝光/增益。
+# 一直采集，图像只在有订阅者时拷贝和发布；camera_info 每帧都发。
+video_device: /dev/video11
+image_width: 4224
+image_height: 3136
+framerate: 15
+camera_name: ov13855_4224x3136
+camera_frame_id: ov13855_optical_frame
+camera_info_url: package://ov13855_cam/config/ov13855_4224x3136.yaml
+image_topic: /ov13855_full/image_raw
+camera_info_topic: /ov13855_full/camera_info
+# 发布 NV12 的 Y 平面（亮度）作为 mono8；不翻转，不缩放采集图像。
+frame_timeout_sec: 5.0

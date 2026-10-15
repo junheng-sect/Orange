@@ -1,0 +1,34 @@
+# 由 ov13855_2560x1440.yaml（2560x1440）按纯缩放换算到 4224x3136，2026-10-14 21:30；未重新标定
+# 横向 x1.6500000、纵向 x2.1777778；主点按像素中心 (c+0.5)*s-0.5；畸变系数不变（camera_calibration_pkg/scale_calibration.py）
+# 只在两种分辨率视场相同（ISP 整幅缩放、不裁剪）时成立。源文件注释：
+#   棋盘格标定 2026-10-11 12:35，离线重算自 ov13855_2560x1440_20261011_122912.tar.gz
+#   棋盘内角点 7x5，边长 0.0395 m；3 项径向畸变；使用 25/29 张，RMS 0.322 px
+#   剔除：left-0000.png, left-0022.png, left-0029.png, left-0021.png
+#   标准差 fx±1.73 fy±1.30 cx±0.77 cy±0.78 px；同日另一组独立标定（24 张）各参数差 ≤3.5 px。
+#   由 camera_calibration_pkg 的 recalibrate.py 生成；替换前为 1920x1080 标定按 4/3 缩放的参考值，见 git 历史。
+image_width: 4224
+image_height: 3136
+camera_name: ov13855_4224x3136
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [3114.45898,    0.     , 2124.5435 ,
+            0.     , 3112.26388, 1567.562  ,
+            0.     ,    0.     ,    1.     ]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.182839, -0.557115, -0.001278, -0.000407, 0.498597]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1., 0., 0.,
+         0., 1., 0.,
+         0., 0., 1.]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [3189.86694,    0.     , 2120.91751,    0.     ,
+            0.     , 3186.53285, 1562.28366,    0.     ,
+            0.     ,    0.     ,    1.     ,    0.     ]
