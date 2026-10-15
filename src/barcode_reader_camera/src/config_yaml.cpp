@@ -103,6 +103,7 @@ DecoderConfig loadDecoderConfig(const YAML::Node& root) {
   c.clahe_clip = get(clahe, "clip_limit", c.clahe_clip);
   c.clahe_grid = get(clahe, "grid_size", c.clahe_grid);
   c.try_rotate = get(bc ? bc["decoder"] : YAML::Node(), "try_rotate", c.try_rotate);
+  c.pyramid_with_tag = get(bc ? bc["pyramid"] : YAML::Node(), "with_tag", c.pyramid_with_tag);
   const YAML::Node retry = bc ? bc["retry"] : YAML::Node();
   c.retry_timeout_ms = get(retry, "timeout_ms", c.retry_timeout_ms);
   // Drone-Vision keys of the old whole-frame retry; reject them so an old config is not silently ignored.

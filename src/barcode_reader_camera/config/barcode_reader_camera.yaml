@@ -23,7 +23,13 @@ barcode_decoder:
       grid_size: 8
   decoder:
     try_rotate: true
+  pyramid:                     # 第一帧的整图金字塔（整幅缩到 1280 / 1920 / 原图三层扫描）
+    with_tag: false            # 有 tag ROI 时是否跑：false 只跑标签 ROI，读不出直接换帧；没有 tag 时总是跑
+                               # 2026-10-15 关：97 次读码里整图金字塔一次没读出；4224×3136 下首帧读不出时它要多花约 240 ms
+                               # （20 张实飞模糊帧离线测，首帧 642→400 ms，剩下主要是去畸变）。ROI 切不准时改回 true
   retry:                       # 第一帧没读齐时换新帧重试：每帧用自己的 tag 位姿，只跑标签 ROI（WARP/ROI）
     timeout_ms: 2000           # 解码开始后多久停止重试（含第一帧），0 = 不重试
   undistort:
-    enabled: true              # 2D 没读齐时，去畸变后再扫一次（需要 CameraInfo）
+    enabled: false             # 2D 没读齐时，整幅去畸变后再扫一次（需要 CameraInfo）
+                               # 2026-10-15 关：4224×3136 下每次约 370 ms（几乎全是 cv::undistort 本身），关后首帧读不出 400→26 ms，
+                               # 省下的时间留给换帧重试；97 次读码里只读出过 1 次（10.14 手动悬停，2560）。ROI 切不准时与 pyramid 一起改回 true

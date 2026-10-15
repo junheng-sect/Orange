@@ -6,7 +6,8 @@
 
 移植自 Drone-Vision `vision_core/src/vision_detect.cpp` 的 `decode_barcodes`（ZXing-C++ 3.0）。
 第一帧流程与原实现一致：AprilTag 位姿 → 按标签物理尺寸投影 ROI → 透视矫正 / ROI / 1D 补救 → 全图金字塔 → 去畸变；
-没读齐时换新帧重试（与原实现不同，见「换帧重试」）。所有结果经 `barcode_result_fusion.h`（原样复制）按物理位置去重。
+没读齐时换新帧重试（与原实现不同，见「换帧重试」）。包内配置关掉了后两步：有 tag ROI 时不跑全图金字塔（`pyramid.with_tag: false`），
+去畸变也不跑（`undistort.enabled: false`），第一帧只跑标签 ROI 策略，读不出直接换帧，见下。所有结果经 `barcode_result_fusion.h`（原样复制）按物理位置去重。
 策略名（`WARP-2d`、`ROI-raw`、`PFULL-1d-otsu` …）与 `vision_run.log` 相同，便于对照；重试帧上的策略名加 `RT-` 前缀。
 
 ## ROS 接口
@@ -63,6 +64,14 @@
 - 全分辨率下第一帧整条链路（读不出时）约 0.68 s，2560×1440 时约 0.24 s（2026-10-14 用 34 个历史读码帧放大到 4224×3136 离线测）；
   多出的主要是整图金字塔的 FULL 层和整图去畸变，标签 ROI 策略几乎不变，第一帧就读出的仍是 11~22 ms。
   这部分占用 2 s 重试预算，留给换帧重试的时间相应变少。
+- 因此 2026-10-15 起第一帧只跑标签 ROI 策略：有 tag ROI 时不跑全图金字塔（`barcode_decoder.pyramid.with_tag: false`），
+  也不跑整幅去畸变（`barcode_decoder.undistort.enabled: false`）。
+  - 板端全部 97 次读码中，成功 73 次：P1280/P1920/PFULL 一次没读出过，UND-2d 只读出 1 次（10.14 手动悬停，2560），其余全部来自 WARP/ROI。
+  - 10.11 实飞读失败的 20 帧放大到 4224×3136 离线测，第一帧读不出的耗时中位：两者都开 642 ms，只关金字塔 400 ms，两者都关 26 ms；
+    三种配置下都没读出。去畸变的约 370 ms 几乎全是 `cv::undistort` 处理整幅图，扫描只占约 57 ms。
+  - 省下的约 0.6 s 留给换帧重试（2 s 预算从解码开始算）。
+  - 没有 tag（`require_tag: false` 或 `decode_image --no-tag`）时金字塔照跑，它是唯一的策略；去畸变关闭对有无 tag 都生效。
+  - 版式、tag 位姿不准导致 ROI 切偏时，把这两项改回 `true`。
 
 ## 读码记录字段
 
@@ -84,6 +93,7 @@
 `config/barcode_reader_camera.yaml`，结构同 Drone-Vision `config.json` 的 `tag` / `detector` / `barcode_decoder`，
 默认值取自板端 `Drone-Vision/publish/config.json`：roi_scale 1.25；CLAHE 2.0/8；try_rotate；2D 没读齐时去畸变重扫；
 换帧重试到解码开始后 2 s（`retry.timeout_ms`；原实现的 `retry.count/interval_ms` 已删除，写了会报错）。
+代码默认值与原实现一致；包内配置文件另把 `pyramid.with_tag`、`undistort.enabled` 设为 false（2026-10-15，原因见「换帧重试」）。
 `detector` 只在 `decode_image` 自己检测 tag 时使用，ROS 节点用 `/front_marker/pose`。
 标签几何、码制开关和预期码数放在版式文件里。
 
@@ -124,5 +134,5 @@ expected_codes: {QRCode: 1, DataMatrix: 0, Code128: 0, ...}       # 每种要读
 
 板端 ZXing 是只读构建（不能生成码），测试用的合成标签由 `test/synthetic_label.hpp` 生成：QR 点阵由 qrencode 预先导出，
 Code128 用自带编码器，tag 用 `apriltag_to_image`。覆盖：Drone-Vision fusion 单测、tag ROI 读全且全图金字塔不运行、
-无 tag 走金字塔、`--free` 跑全链路去重、未达预期报 partial、关闭的码制不扫描、重试取帧、取消、读码记录、
+无 tag 走金字塔、`pyramid.with_tag` / `undistort.enabled` 开关（有 tag 时按开关跳过金字塔、去畸变，两者都关只跑标签 ROI）、无 tag 照跑金字塔、`--free` 跑全链路去重、未达预期报 partial、关闭的码制不扫描、重试取帧、取消、读码记录、
 节点 `~decode` / `no_tag` / `~cancel` / `~result`。DataMatrix 解码由实拍图验证。

@@ -143,7 +143,8 @@ rosrun barcode_reader_camera decode_image 图片.jpg --annotate /tmp/out.jpg
 | --- | --- | --- |
 | `barcode_decoder.retry.timeout_ms` | 2000 | 没读齐时换帧重试到解码开始后多久，0 = 不重试 |
 | `tag.roi_scale` | 1.25 | 标签区域 = 标签尺寸 × roi_scale |
-| `barcode_decoder.undistort.enabled` | `true` | 2D 码没读齐时去畸变再扫一次 |
+| `barcode_decoder.pyramid.with_tag` | `false` | 有 tag ROI 时第一帧是否再跑整图金字塔（1280/1920/原图）；没有 tag 时总是跑。ROI 切不准时改回 `true` |
+| `barcode_decoder.undistort.enabled` | `false` | 2D 码没读齐时整幅去畸变再扫一次（有无 tag 都适用）；4224×3136 下每次约 370 ms，ROI 切不准时与上一项一起改回 `true` |
 
 其余参数见文件内注释和 [DETAILS.md](DETAILS.md)。
 

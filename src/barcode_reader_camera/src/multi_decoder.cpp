@@ -1,6 +1,7 @@
 // Port of Drone-Vision vision_core/src/vision_detect.cpp decode_barcodes() and its 1D helpers
 // (BUILD_ID vision_detect_fusion_fix_buildlog_20260903_01). The first-frame strategy chain, parameters
-// and labels are unchanged; only the process-global dependencies were replaced:
+// and labels are unchanged (DecoderConfig::pyramid_with_tag=false can drop the whole-frame pyramid when a
+// tag ROI exists); only the process-global dependencies were replaced:
 //   VisionConfigSnapshot -> DecoderConfig (mapped to LegacyCfg below, original field names)
 //   VisionResult buffers  -> DecodeOutput
 //   vlogf/ms_now/op_aborted/g_ctx.cap->read -> DecodeHooks log/steady clock/cancelled/next_frame
@@ -64,6 +65,7 @@ struct LegacyCfg {
   double bc_clahe_clip;
   int bc_clahe_grid;
   bool bc_undistort_enabled;
+  bool bc_pyramid_with_tag;
   double label_width_meters, label_height_meters;
   const char* tag_position;
   double tag_offset_x_meters, tag_offset_y_meters;
@@ -88,6 +90,7 @@ LegacyCfg make_legacy(const DecoderConfig& c, const CameraModel& camera) {
   l.bc_clahe_clip = c.clahe_clip;
   l.bc_clahe_grid = c.clahe_grid;
   l.bc_undistort_enabled = c.undistort_enabled;
+  l.bc_pyramid_with_tag = c.pyramid_with_tag;
   l.label_width_meters = c.label_width_m;
   l.label_height_meters = c.label_height_m;
   l.tag_position = c.tag_position.c_str();
@@ -1150,8 +1153,12 @@ DecodeOutput decodeBarcodes(const cv::Mat& gray_in, const TagPose* tag, const Ca
   };
 
   // ── 5. 主帧金字塔（带 ROI 先验） ──
+  // 有 tag ROI 且 pyramid_with_tag=false 时只跑 ROI 策略，不跑 1280/1920/FULL 整图层；没有 tag 时金字塔是唯一的策略，照跑。
   out.frames = 1;
-  run_pyramid(full_gray, "P", true, true);
+  const bool with_layers = !tag_roi || cfg.bc_pyramid_with_tag;
+  run_pyramid(full_gray, "P", true, with_layers);
+  if (!with_layers && !all_done())
+    vlogf("[Vision] Pyramid skipped (tag ROI present, pyramid.with_tag=false)\n");
 
   // ── 6. 畸变校正兜底（2D 未命中时；需要相机内参） ──
   if (!type_done(true) && cfg.bc_undistort_enabled && !fmts_2d.empty() && !check_cancel()) {

@@ -35,6 +35,9 @@ struct DecoderConfig {
   int clahe_grid = 8;
   int roi_2d_scale = 512;
   bool undistort_enabled = true;
+  // Whole-frame pyramid (P1280/P1920/PFULL) on the input frame when a tag ROI exists. Without a tag it
+  // always runs, being the only strategy. false: the input frame runs the ROI strategies only, then UND-2d.
+  bool pyramid_with_tag = true;
   // Codes still missing after the first frame: take new frames, each with its own tag pose, and run
   // only the label-ROI strategies (WARP/ROI) on them until this many ms after decoding started.
   // 0 = no retry. Drone-Vision retried twice on the whole frame shrunk to roi_2d_scale.

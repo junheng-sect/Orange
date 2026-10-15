@@ -173,6 +173,55 @@ TEST(MultiDecoder, UnmetExpectationIsPartial) {
   EXPECT_EQ(out.report, "QR=2/2 C128=2/3");
 }
 
+TEST(MultiDecoder, PyramidAndUndistortSwitchesWithTag) {
+  const auto scene = synthetic::makeScene();
+  TagPose pose;
+  ASSERT_TRUE(detectPose(scene, pose));
+  auto config = qrConfig();
+  config.expected.qr = 3;  // only 2 QR in the scene: the ROI cannot finish, so the chain goes on
+  config.retry_timeout_ms = 0;
+  config.pyramid_with_tag = false;
+  std::vector<std::string> off;
+  DecodeHooks hooks;
+  hooks.log = [&](const std::string& l) { off.push_back(l); };
+  const auto out = decodeBarcodes(scene.gray, &pose, scene.camera, config, hooks);
+  EXPECT_TRUE(out.partial);
+  EXPECT_EQ(texts(out), kQr);
+  EXPECT_FALSE(anyLineContains(off, "P1280"));
+  EXPECT_FALSE(anyLineContains(off, "P1920"));
+  EXPECT_FALSE(anyLineContains(off, "PFULL"));
+  EXPECT_TRUE(anyLineContains(off, "Pyramid skipped"));
+  EXPECT_TRUE(anyLineContains(off, "UND-2d"));  // undistort has its own switch
+
+  config.pyramid_with_tag = true;
+  std::vector<std::string> on;
+  hooks.log = [&](const std::string& l) { on.push_back(l); };
+  decodeBarcodes(scene.gray, &pose, scene.camera, config, hooks);
+  EXPECT_TRUE(anyLineContains(on, "PFULL"));
+  EXPECT_FALSE(anyLineContains(on, "Pyramid skipped"));
+
+  // Shipped config: both off, the input frame runs the label-ROI strategies only.
+  config.pyramid_with_tag = false;
+  config.undistort_enabled = false;
+  std::vector<std::string> roi_only;
+  hooks.log = [&](const std::string& l) { roi_only.push_back(l); };
+  const auto roi_out = decodeBarcodes(scene.gray, &pose, scene.camera, config, hooks);
+  EXPECT_TRUE(roi_out.partial);
+  EXPECT_EQ(texts(roi_out), kQr);
+  EXPECT_FALSE(anyLineContains(roi_only, "PFULL"));
+  EXPECT_FALSE(anyLineContains(roi_only, "UND-2d"));
+}
+
+TEST(MultiDecoder, NoTagRunsPyramidEvenWhenOffWithTag) {
+  const auto scene = synthetic::makeScene(8.0, false);
+  auto config = testConfig();
+  config.pyramid_with_tag = false;
+  const auto out = decodeBarcodes(scene.gray, nullptr, scene.camera, config);
+  EXPECT_TRUE(out.success) << out.error << " " << out.report;
+  EXPECT_EQ(texts(out), kAll);
+  for (const auto& c : out.codes) EXPECT_EQ(c.source[0], 'P') << c.source;
+}
+
 TEST(MultiDecoder, DisabledFormatsAreNotScanned) {
   const auto scene = synthetic::makeScene();
   TagPose pose;
@@ -348,6 +397,8 @@ TEST(Layout, ShippedLayoutOverlaysMainConfig) {
   EXPECT_EQ(c.expected.dm, 0);
   EXPECT_EQ(c.expected.c128, 0);
   EXPECT_DOUBLE_EQ(c.roi_scale, 1.25);  // main-config keys survive the overlay
+  EXPECT_FALSE(c.pyramid_with_tag);     // shipped config: tag ROI frames skip the whole-frame pyramid
+  EXPECT_FALSE(c.undistort_enabled);    // ... and the whole-frame undistort pass
 
   applyLayout(YAML::LoadFile(packageFile("config/layouts/drone_vision_default.yaml")), c, &tag_size);
   EXPECT_DOUBLE_EQ(tag_size, 0.012);
@@ -390,6 +441,11 @@ TEST(Config, RetryTimeoutAndOldRetryKeys) {
   EXPECT_THROW(loadDecoderConfig(YAML::Load("barcode_decoder: {retry: {count: 2, interval_ms: 100}}")),
                std::runtime_error);
   EXPECT_THROW(loadDecoderConfig(YAML::Load("barcode_decoder: {retry: {timeout_ms: -1}}")), std::runtime_error);
+}
+
+TEST(Config, PyramidWithTag) {
+  EXPECT_TRUE(loadDecoderConfig(YAML::Load("barcode_decoder: {enabled: true}")).pyramid_with_tag);
+  EXPECT_FALSE(loadDecoderConfig(YAML::Load("barcode_decoder: {pyramid: {with_tag: false}}")).pyramid_with_tag);
 }
 
 int main(int argc, char** argv) {
