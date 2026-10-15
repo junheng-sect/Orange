@@ -56,13 +56,14 @@ launch 只起被标定那一路的相机节点（`ov13855_full_cam` / `ov13855_c
 
 ```bash
 source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash
-rosrun camera_calibration_pkg recalibrate.py --size 7x5 --square 0.0395
+rosrun camera_calibration_pkg recalibrate.py --size 7x5 --square 0.0397 --max-image-error 1.0
 ```
 
 默认读取 `~/.ros/camera_info` 下最新的 `ov13855_4224x3136_*.tar.gz`（`--camera-name` 换前缀，`--tar` 可指定），在原图上重新检测角点，
 用 3 项径向畸变（`--k 2` 可改）标定，单张 RMS 大于 `--max-image-error`（默认 0.5 px）时每次剔除最差的一张后重算，
-至少保留 `--min-images`（默认 15）张。终端打印各参数的标准差，结果存为 `..._<时间戳>_k3.yaml`，
-文件头注释写明来源 tar、使用张数、RMS 和被剔除的图。
+至少保留 `--min-images`（默认 15）张。默认 0.5 px 是按 2560 宽定的，4224x3136 像素尺度约大 1.7~2 倍，用 `1.0`；
+用 0.5 会一路剔到 15 张下限。原图检测偶有误检（整板角点挤成一团，误差数 px），会被当成最差样本剔掉。
+终端打印各参数的标准差，结果存为 `..._<时间戳>_k3.yaml`，文件头注释写明来源 tar、使用张数、RMS 和被剔除的图。
 
 launch 已默认 `-k 3`（官方默认只估 k1、k2，本镜头画面边缘误差明显），`k_coefficients:=2` 可改回。
 
@@ -96,7 +97,8 @@ rosrun camera_calibration_pkg scale_calibration.py ov13855_4224x3136.yaml --widt
   --camera-name ov13855_1280x960 --out ov13855_1280x960.yaml
 ```
 
-输出文件头注释写明来源、比例并保留源文件注释。当前包内 1280x960、4224x3136 两份都由 2026-10-11 的 2560x1440 标定换算而来。
+输出文件头注释写明来源、比例并保留源文件注释。当前包内 4224x3136 为 2026-10-15 主通路直接标定（23/27 张，RMS 0.59 px），
+1280x960 由它换算；此前两份都由 2026-10-11 的 2560x1440 标定换算，与本次差值在标定误差内（fx/fy 差 3~4 px，主点差 3~5 px）。
 
 ## 测试
 

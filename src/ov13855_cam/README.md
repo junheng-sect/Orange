@@ -42,17 +42,18 @@ Y 平面当作 mono8 的前提是 ISP 输出全范围：colorimetry 第一位为
 
 | 文件 | 来源 |
 | --- | --- |
-| `config/ov13855_2560x1440.yaml` | 2026-10-11 棋盘格标定（7x5 内角点、39.5 mm，`camera_calibration_pkg` 采集，`recalibrate.py` 离线重算）：k1、k2、k3 三项径向畸变，使用 25/29 张，RMS 0.32 px，fx/fy/cx/cy 标准差 ≤1.7 px；同日另一组独立标定各参数差 ≤3.5 px |
+| `config/ov13855_4224x3136.yaml` | 2026-10-15 主通路原生分辨率棋盘格标定（7x5 内角点、39.7 mm，`camera_calibration_pkg` 采集，`recalibrate.py --max-image-error 1.0` 离线重算）：k1、k2、k3 三项径向畸变，使用 23/27 张，RMS 0.59 px，fx/fy 标准差 ±3.8 px、cx/cy ±2.0 px（bootstrap fx ±7.5、cx/cy ±3 px）；角点最远到半对角线 0.85 处，画面四角畸变为外推 |
 | `config/ov13855_1280x960.yaml` | 由上面按纯缩放换算（`camera_calibration_pkg/scale_calibration.py`），未重新标定 |
-| `config/ov13855_4224x3136.yaml` | 同上 |
+| `config/ov13855_2560x1440.yaml` | 2026-10-11 棋盘格标定（7x5 内角点、39.5 mm，`recalibrate.py` 离线重算）：k1、k2、k3 三项径向畸变，使用 25/29 张，RMS 0.32 px，fx/fy/cx/cy 标准差 ≤1.7 px；同日另一组独立标定各参数差 ≤3.5 px |
 
 换算：K、P 的第一行乘 W1/W0、第二行乘 H1/H0，主点按像素中心 (c+0.5)·s−0.5，畸变系数不变；
-前提是各分辨率都是同一画幅的整幅缩放（已在板端确认）。换算后 4224×3136 的 fx/fy=1.0007、主点离画面中心约 13 px，
-与传感器方像素相符；2560×1440 的 fx/fy≈1.32 来自全幅 4:3 经 ISP 输出 16:9。
+前提是各分辨率都是同一画幅的整幅缩放（已在板端确认）。2560×1440 标定换算到 4224×3136 后 fx/fy=1.0007，
+与 4224×3136 直接标定的 fx/fy=1.0003 一致，fx/fy/cx/cy 差 3~5 px，在标定误差内；2560×1440 的 fx/fy≈1.32
+来自全幅 4:3 经 ISP 输出 16:9。替换前的两份换算文件备份在板端 `~/backup/ov13855_calib_scaled_from_2560_20261014/`。
 
-节点不会自动缩放内参，标定尺寸与配置尺寸不符时报错退出。要更准可直接标定 4224×3136
-（`camera_calibration_pkg` 的 `stream:=full`，默认），再用 `scale_calibration.py` 换算 1280×960，见该包 README。
-2560×1440 文件保留作换算来源，当前没有配置使用它。
+节点不会自动缩放内参，标定尺寸与配置尺寸不符时报错退出。重新标定见 `camera_calibration_pkg` README
+（`stream:=full` 标 4224×3136，再用 `scale_calibration.py` 换算 1280×960）。
+2560×1440 文件保留作历史标定与交叉核对，当前没有配置使用它。
 
 板端构建：
 

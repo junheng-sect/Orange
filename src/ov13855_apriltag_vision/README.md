@@ -82,5 +82,5 @@ python3 /home/orangepi/orange/src/ov13855_apriltag_vision/test/live_camera_check
 固定/最大面积选择、首帧及 ID 切换立即发布、基本无效输入停发、Pose/TF/矩阵一致和控制输入外参。
 合成测试还确认：只要解算结果符合基本有效性条件，不会因为重投影 RMS 大于 1 px 而拒绝。
 
-内参来自相机包的 CameraInfo：当前 1280×960 由 2026-10-11 的 2560×1440 棋盘格标定按比例换算，见 `ov13855_cam` README。
+内参来自相机包的 CameraInfo：当前 1280×960 由 2026-10-15 主通路 4224×3136 棋盘格标定按比例换算，见 `ov13855_cam` README。
 当前软件是否发布位姿与实物尺度是否准确是两项验证，最新结果见 `VALIDATION.md`。
