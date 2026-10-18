@@ -1,6 +1,7 @@
 'use strict';
-// 小车网页控制台，阶段 1：只读显示。
-// 浏览器直接连车端 rosbridge（Melodic，rosbridge_server 0.11.16），只订阅话题、调只读服务，不发任何指令。
+// 小车网页控制台。浏览器直接连车端 rosbridge（Melodic，rosbridge_server 0.11.16），没有后端。
+// 阶段 1：只读显示。阶段 2：停止、暂停/继续、点地图设目标、按点位导航、摇杆；
+// 发目标前先用 /get_plan_movebase 规划（不动车），再按车身轮廓做碰撞检查，确认后才发。
 // 默认走 Xiaomi 网的 192.168.31.231；连车热点时用 ?ws=ws://10.7.5.88:9090。
 
 const WS_URL = new URLSearchParams(location.search).get('ws') || 'ws://192.168.31.231:9090';
@@ -15,6 +16,7 @@ class Rosbridge {
     this.onState = onState;
     this.subs = new Map();     // topic → {type, cb, throttle}
     this.pending = new Map();  // id → {resolve, reject, timer}
+    this.advs = new Map();     // topic → type
     this.seq = 0;
     this.connect();
   }
@@ -25,6 +27,7 @@ class Rosbridge {
     this.ws = ws;
     ws.onopen = () => {
       this.onState('open');
+      for (const [topic, type] of this.advs) this.send({ op: 'advertise', topic, type });
       for (const [topic, s] of this.subs) this.sendSub(topic, s);
     };
     ws.onclose = () => {
@@ -74,6 +77,19 @@ class Rosbridge {
     this.send({ op: 'unsubscribe', id: 'sub:' + topic, topic });
   }
 
+  // 连上就先 advertise：车端新建的发布者要过一会儿才连上订阅者，用到时才 advertise 会丢第一条。
+  advertise(topic, type) {
+    this.advs.set(topic, type);
+    this.send({ op: 'advertise', topic, type });
+  }
+
+  // 返回是否真的发出去了。
+  publish(topic, msg) {
+    if (this.ws.readyState !== WebSocket.OPEN) return false;
+    this.send({ op: 'publish', topic, msg });
+    return true;
+  }
+
   call(service, args = {}, timeoutMs = 5000) {
     return new Promise((resolve, reject) => {
       if (this.ws.readyState !== WebSocket.OPEN) return reject(new Error('未连接'));
@@ -101,13 +117,19 @@ function parseJson(text) {
 const st = {
   map: null,        // {info, canvas, key}
   costmap: null,
+  gcost: null,      // 全局代价图：规划禁行区，设目标时叠加显示
   pose: null,       // {x, y, yaw, t}
   scan: null,
   path: [],         // [[x, y]]
   footprint: [],    // [{x, y, r}] 或 [{poly: [[x, y]]}]
   points: [],       // [{name, x, y, sys}]
   trail: [],        // [[x, y]]
-  nav: null,        // {x, y, status}
+  nav: null,        // {x, y, status, t}
+  floor: null,      // {floorId, mapId}，按点位导航要用
+  fpLocal: [],      // 车体系下的轮廓圆 [{x, y, r}]，由 footprint 和当前位姿反算
+  moving: false,
+  stopped: false,   // 本页叫停过：强停后 /navigation_status 会一直停在 1，没有「取消」状态
+  active: null,     // 本页发出、还在执行的目标（带规划路径）
 };
 const view = { scale: 80, rot: 0, ox: 0, oy: 0, follow: false, fitted: false };
 
@@ -118,6 +140,7 @@ const LAYERS = {
   trail:     { label: '轨迹', def: true },
   points:    { label: '导航点', def: true },
   costmap:   { label: '局部代价图', def: false },
+  gcost:     { label: '全局代价图', note: '设目标时自动显示', def: false },
   score:     { label: '定位分数', note: '860 Hz 话题，车端开销大', def: false },
 };
 const layers = loadPrefs('car_web.layers', Object.fromEntries(Object.entries(LAYERS).map(([k, v]) => [k, v.def])));
@@ -147,6 +170,17 @@ ros.subscribe('/navigation_status', 'map_msgs/NavigationStatusResult', onNav);
 ros.subscribe('/power_report', 'std_msgs/Int16', onPower);
 ros.subscribe('/location_status', 'std_msgs/Int16', onLoc);
 ros.subscribe('/raw_odom', 'nav_msgs/Odometry', onOdom, 200);
+ros.subscribe('/clean_pnc/cost_map/global_costmap', 'nav_msgs/OccupancyGrid', (m) => {
+  st.gcost = { ...gridToImage(m, costColor), data: m.data };
+  redraw();
+}, 2000);
+ros.subscribe('/current_floormap', 'map_msgs/RobotFloorMap', (m) => {
+  st.floor = { floorId: m.floorId, mapId: m.mapId };
+});
+ros.advertise('/navi_stop', 'std_msgs/Int16');
+ros.advertise('/task_op', 'std_msgs/Int16');
+ros.advertise('/move_base_simple/goal', 'geometry_msgs/PoseStamped');
+ros.advertise('/cmd_vel', 'geometry_msgs/Twist');
 applyLayerSubs();
 
 // 激光、代价图、定位分数数据量大，只在图层打开时订阅。
@@ -180,7 +214,7 @@ function onMap(m) {
   const i = m.info;
   const key = [i.width, i.height, i.resolution, i.origin.position.x, i.origin.position.y].join(',');
   const changed = !st.map || st.map.key !== key;
-  st.map = { ...gridToImage(m, mapColor), key };
+  st.map = { ...gridToImage(m, mapColor), key, data: m.data };
   if (changed) {
     loadPoints();
     fitView();
@@ -222,15 +256,35 @@ function onFootprint(m) {
     if (k.points && k.points.length) return { poly: k.points.map((q) => [q.x, q.y]) };
     return { x: k.pose.position.x, y: k.pose.position.y, r: k.scale.x / 2 };
   });
+  // 车停着时把轮廓圆换算到车体系，给碰撞检查用；车在动时 footprint 和位姿不同步，不更新。
+  const p = st.pose;
+  const circles = st.footprint.filter((f) => !f.poly);
+  if (p && circles.length && !st.moving) {
+    const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+    st.fpLocal = circles.map((f) => {
+      const dx = f.x - p.x, dy = f.y - p.y;
+      return { x: dx * c + dy * s, y: -dx * s + dy * c, r: f.r };
+    });
+  }
   redraw();
 }
 
 // status：1 进行中，2 到达。强停后会一直停在 1，没有「取消」状态。
 function onNav(m) {
-  st.nav = m;
-  const text = { 1: '进行中', 2: '已到达' }[m.status] || '状态 ' + m.status;
-  setChip('c-nav', text, m.status === 1 ? 'warn' : m.status === 2 ? 'ok' : '');
+  st.nav = { ...m, t: performance.now() };
+  if (m.status === 2) {
+    st.stopped = false;
+    st.active = null;
+  }
+  updateNavChip();
   redraw();
+}
+
+function updateNavChip() {
+  if (st.stopped) return setChip('c-nav', '已叫停', 'bad');
+  if (!st.nav) return;
+  const s = st.nav.status;
+  setChip('c-nav', { 1: '进行中', 2: '已到达' }[s] || '状态 ' + s, s === 1 ? 'warn' : s === 2 ? 'ok' : '');
 }
 
 function onPower(m) {
@@ -255,6 +309,7 @@ function onScore(m) {
 
 function onOdom(m) {
   const t = m.twist.twist;
+  st.moving = Math.abs(t.linear.x) > 0.02 || Math.abs(t.angular.z) > 0.05;
   setChip('c-vel', `${t.linear.x.toFixed(2)} m/s ${(t.angular.z * 180 / Math.PI).toFixed(0)}°/s`);
 }
 
@@ -262,7 +317,9 @@ function onOdom(m) {
 async function loadPoints() {
   try {
     const r = await ros.call('/list_navi_points');
-    const conv = (sys) => (p) => ({ name: p.point_name, x: p.x, y: p.y, sys });
+    // z 是朝向，单位是度。
+    const conv = (sys) => (p) => ({ name: p.point_name, id: p.point_id, x: p.x, y: p.y,
+                                     yaw: p.z * Math.PI / 180, sys });
     st.points = [...(r.list_navi_points || []).map(conv(false)),
                  ...(r.list_system_points || []).map(conv(true))];
     redraw();
@@ -377,12 +434,16 @@ function draw() {
   ctx.fillStyle = '#1e2227';
   ctx.fillRect(0, 0, W, H);
   if (st.map) drawGrid(st.map);
+  if (st.gcost && (layers.gcost || goalMode || pending)) drawGrid(st.gcost);
   if (layers.costmap && st.costmap) drawGrid(st.costmap);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawMeterGrid();
   drawAxes();
   if (layers.trail) drawPolyline(st.trail, 'rgba(88,166,255,0.55)', 2, 0.5);
   if (layers.path) drawPolyline(st.path, '#3fb950', 2.5);
+  if (st.active) drawPlan(st.active, 'rgba(240,136,62,0.55)');
+  if (pending) drawPlan(pending, '#f0883e');
+  if (picking) drawPick();
   if (layers.points) drawPoints();
   drawGoal();
   if (layers.scan) drawScan();
@@ -475,7 +536,7 @@ function drawPoints() {
 }
 
 function drawGoal() {
-  if (!st.nav || st.nav.status !== 1) return;
+  if (!st.nav || st.nav.status !== 1 || st.stopped) return;
   const [sx, sy] = w2s(st.nav.x, st.nav.y);
   ctx.strokeStyle = '#f85149';
   ctx.lineWidth = 2.5;
@@ -485,17 +546,62 @@ function drawGoal() {
   label('目标', sx + 11, sy - 8, '#f85149');
 }
 
-function drawScan() {
+function forEachScanPoint(fn) {
   const sc = st.scan, p = st.pose;
   if (!sc || !p) return;
-  ctx.fillStyle = '#ff4d4f';
   for (let i = 0; i < sc.ranges.length; i++) {
     const r = sc.ranges[i];
     if (!(r >= sc.range_min && r <= sc.range_max)) continue;
     const a = p.yaw + sc.angle_min + i * sc.angle_increment;
-    const [sx, sy] = w2s(p.x + r * Math.cos(a), p.y + r * Math.sin(a));
-    ctx.fillRect(sx - 1, sy - 1, 2, 2);
+    fn(p.x + r * Math.cos(a), p.y + r * Math.sin(a));
   }
+}
+
+function drawScan() {
+  ctx.fillStyle = '#ff4d4f';
+  forEachScanPoint((x, y) => {
+    const [sx, sy] = w2s(x, y);
+    ctx.fillRect(sx - 1, sy - 1, 2, 2);
+  });
+}
+
+function drawPlan(t, color) {
+  if (t.pts) {
+    ctx.setLineDash([6, 4]);
+    drawPolyline(t.pts, color, 2.5);
+    ctx.setLineDash([]);
+  }
+  drawGhost(t.x, t.y, t.yaw, color);
+  const c = t.check;
+  if (c && c.worstPath && c.minPath < CLEAR_WARN) drawGhost(c.worstPath.x, c.worstPath.y, c.worstPath.yaw, '#f85149');
+  if (c && c.worstStart && c.minStart < CLEAR_WARN) drawGhost(c.worstStart.x, c.worstStart.y, c.worstStart.yaw, '#f85149');
+}
+
+// 在 (x, y, yaw) 处画车身轮廓和朝向：目标位姿、碰撞检查里最危险的位姿。
+function drawGhost(x, y, yaw, color) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  for (const f of st.fpLocal) {
+    const [sx, sy] = w2s(x + f.x * c - f.y * s, y + f.x * s + f.y * c);
+    ctx.beginPath();
+    ctx.arc(sx, sy, Math.max(1, f.r * view.scale), 0, 2 * Math.PI);
+    ctx.stroke();
+  }
+  const [ax, ay] = w2s(x, y), [bx, by] = w2s(x + 0.3 * c, y + 0.3 * s);
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(ax, ay);
+  ctx.lineTo(bx, by);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(ax, ay, 4, 0, 2 * Math.PI);
+  ctx.fill();
+}
+
+function drawPick() {
+  drawGhost(picking.x, picking.y, pickYaw(picking), '#f0883e');
 }
 
 function drawFootprint() {
@@ -542,7 +648,7 @@ function drawRobot() {
 
 function drawScaleBar() {
   const len = [0.1, 0.2, 0.5, 1, 2, 5, 10].find((l) => l * view.scale >= 60) || 10;
-  const px = len * view.scale, x = 12, y = H - 16;
+  const px = len * view.scale, x = 12, y = H - $('ctl').offsetHeight - 16;
   ctx.strokeStyle = '#e6e6e6';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -561,7 +667,14 @@ let pinch = null;
 cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
   ptrs.set(e.pointerId, [e.clientX, e.clientY]);
-  if (ptrs.size === 2) startPinch();
+  if (ptrs.size === 2) {
+    picking = null;
+    startPinch();
+  } else if (ptrs.size === 1 && goalMode) {
+    const [x, y] = s2w(e.clientX, e.clientY);
+    picking = { x, y, yaw: null, sx: e.clientX, sy: e.clientY };
+    redraw();
+  }
 });
 
 cv.addEventListener('pointermove', (e) => {
@@ -569,6 +682,13 @@ cv.addEventListener('pointermove', (e) => {
   const prev = ptrs.get(e.pointerId);
   if (!prev) return;
   ptrs.set(e.pointerId, [e.clientX, e.clientY]);
+  if (picking && ptrs.size === 1) {
+    if (Math.hypot(e.clientX - picking.sx, e.clientY - picking.sy) > 12) {
+      const [x, y] = s2w(e.clientX, e.clientY);
+      picking.yaw = Math.atan2(y - picking.y, x - picking.x);
+    }
+    return redraw();
+  }
   if (ptrs.size === 1) {
     view.ox += e.clientX - prev[0];
     view.oy += e.clientY - prev[1];
@@ -589,6 +709,10 @@ for (const type of ['pointerup', 'pointercancel']) {
     ptrs.delete(e.pointerId);
     pinch = null;
     if (ptrs.size === 2) startPinch();
+    if (picking && ptrs.size === 0) {
+      if (type === 'pointerup') finishPick();
+      else picking = null;
+    }
   });
 }
 
@@ -661,6 +785,376 @@ for (const [k, v] of Object.entries(LAYERS)) {
   $('layer-list').append(lab);
 }
 
+// ---------- 操作（阶段 2） ----------
+// 接口 2026-10-16～18 都实测过：/navi_stop 5 最快（约 0.7 s 停住，滑行约 5 cm），驱动也会清掉目标；
+// /task_op 1/2 暂停/继续要等驱动 0.5 s 看门狗，约 1.2 s 停住；/cmd_vel 停发约 0.8 s 自停。
+const CLEAR_BAD = 0.03;   // 最小间隙低于它算可能碰撞
+const CLEAR_WARN = 0.08;  // 低于它提示间隙小
+const SEARCH = 0.3;       // 碰撞检查在每个轮廓圆心周围搜障碍的半径
+const START_SEG = 0.3;    // 离起点这么近的位姿算起步段（停在充电桩上时本来就贴着桩）
+const JOY_SPEEDS = [{ label: '慢 0.2 m/s', v: 0.2, w: 0.4 }, { label: '快 0.4 m/s', v: 0.4, w: 0.6 }];
+
+let goalMode = false;
+let picking = null;   // 设目标时正在拖的 {x, y, yaw, sx, sy}
+let pending = null;   // 等确认的目标 {kind, title, x, y, yaw, point, start, pts, check, danger, armed}
+let joySpeed = 0, joyVec = null, joyTimer = 0;
+
+function sendOrWarn(topic, msg) {
+  if (ros.publish(topic, msg)) return true;
+  toast('未连接，指令没发出去');
+  return false;
+}
+
+function stopAll() {
+  joyRelease();
+  if (!sendOrWarn('/navi_stop', { data: 5 })) return;
+  // 停止要可靠：再补发两次，重复的 5 没有副作用。
+  setTimeout(() => ros.publish('/navi_stop', { data: 5 }), 100);
+  setTimeout(() => ros.publish('/navi_stop', { data: 5 }), 200);
+  st.stopped = true;
+  st.active = null;
+  closeConfirm();
+  setGoalMode(false);
+  updateNavChip();
+  toast('已发停止', true);
+  redraw();
+}
+
+function navBusy() {
+  if (st.stopped) return false;
+  if (st.active) return true;
+  return !!st.nav && st.nav.status === 1 && performance.now() - st.nav.t < 3000;
+}
+
+function deg(r) {
+  return (r * 180 / Math.PI).toFixed(0);
+}
+
+function wrapAngle(a) {
+  return Math.atan2(Math.sin(a), Math.cos(a));
+}
+
+function poseMsg(x, y, yaw) {
+  return { header: { frame_id: 'map' },
+           pose: { position: { x, y, z: 0 }, orientation: { x: 0, y: 0, z: Math.sin(yaw / 2), w: Math.cos(yaw / 2) } } };
+}
+
+function twist(v, w) {
+  return { linear: { x: v, y: 0, z: 0 }, angular: { x: 0, y: 0, z: w } };
+}
+
+// ----- 设目标 -----
+function setGoalMode(on) {
+  goalMode = on;
+  picking = null;
+  $('b-goal').classList.toggle('on', on);
+  cv.style.cursor = on ? 'crosshair' : '';
+  if (on) toast('在地图上按下选位置，拖动定朝向', true);
+}
+
+// 只点不拖时，朝向取车指向目标的方向。
+function pickYaw(t) {
+  if (t.yaw !== null) return t.yaw;
+  const p = st.pose;
+  return p ? Math.atan2(t.y - p.y, t.x - p.x) : 0;
+}
+
+function finishPick() {
+  const t = picking;
+  const yaw = pickYaw(t);
+  setGoalMode(false);
+  preview({ kind: 'goal', x: t.x, y: t.y, yaw,
+            title: `去 (${t.x.toFixed(2)}, ${t.y.toFixed(2)})，朝向 ${deg(yaw)}°` });
+}
+
+// ----- 规划预览和碰撞检查 -----
+async function preview(t) {
+  const p = st.pose;
+  if (!p) return toast('还没有车的位姿');
+  pending = t;
+  t.start = { x: p.x, y: p.y, yaw: p.yaw };
+  $('cf-title').textContent = t.title;
+  setConfirmInfo('规划中…');
+  setGoButton(true, '出发', false);
+  $('confirm').classList.add('open');
+  redraw();
+  let r;
+  try {
+    r = await ros.call('/get_plan_movebase', { start: poseMsg(p.x, p.y, p.yaw), goal: poseMsg(t.x, t.y, t.yaw) }, 8000);
+  } catch (e) {
+    if (pending === t) setConfirmInfo('规划失败：' + e.message, 'bad');
+    return;
+  }
+  if (pending !== t) return;
+  t.pts = (r.path || []).map((q) => [q.pose.position.x, q.pose.position.y]);
+  if (t.pts.length < 2) {
+    const v = gridValue(st.gcost, t.x, t.y);
+    return setConfirmInfo(v !== 0 && v !== -1 && v !== undefined
+      ? '规划失败：目标离障碍太近，在禁行区里（紫色区域）' : '规划失败：没有路径', 'bad');
+  }
+  t.check = checkPlan(t.pts, t.yaw);
+
+  const parts = [`路径 ${pathLength(t.pts).toFixed(2)} m`];
+  let level = 'ok';
+  const c = t.check;
+  const cm = (v) => (v > c.limit ? `> ${Math.floor(c.limit * 100)}` : (v * 100).toFixed(0)) + ' cm';
+  if (!c) {
+    parts.push('没收到车身轮廓，没做碰撞检查');
+    level = 'warn';
+  } else {
+    parts.push(`间隙：路上 ${cm(c.minPath)}，起步 ${cm(c.minStart)}（现在 ${cm(c.now)}）`);
+    // 起步段只要不比现在更贴近障碍（容差半个 5 cm 栅格）就不算碰撞：停在充电桩上时车尾本来就贴着桩。
+    const startBad = c.minStart < CLEAR_BAD && c.minStart < c.now - 0.025;
+    if (c.minPath < CLEAR_BAD || startBad) level = 'bad';
+    else if (c.minPath < CLEAR_WARN || c.minStart < CLEAR_WARN) level = 'warn';
+    if (c.now < CLEAR_BAD) parts.push('车现在就贴着障碍（可能在充电桩上）');
+    if (!c.withScan) parts.push('激光图层关着，只查了地图');
+  }
+  const end = t.pts[t.pts.length - 1];
+  const off = Math.hypot(end[0] - t.x, end[1] - t.y);
+  if (off > 0.1) {
+    parts.push(`路径终点离目标 ${off.toFixed(2)} m`);
+    if (level === 'ok') level = 'warn';
+  }
+  setConfirmInfo(parts.join('，'), level);
+  t.danger = level !== 'ok';
+  setGoButton(false, level === 'bad' ? '可能碰撞，仍要出发' : t.danger ? '仍要出发' : '出发', t.danger);
+  redraw();
+}
+
+function gridValue(g, x, y) {
+  if (!g) return undefined;
+  const i = g.info, c = Math.floor((x - i.origin.position.x) / i.resolution);
+  const r = Math.floor((y - i.origin.position.y) / i.resolution);
+  return c < 0 || r < 0 || c >= i.width || r >= i.height ? undefined : g.data[r * i.width + c];
+}
+
+function pathLength(pts) {
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  return len;
+}
+
+// 沿路径取车的位姿：路径点去重后用前后 3 个点算切向（规划结果不带朝向），
+// 起点和终点的原地转向按最短方向每 10° 取一个。
+function poseSamples(pts, p, goalYaw) {
+  // 规划器把起点吸附到 5 cm 栅格，开头几个点可能比车的真实位置更靠近障碍，换成真实位姿。
+  let k = 0;
+  while (k < pts.length - 1 && Math.hypot(pts[k][0] - p.x, pts[k][1] - p.y) <= 0.05) k++;
+  const raw = [[p.x, p.y], ...pts.slice(k)];
+  const q = raw.filter((a, i) => i === 0 || a[0] !== raw[i - 1][0] || a[1] !== raw[i - 1][1]);
+  const yawAt = (i) => {
+    const a = q[Math.max(0, i - 3)], b = q[Math.min(q.length - 1, i + 3)];
+    return Math.atan2(b[1] - a[1], b[0] - a[0]);
+  };
+  const out = [];
+  const turn = (x, y, from, to) => {
+    const d = wrapAngle(to - from), n = Math.max(1, Math.ceil(Math.abs(d) / (Math.PI / 18)));
+    for (let k = 0; k <= n; k++) out.push({ x, y, yaw: from + d * k / n });
+  };
+  if (q.length < 2) return [{ x: p.x, y: p.y, yaw: p.yaw }];
+  turn(p.x, p.y, p.yaw, yawAt(0));
+  for (let i = 0; i < q.length; i++) out.push({ x: q[i][0], y: q[i][1], yaw: yawAt(i) });
+  const last = q[q.length - 1];
+  turn(last[0], last[1], yawAt(q.length - 1), goalYaw);
+  return out;
+}
+
+// 按 10.16 的做法：车身用 footprint 的 6 个圆，障碍取地图占据栅格（≥50）加当前激光端点，
+// 每个位姿算轮廓圆到最近障碍的间隙。返回现在、起步段、路上三个最小间隙和对应位姿，没有轮廓时返回 null。
+function checkPlan(pts, goalYaw) {
+  const g = st.map, p = st.pose;
+  if (!g || !p || !st.fpLocal.length) return null;
+  const { width: w, height: h, resolution: res } = g.info;
+  const ox = g.info.origin.position.x, oy = g.info.origin.position.y;
+  const occ = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) if (g.data[i] >= 50) occ[i] = 1;
+  forEachScanPoint((x, y) => {
+    const c = Math.floor((x - ox) / res), r = Math.floor((y - oy) / res);
+    if (c >= 0 && r >= 0 && c < w && r < h) occ[r * w + c] = 1;
+  });
+  const R = Math.ceil(SEARCH / res);
+  const maxR = Math.max(...st.fpLocal.map((f) => f.r));
+  const clearAt = (s) => {
+    let best = Infinity;
+    const c = Math.cos(s.yaw), sn = Math.sin(s.yaw);
+    for (const f of st.fpLocal) {
+      const cx = s.x + f.x * c - f.y * sn, cy = s.y + f.x * sn + f.y * c;
+      const ci = Math.floor((cx - ox) / res), ri = Math.floor((cy - oy) / res);
+      for (let dr = -R; dr <= R; dr++) {
+        const rr = ri + dr;
+        if (rr < 0 || rr >= h) continue;
+        for (let dc = -R; dc <= R; dc++) {
+          const cc = ci + dc;
+          if (cc < 0 || cc >= w || !occ[rr * w + cc]) continue;
+          const d = Math.hypot(ox + (cc + 0.5) * res - cx, oy + (rr + 0.5) * res - cy) - f.r - res / 2;
+          if (d < best) best = d;
+        }
+      }
+    }
+    return best;
+  };
+  const r = { now: clearAt(p), minStart: Infinity, minPath: Infinity, worstStart: null, worstPath: null,
+              limit: SEARCH - maxR - res / 2, withScan: !!st.scan };
+  for (const s of poseSamples(pts, p, goalYaw)) {
+    const d = clearAt(s);
+    if (Math.hypot(s.x - p.x, s.y - p.y) < START_SEG) {
+      if (d < r.minStart) [r.minStart, r.worstStart] = [d, s];
+    } else if (d < r.minPath) {
+      [r.minPath, r.worstPath] = [d, s];
+    }
+  }
+  return r;
+}
+
+function setConfirmInfo(text, level = '') {
+  $('cf-info').textContent = text;
+  $('cf-info').className = level ? level + '-t' : '';
+}
+
+function setGoButton(disabled, text, danger) {
+  const b = $('cf-go');
+  b.disabled = disabled;
+  b.textContent = text;
+  b.className = 'go' + (danger ? ' danger' : '');
+}
+
+function closeConfirm() {
+  pending = null;
+  $('confirm').classList.remove('open');
+  redraw();
+}
+
+function go() {
+  const t = pending, p = st.pose;
+  if (!t || !t.pts || !p) return;
+  // 规划之后车动过，旧路径的碰撞检查不算数，重新规划。
+  if (Math.hypot(p.x - t.start.x, p.y - t.start.y) > 0.1 || Math.abs(wrapAngle(p.yaw - t.start.yaw)) > 0.2) {
+    toast('车动过了，重新规划', true);
+    return preview({ ...t, pts: null, check: null, armed: false });
+  }
+  if (t.danger && !t.armed) {
+    t.armed = true;
+    setGoButton(false, '再点一次确认', true);
+    return;
+  }
+  if (t.kind === 'goal') {
+    if (!sendOrWarn('/move_base_simple/goal', poseMsg(t.x, t.y, t.yaw))) return;
+  } else {
+    if (!st.floor) return toast('还没收到 /current_floormap，不知道地图 ID');
+    // 返回 status −1 不代表失败（10.16 实测），只把原始结果显示出来。
+    ros.call('/navi_targegoalplan', { type: 0, floor_id: st.floor.floorId, map_id: st.floor.mapId,
+                                      point_id: Number(t.point.id) }, 10000)
+      .then((r) => toast(`按点位导航已下发（status ${r.status}${r.msg ? '，' + r.msg : ''}）`, true))
+      .catch((e) => toast('按点位导航调用失败：' + e.message));
+  }
+  st.stopped = false;
+  st.active = t;
+  pending = null;
+  $('confirm').classList.remove('open');
+  updateNavChip();
+  redraw();
+}
+
+// ----- 摇杆：按住才发，10 Hz；松手、切后台都会发零 -----
+function joyMove(e) {
+  const r = $('joy').getBoundingClientRect(), R = r.width / 2;
+  let dx = (e.clientX - r.left - R) / R, dy = (e.clientY - r.top - R) / R;
+  const n = Math.hypot(dx, dy);
+  if (n > 1) {
+    dx /= n;
+    dy /= n;
+  }
+  joyVec = [dx, dy];
+  $('knob').style.transform = `translate(${dx * R * 0.7}px, ${dy * R * 0.7}px)`;
+}
+
+function joySend() {
+  if (!joyVec) return;
+  const s = JOY_SPEEDS[joySpeed];
+  const dz = (a) => (Math.abs(a) < 0.15 ? 0 : a);
+  ros.publish('/cmd_vel', twist(-dz(joyVec[1]) * s.v, -dz(joyVec[0]) * s.w));
+}
+
+function joyRelease() {
+  if (!joyTimer) return;
+  clearInterval(joyTimer);
+  joyTimer = 0;
+  joyVec = null;
+  $('knob').style.transform = '';
+  ros.publish('/cmd_vel', twist(0, 0));
+}
+
+$('joy').addEventListener('pointerdown', (e) => {
+  if (e.target.id === 'joy-speed' || joyTimer) return;
+  if (navBusy()) return toast('导航进行中，先按停止再用摇杆');
+  $('joy').setPointerCapture(e.pointerId);
+  joyMove(e);
+  joySend();
+  joyTimer = setInterval(joySend, 100);
+});
+$('joy').addEventListener('pointermove', (e) => {
+  if (joyTimer) joyMove(e);
+});
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) $('joy').addEventListener(type, joyRelease);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) joyRelease();
+});
+$('joy-speed').textContent = JOY_SPEEDS[0].label;
+$('joy-speed').onclick = () => {
+  joySpeed = (joySpeed + 1) % JOY_SPEEDS.length;
+  $('joy-speed').textContent = JOY_SPEEDS[joySpeed].label;
+};
+
+// ----- 按钮 -----
+// 停止用 pointerdown，比 click 早一个松手的时间。
+$('b-stop').addEventListener('pointerdown', stopAll);
+$('b-pause').onclick = () => {
+  if (sendOrWarn('/task_op', { data: 1 })) toast('已发暂停', true);
+};
+$('b-resume').onclick = () => {
+  if (sendOrWarn('/task_op', { data: 2 })) toast('已发继续', true);
+};
+$('b-goal').onclick = () => {
+  closeConfirm();
+  $('points').classList.remove('open');
+  setGoalMode(!goalMode);
+};
+$('b-nav').onclick = () => {
+  closeConfirm();
+  setGoalMode(false);
+  const list = $('point-list');
+  list.textContent = '';
+  // 系统点（充电桩、初始点、桩位置）贴着充电桩，导航过去可能撞桩，不列出来。
+  const pts = st.points.filter((p) => !p.sys);
+  if (!pts.length) list.textContent = '没有点位';
+  for (const p of pts) {
+    const b = document.createElement('button');
+    b.textContent = `${p.name}　(${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${deg(p.yaw)}°)`;
+    b.onclick = () => {
+      $('points').classList.remove('open');
+      preview({ kind: 'point', point: p, x: p.x, y: p.y, yaw: p.yaw, title: `去点位 ${p.name}` });
+    };
+    list.append(b);
+  }
+  $('points').classList.toggle('open');
+};
+$('pt-close').onclick = () => $('points').classList.remove('open');
+$('cf-cancel').onclick = closeConfirm;
+$('cf-go').onclick = go;
+$('b-joy').onclick = () => {
+  const open = !$('joy').classList.contains('open');
+  if (!open) joyRelease();
+  $('joy').classList.toggle('open', open);
+  $('b-joy').classList.toggle('on', open);
+};
+addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  setGoalMode(false);
+  closeConfirm();
+  $('points').classList.remove('open');
+});
+
 // ---------- 状态栏 ----------
 function $(id) {
   return document.getElementById(id);
@@ -680,8 +1174,9 @@ function updatePoseChip() {
 }
 
 let toastTimer = 0;
-function toast(text) {
+function toast(text, info = false) {
   $('toast').textContent = text;
+  $('toast').className = info ? 'info' : '';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { $('toast').textContent = ''; }, 6000);
 }

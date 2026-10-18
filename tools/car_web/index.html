@@ -27,14 +27,14 @@
   .chip.ok { box-shadow: inset 3px 0 var(--ok); }
   .chip.warn { box-shadow: inset 3px 0 var(--warn); }
   .chip.bad { box-shadow: inset 3px 0 var(--bad); }
-  #tools { position: fixed; right: 12px; bottom: 12px; z-index: 2; display: flex; flex-direction: column; gap: 8px; }
+  #tools { position: fixed; right: 12px; bottom: 76px; z-index: 2; display: flex; flex-direction: column; gap: 8px; }
   #tools button, #layers button {
     border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: inherit; cursor: pointer;
   }
   #tools button { width: 48px; height: 48px; border-radius: 24px; font-size: 13px; }
   #tools button.on { border-color: var(--ok); color: var(--ok); }
   #layers {
-    position: fixed; right: 70px; bottom: 12px; z-index: 2; display: none; min-width: 180px;
+    position: fixed; right: 70px; bottom: 76px; z-index: 2; display: none; min-width: 180px;
     padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   }
   #layers.open { display: block; }
@@ -42,7 +42,47 @@
   #layers small { color: var(--muted); }
   #layers .row { display: flex; gap: 8px; margin-top: 6px; }
   #layers button { flex: 1; padding: 6px; border-radius: 6px; }
-  #toast { position: fixed; left: 12px; bottom: 40px; z-index: 2; max-width: 60%; color: var(--bad); font-size: 12px; }
+  #toast { position: fixed; left: 12px; bottom: 104px; z-index: 2; max-width: 60%; color: var(--bad); font-size: 13px; }
+  #toast.info { color: var(--fg); }
+  #ctl {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; gap: 6px; padding: 8px;
+    background: var(--panel); border-top: 1px solid var(--line);
+  }
+  #ctl button, .sheet button {
+    border: 1px solid var(--line); background: var(--chip); color: var(--fg); font: inherit; cursor: pointer;
+    user-select: none; -webkit-user-select: none;
+  }
+  #ctl button { flex: 1; min-width: 0; height: 48px; border-radius: 8px; }
+  #ctl button.on { border-color: var(--ok); color: var(--ok); }
+  #ctl #b-stop { flex: 1.6; background: #b62324; border-color: var(--bad); color: #fff; font-size: 17px; font-weight: 600; }
+  .sheet {
+    position: fixed; left: 8px; right: 8px; bottom: 72px; z-index: 3; display: none; max-width: 420px; margin: 0 auto;
+    padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  }
+  .sheet.open { display: block; }
+  .sheet h3 { margin: 0 0 6px; font-size: 15px; }
+  .sheet .row { display: flex; gap: 8px; margin-top: 8px; }
+  .sheet button { flex: 1; height: 42px; border-radius: 8px; }
+  .sheet button.go { background: #1f6f3a; border-color: var(--ok); }
+  .sheet button.go.danger { background: #8a5a00; border-color: var(--warn); }
+  .sheet button:disabled { opacity: 0.4; cursor: default; }
+  #point-list button { display: block; width: 100%; margin-top: 6px; padding: 0 10px; text-align: left; }
+  .ok-t { color: var(--ok); }
+  .warn-t { color: var(--warn); }
+  .bad-t { color: var(--bad); }
+  #joy {
+    position: fixed; left: 16px; bottom: 96px; z-index: 3; display: none; width: 160px; height: 160px;
+    border-radius: 50%; background: rgba(43, 49, 56, 0.85); border: 2px solid var(--line); touch-action: none;
+  }
+  #joy.open { display: block; }
+  #knob {
+    position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; margin: -28px 0 0 -28px;
+    border-radius: 50%; background: #2f81f7; pointer-events: none;
+  }
+  #joy-speed {
+    position: absolute; left: 50%; top: -40px; transform: translateX(-50%); padding: 4px 12px; border-radius: 14px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: inherit; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -68,6 +108,25 @@
   <div class="row"><button id="b-trail">清轨迹</button><button id="b-points">刷新点位</button></div>
 </div>
 <div id="toast"></div>
+<div id="ctl">
+  <button id="b-stop">停止</button>
+  <button id="b-pause">暂停</button>
+  <button id="b-resume">继续</button>
+  <button id="b-goal">设目标</button>
+  <button id="b-nav">点位</button>
+  <button id="b-joy">摇杆</button>
+</div>
+<div class="sheet" id="confirm">
+  <h3 id="cf-title">—</h3>
+  <div id="cf-info">规划中…</div>
+  <div class="row"><button id="cf-cancel">取消</button><button class="go" id="cf-go" disabled>出发</button></div>
+</div>
+<div class="sheet" id="points">
+  <h3>去已存点位</h3>
+  <div id="point-list"></div>
+  <div class="row"><button id="pt-close">关闭</button></div>
+</div>
+<div id="joy"><div id="knob"></div><button id="joy-speed">慢速</button></div>
 <script src="app.js"></script>
 </body>
 </html>
