@@ -8,6 +8,9 @@ const WS_URL = new URLSearchParams(location.search).get('ws') || 'ws://192.168.3
 // base_footprint→scan 只有 z=0.2（2026-10-18 实测 /tf），平面上和车体原点重合。
 // /tracked_pose 就是 map→base_footprint，激光直接按它投到地图上。
 const POSE_STALE_MS = 2000;
+// 车身按规格书 650×550 mm 取圆角矩形，车体原点在中心，圆角半径按外观照片估。显示和碰撞检查都用它。
+// 车端 /clean_pnc/cost_map/footprint 是 6 个 r=0.1375 的圆（10.18 实测，包络 0.675×0.55 m），不再用。
+const BODY_L = 0.65, BODY_W = 0.55, BODY_R = 0.08;
 
 // ---------- rosbridge 客户端 ----------
 class Rosbridge {
@@ -121,13 +124,10 @@ const st = {
   pose: null,       // {x, y, yaw, t}
   scan: null,
   path: [],         // [[x, y]]
-  footprint: [],    // [{x, y, r}] 或 [{poly: [[x, y]]}]
   points: [],       // [{name, x, y, sys}]
   trail: [],        // [[x, y]]
   nav: null,        // {x, y, status, t}
   floor: null,      // {floorId, mapId}，按点位导航要用
-  fpLocal: [],      // 车体系下的轮廓圆 [{x, y, r}]，由 footprint 和当前位姿反算
-  moving: false,
   stopped: false,   // 本页叫停过：强停后 /navigation_status 会一直停在 1，没有「取消」状态
   active: null,     // 本页发出、还在执行的目标（带规划路径）
 };
@@ -136,7 +136,6 @@ const view = { scale: 80, rot: 0, ox: 0, oy: 0, follow: false, fitted: false };
 const LAYERS = {
   scan:      { label: '激光', def: true },
   path:      { label: '规划路径', def: true },
-  footprint: { label: '车身轮廓', def: true },
   trail:     { label: '轨迹', def: true },
   points:    { label: '导航点', def: true },
   costmap:   { label: '局部代价图', def: false },
@@ -165,7 +164,6 @@ const ros = new Rosbridge(WS_URL, onConnState);
 ros.subscribe('/map', 'nav_msgs/OccupancyGrid', onMap, 1000);
 ros.subscribe('/tracked_pose', 'geometry_msgs/PoseStamped', onPose);
 ros.subscribe('/clean_pnc/global_planner/plan', 'nav_msgs/Path', onPath, 500);
-ros.subscribe('/clean_pnc/cost_map/footprint', 'visualization_msgs/MarkerArray', onFootprint, 500);
 ros.subscribe('/navigation_status', 'map_msgs/NavigationStatusResult', onNav);
 ros.subscribe('/power_report', 'std_msgs/Int16', onPower);
 ros.subscribe('/location_status', 'std_msgs/Int16', onLoc);
@@ -251,24 +249,6 @@ function onPath(m) {
   redraw();
 }
 
-function onFootprint(m) {
-  st.footprint = m.markers.filter((k) => k.action !== 2).map((k) => {
-    if (k.points && k.points.length) return { poly: k.points.map((q) => [q.x, q.y]) };
-    return { x: k.pose.position.x, y: k.pose.position.y, r: k.scale.x / 2 };
-  });
-  // 车停着时把轮廓圆换算到车体系，给碰撞检查用；车在动时 footprint 和位姿不同步，不更新。
-  const p = st.pose;
-  const circles = st.footprint.filter((f) => !f.poly);
-  if (p && circles.length && !st.moving) {
-    const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
-    st.fpLocal = circles.map((f) => {
-      const dx = f.x - p.x, dy = f.y - p.y;
-      return { x: dx * c + dy * s, y: -dx * s + dy * c, r: f.r };
-    });
-  }
-  redraw();
-}
-
 // status：1 进行中，2 到达。强停后会一直停在 1，没有「取消」状态。
 function onNav(m) {
   st.nav = { ...m, t: performance.now() };
@@ -309,7 +289,6 @@ function onScore(m) {
 
 function onOdom(m) {
   const t = m.twist.twist;
-  st.moving = Math.abs(t.linear.x) > 0.02 || Math.abs(t.angular.z) > 0.05;
   setChip('c-vel', `${t.linear.x.toFixed(2)} m/s ${(t.angular.z * 180 / Math.PI).toFixed(0)}°/s`);
 }
 
@@ -447,7 +426,6 @@ function draw() {
   if (layers.points) drawPoints();
   drawGoal();
   if (layers.scan) drawScan();
-  if (layers.footprint) drawFootprint();
   drawRobot();
   drawScaleBar();
 }
@@ -577,17 +555,37 @@ function drawPlan(t, color) {
   if (c && c.worstStart && c.minStart < CLEAR_WARN) drawGhost(c.worstStart.x, c.worstStart.y, c.worstStart.yaw, '#f85149');
 }
 
+// 车体系下的车身轮廓点，每个圆角用 6 段折线。
+const BODY_OUTLINE = (() => {
+  const ax = BODY_L / 2 - BODY_R, ay = BODY_W / 2 - BODY_R, out = [];
+  for (const [cx, cy, a0] of [[ax, ay, 0], [-ax, ay, 0.5], [-ax, -ay, 1], [ax, -ay, 1.5]]) {
+    for (let k = 0; k <= 6; k++) {
+      const a = (a0 + k / 12) * Math.PI;
+      out.push([cx + BODY_R * Math.cos(a), cy + BODY_R * Math.sin(a)]);
+    }
+  }
+  return out;
+})();
+
+// 把车体系下的多边形摆到 (x, y, yaw) 处建成路径，由调用方 fill / stroke。
+function bodyPoly(pts, x, y, yaw) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  ctx.beginPath();
+  pts.forEach(([bx, by], i) => {
+    const [sx, sy] = w2s(x + bx * c - by * s, y + bx * s + by * c);
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
+  ctx.closePath();
+}
+
 // 在 (x, y, yaw) 处画车身轮廓和朝向：目标位姿、碰撞检查里最危险的位姿。
 function drawGhost(x, y, yaw, color) {
   const c = Math.cos(yaw), s = Math.sin(yaw);
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
-  for (const f of st.fpLocal) {
-    const [sx, sy] = w2s(x + f.x * c - f.y * s, y + f.x * s + f.y * c);
-    ctx.beginPath();
-    ctx.arc(sx, sy, Math.max(1, f.r * view.scale), 0, 2 * Math.PI);
-    ctx.stroke();
-  }
+  bodyPoly(BODY_OUTLINE, x, y, yaw);
+  ctx.stroke();
   const [ax, ay] = w2s(x, y), [bx, by] = w2s(x + 0.3 * c, y + 0.3 * s);
   ctx.lineWidth = 2.5;
   ctx.beginPath();
@@ -604,46 +602,20 @@ function drawPick() {
   drawGhost(picking.x, picking.y, pickYaw(picking), '#f0883e');
 }
 
-function drawFootprint() {
-  ctx.fillStyle = 'rgba(47,129,247,0.18)';
-  ctx.strokeStyle = 'rgba(47,129,247,0.75)';
-  ctx.lineWidth = 1.5;
-  for (const f of st.footprint) {
-    ctx.beginPath();
-    if (f.poly) {
-      f.poly.forEach(([x, y], i) => {
-        const [sx, sy] = w2s(x, y);
-        if (i === 0) ctx.moveTo(sx, sy);
-        else ctx.lineTo(sx, sy);
-      });
-      ctx.closePath();
-    } else {
-      const [sx, sy] = w2s(f.x, f.y);
-      ctx.arc(sx, sy, Math.max(1, f.r * view.scale), 0, 2 * Math.PI);
-    }
-    ctx.fill();
-    ctx.stroke();
-  }
-}
-
 function drawRobot() {
   const p = st.pose;
   if (!p) return;
   const stale = performance.now() - p.t > POSE_STALE_MS;
-  const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
-  const body = [[0.3, 0], [-0.15, 0.15], [-0.15, -0.15]];
-  ctx.fillStyle = stale ? '#6e7681' : '#2f81f7';
+  ctx.fillStyle = stale ? 'rgba(110,118,129,0.75)' : 'rgba(47,129,247,0.75)';
   ctx.strokeStyle = '#ffffff';
   ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  body.forEach(([bx, by], i) => {
-    const [sx, sy] = w2s(p.x + bx * c - by * s, p.y + bx * s + by * c);
-    if (i === 0) ctx.moveTo(sx, sy);
-    else ctx.lineTo(sx, sy);
-  });
-  ctx.closePath();
+  bodyPoly(BODY_OUTLINE, p.x, p.y, p.yaw);
   ctx.fill();
   ctx.stroke();
+  // 车头方向：车身前半部的白色三角。
+  ctx.fillStyle = '#ffffff';
+  bodyPoly([[0.24, 0], [0.02, 0.13], [0.02, -0.13]], p.x, p.y, p.yaw);
+  ctx.fill();
 }
 
 function drawScaleBar() {
@@ -790,7 +762,7 @@ for (const [k, v] of Object.entries(LAYERS)) {
 // /task_op 1/2 暂停/继续要等驱动 0.5 s 看门狗，约 1.2 s 停住；/cmd_vel 停发约 0.8 s 自停。
 const CLEAR_BAD = 0.03;   // 最小间隙低于它算可能碰撞
 const CLEAR_WARN = 0.08;  // 低于它提示间隙小
-const SEARCH = 0.3;       // 碰撞检查在每个轮廓圆心周围搜障碍的半径
+const SEARCH = 0.2;       // 碰撞检查在车身外这么远内搜障碍，更远的间隙显示成「> x cm」
 const START_SEG = 0.3;    // 离起点这么近的位姿算起步段（停在充电桩上时本来就贴着桩）
 const JOY_SPEEDS = [{ label: '慢 0.2 m/s', v: 0.2, w: 0.4 }, { label: '快 0.4 m/s', v: 0.4, w: 0.6 }];
 
@@ -899,7 +871,7 @@ async function preview(t) {
   const c = t.check;
   const cm = (v) => (v > c.limit ? `> ${Math.floor(c.limit * 100)}` : (v * 100).toFixed(0)) + ' cm';
   if (!c) {
-    parts.push('没收到车身轮廓，没做碰撞检查');
+    parts.push('还没收到地图，没做碰撞检查');
     level = 'warn';
   } else {
     parts.push(`间隙：路上 ${cm(c.minPath)}，起步 ${cm(c.minStart)}（现在 ${cm(c.now)}）`);
@@ -960,11 +932,17 @@ function poseSamples(pts, p, goalYaw) {
   return out;
 }
 
-// 按 10.16 的做法：车身用 footprint 的 6 个圆，障碍取地图占据栅格（≥50）加当前激光端点，
-// 每个位姿算轮廓圆到最近障碍的间隙。返回现在、起步段、路上三个最小间隙和对应位姿，没有轮廓时返回 null。
+// 车体系点 (bx, by) 到车身圆角矩形边缘的距离，在车身内为负。
+function bodyDist(bx, by) {
+  const qx = Math.abs(bx) - (BODY_L / 2 - BODY_R), qy = Math.abs(by) - (BODY_W / 2 - BODY_R);
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - BODY_R;
+}
+
+// 车身取圆角矩形（BODY_*），障碍取地图占据栅格（≥50）加当前激光端点，
+// 每个位姿算车身到最近障碍的间隙。返回现在、起步段、路上三个最小间隙和对应位姿，没有地图时返回 null。
 function checkPlan(pts, goalYaw) {
   const g = st.map, p = st.pose;
-  if (!g || !p || !st.fpLocal.length) return null;
+  if (!g || !p) return null;
   const { width: w, height: h, resolution: res } = g.info;
   const ox = g.info.origin.position.x, oy = g.info.origin.position.y;
   const occ = new Uint8Array(w * h);
@@ -973,29 +951,27 @@ function checkPlan(pts, goalYaw) {
     const c = Math.floor((x - ox) / res), r = Math.floor((y - oy) / res);
     if (c >= 0 && r >= 0 && c < w && r < h) occ[r * w + c] = 1;
   });
-  const R = Math.ceil(SEARCH / res);
-  const maxR = Math.max(...st.fpLocal.map((f) => f.r));
+  // 搜索窗口取车身外接圆再往外 SEARCH，窗口外的障碍离车身一定超过 SEARCH。
+  const R = Math.ceil((Math.hypot(BODY_L / 2, BODY_W / 2) + SEARCH) / res);
   const clearAt = (s) => {
     let best = Infinity;
     const c = Math.cos(s.yaw), sn = Math.sin(s.yaw);
-    for (const f of st.fpLocal) {
-      const cx = s.x + f.x * c - f.y * sn, cy = s.y + f.x * sn + f.y * c;
-      const ci = Math.floor((cx - ox) / res), ri = Math.floor((cy - oy) / res);
-      for (let dr = -R; dr <= R; dr++) {
-        const rr = ri + dr;
-        if (rr < 0 || rr >= h) continue;
-        for (let dc = -R; dc <= R; dc++) {
-          const cc = ci + dc;
-          if (cc < 0 || cc >= w || !occ[rr * w + cc]) continue;
-          const d = Math.hypot(ox + (cc + 0.5) * res - cx, oy + (rr + 0.5) * res - cy) - f.r - res / 2;
-          if (d < best) best = d;
-        }
+    const ci = Math.floor((s.x - ox) / res), ri = Math.floor((s.y - oy) / res);
+    for (let dr = -R; dr <= R; dr++) {
+      const rr = ri + dr;
+      if (rr < 0 || rr >= h) continue;
+      for (let dc = -R; dc <= R; dc++) {
+        const cc = ci + dc;
+        if (cc < 0 || cc >= w || !occ[rr * w + cc]) continue;
+        const dx = ox + (cc + 0.5) * res - s.x, dy = oy + (rr + 0.5) * res - s.y;
+        const d = bodyDist(dx * c + dy * sn, -dx * sn + dy * c) - res / 2;
+        if (d < best) best = d;
       }
     }
     return best;
   };
   const r = { now: clearAt(p), minStart: Infinity, minPath: Infinity, worstStart: null, worstPath: null,
-              limit: SEARCH - maxR - res / 2, withScan: !!st.scan };
+              limit: SEARCH - res / 2, withScan: !!st.scan };
   for (const s of poseSamples(pts, p, goalYaw)) {
     const d = clearAt(s);
     if (Math.hypot(s.x - p.x, s.y - p.y) < START_SEG) {
