@@ -8,6 +8,11 @@
   :root {
     --bg: #1e2227; --panel: rgba(30, 34, 39, 0.92); --chip: #2b3138; --line: #3a4048;
     --fg: #e6e6e6; --muted: #9aa4ae; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+    --ctl-h: 65px;  /* 底部按钮栏高度，上面浮着的控件都按它往上排 */
+  }
+  /* 手机竖屏一行放不下 8 个按钮：停止占两行，其余按钮排成两行。 */
+  @media (max-width: 600px) {
+    :root { --ctl-h: 110px; }
   }
   * { box-sizing: border-box; }
   html, body {
@@ -27,14 +32,14 @@
   .chip.ok { box-shadow: inset 3px 0 var(--ok); }
   .chip.warn { box-shadow: inset 3px 0 var(--warn); }
   .chip.bad { box-shadow: inset 3px 0 var(--bad); }
-  #tools { position: fixed; right: 12px; bottom: 76px; z-index: 2; display: flex; flex-direction: column; gap: 8px; }
+  #tools { position: fixed; right: 12px; bottom: calc(var(--ctl-h) + 11px); z-index: 2; display: flex; flex-direction: column; gap: 8px; }
   #tools button, #layers button {
     border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: inherit; cursor: pointer;
   }
   #tools button { width: 48px; height: 48px; border-radius: 24px; font-size: 13px; }
   #tools button.on { border-color: var(--ok); color: var(--ok); }
   #layers {
-    position: fixed; right: 70px; bottom: 76px; z-index: 2; display: none; min-width: 180px;
+    position: fixed; right: 70px; bottom: calc(var(--ctl-h) + 11px); z-index: 2; display: none; min-width: 180px;
     padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
   }
   #layers.open { display: block; }
@@ -42,21 +47,29 @@
   #layers small { color: var(--muted); }
   #layers .row { display: flex; gap: 8px; margin-top: 6px; }
   #layers button { flex: 1; padding: 6px; border-radius: 6px; }
-  #toast { position: fixed; left: 12px; bottom: 104px; z-index: 2; max-width: 60%; color: var(--bad); font-size: 13px; }
+  #toast {
+    position: fixed; left: 12px; bottom: calc(var(--ctl-h) + 39px); z-index: 2; max-width: 60%;
+    color: var(--bad); font-size: 13px;
+  }
   #toast.info { color: var(--fg); }
   #ctl {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; display: flex; gap: 6px; padding: 8px;
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 3; height: var(--ctl-h); display: grid;
+    grid-template-columns: 1.6fr repeat(7, 1fr); grid-auto-rows: 1fr; gap: 6px; padding: 8px;
     background: var(--panel); border-top: 1px solid var(--line);
+  }
+  @media (max-width: 600px) {
+    #ctl { grid-template-columns: 1.3fr repeat(4, 1fr); }
+    #ctl #b-stop { grid-row: span 2; }
   }
   #ctl button, .sheet button {
     border: 1px solid var(--line); background: var(--chip); color: var(--fg); font: inherit; cursor: pointer;
     user-select: none; -webkit-user-select: none;
   }
-  #ctl button { flex: 1; min-width: 0; height: 48px; border-radius: 8px; }
+  #ctl button { min-width: 0; padding: 0 2px; border-radius: 8px; }
   #ctl button.on { border-color: var(--ok); color: var(--ok); }
-  #ctl #b-stop { flex: 1.6; background: #b62324; border-color: var(--bad); color: #fff; font-size: 17px; font-weight: 600; }
+  #ctl #b-stop { background: #b62324; border-color: var(--bad); color: #fff; font-size: 17px; font-weight: 600; }
   .sheet {
-    position: fixed; left: 8px; right: 8px; bottom: 72px; z-index: 3; display: none; max-width: 420px; margin: 0 auto;
+    position: fixed; left: 8px; right: 8px; bottom: calc(var(--ctl-h) + 7px); z-index: 3; display: none; max-width: 420px; margin: 0 auto;
     padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
   }
   .sheet.open { display: block; }
@@ -67,11 +80,12 @@
   .sheet button.go.danger { background: #8a5a00; border-color: var(--warn); }
   .sheet button:disabled { opacity: 0.4; cursor: default; }
   #point-list button { display: block; width: 100%; margin-top: 6px; padding: 0 10px; text-align: left; }
+  #rl-info { white-space: pre-line; }
   .ok-t { color: var(--ok); }
   .warn-t { color: var(--warn); }
   .bad-t { color: var(--bad); }
   #joy {
-    position: fixed; left: 16px; bottom: 96px; z-index: 3; display: none; width: 160px; height: 160px;
+    position: fixed; left: 16px; bottom: calc(var(--ctl-h) + 31px); z-index: 3; display: none; width: 160px; height: 160px;
     border-radius: 50%; background: rgba(43, 49, 56, 0.85); border: 2px solid var(--line); touch-action: none;
   }
   #joy.open { display: block; }
@@ -90,6 +104,7 @@
 <div id="bar">
   <span class="chip" id="c-conn"><b>连接</b>—</span>
   <span class="chip" id="c-batt"><b>电量</b>—</span>
+  <span class="chip" id="c-chg"><b>充电</b>—</span>
   <span class="chip" id="c-loc"><b>定位</b>—</span>
   <span class="chip" id="c-score" hidden><b>分数</b>—</span>
   <span class="chip" id="c-nav"><b>导航</b>—</span>
@@ -115,6 +130,8 @@
   <button id="b-goal">设目标</button>
   <button id="b-nav">点位</button>
   <button id="b-joy">摇杆</button>
+  <button id="b-reloc">重定位</button>
+  <button id="b-charge">回充</button>
 </div>
 <div class="sheet" id="confirm">
   <h3 id="cf-title">—</h3>
@@ -125,6 +142,13 @@
   <h3>去已存点位</h3>
   <div id="point-list"></div>
   <div class="row"><button id="pt-close">关闭</button></div>
+</div>
+<div class="sheet" id="reloc">
+  <h3>重定位</h3>
+  <div id="rl-info">—</div>
+  <div class="row">
+    <button id="rl-cancel">取消</button><button id="rl-raw">按拖的位姿</button><button class="go" id="rl-go">按微调后</button>
+  </div>
 </div>
 <div id="joy"><div id="knob"></div><button id="joy-speed">慢速</button></div>
 <script src="app.js"></script>

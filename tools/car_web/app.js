@@ -2,6 +2,7 @@
 // 小车网页控制台。浏览器直接连车端 rosbridge（Melodic，rosbridge_server 0.11.16），没有后端。
 // 阶段 1：只读显示。阶段 2：停止、暂停/继续、点地图设目标、按点位导航、摇杆；
 // 发目标前先用 /get_plan_movebase 规划（不动车），再按车身轮廓做碰撞检查，确认后才发。
+// 阶段 3：手动重定位（拖出初值，网页里用激光和地图局部匹配微调，再调 /set_relocation）、回充（/autocharge）。
 // 默认走 Xiaomi 网的 192.168.31.231；连车热点时用 ?ws=ws://10.7.5.88:9090。
 
 const WS_URL = new URLSearchParams(location.search).get('ws') || 'ws://192.168.31.231:9090';
@@ -130,6 +131,11 @@ const st = {
   floor: null,      // {floorId, mapId}，按点位导航要用
   stopped: false,   // 本页叫停过：强停后 /navigation_status 会一直停在 1，没有「取消」状态
   active: null,     // 本页发出、还在执行的目标（带规划路径）
+  vel: null,        // {v, w}，/raw_odom
+  loc: null,        // /location_status
+  charge: null,     // /androidmsg_chargestatus
+  task: null,       // /androidmsg_navigationstatus：manager 的任务状态
+  charging: null,   // 本页发起、还没结束的回充 {before, moved}
 };
 const view = { scale: 80, rot: 0, ox: 0, oy: 0, follow: false, fitted: false };
 
@@ -175,18 +181,21 @@ ros.subscribe('/clean_pnc/cost_map/global_costmap', 'nav_msgs/OccupancyGrid', (m
 ros.subscribe('/current_floormap', 'map_msgs/RobotFloorMap', (m) => {
   st.floor = { floorId: m.floorId, mapId: m.mapId };
 });
+ros.subscribe('/androidmsg_chargestatus', 'std_msgs/Int16', onCharge);
+ros.subscribe('/androidmsg_navigationstatus', 'std_msgs/Int16', onTaskStatus);
 ros.advertise('/navi_stop', 'std_msgs/Int16');
 ros.advertise('/task_op', 'std_msgs/Int16');
 ros.advertise('/move_base_simple/goal', 'geometry_msgs/PoseStamped');
 ros.advertise('/cmd_vel', 'geometry_msgs/Twist');
-applyLayerSubs();
+ros.advertise('/autocharge', 'std_msgs/Int16');
 
-// 激光、代价图、定位分数数据量大，只在图层打开时订阅。
+// 激光、代价图、定位分数数据量大，只在图层打开时订阅；重定位要用激光，期间强制订阅。
 function applyLayerSubs() {
-  toggleSub(layers.scan, '/scan', 'sensor_msgs/LaserScan', onScan, 200);
+  const scan = layers.scan || relocating();
+  toggleSub(scan, '/scan', 'sensor_msgs/LaserScan', onScan, 200);
   toggleSub(layers.costmap, '/clean_pnc/cost_map/local_costmap', 'nav_msgs/OccupancyGrid', onCostmap, 500);
   toggleSub(layers.score, '/local_global_score', 'std_msgs/Float64MultiArray', onScore, 500);
-  if (!layers.scan) st.scan = null;
+  if (!scan) st.scan = null;
   if (!layers.costmap) st.costmap = null;
   $('c-score').hidden = !layers.score;
 }
@@ -261,8 +270,12 @@ function onNav(m) {
 }
 
 function updateNavChip() {
+  if (st.charging) {
+    const v = st.charging.moved ? st.task : null;
+    return setChip('c-nav', '回充·' + (v === null ? '已下发' : TASK_TEXT[v] || '状态 ' + v), v === 87 ? 'bad' : 'warn');
+  }
   if (st.stopped) return setChip('c-nav', '已叫停', 'bad');
-  if (!st.nav) return;
+  if (!st.nav) return setChip('c-nav', '—');
   const s = st.nav.status;
   setChip('c-nav', { 1: '进行中', 2: '已到达' }[s] || '状态 ' + s, s === 1 ? 'warn' : s === 2 ? 'ok' : '');
 }
@@ -275,9 +288,49 @@ function onPower(m) {
 // 3/13 正常，1 丢失。重启后旧位姿错了也会报正常，真假要看定位分数。
 function onLoc(m) {
   const v = m.data;
-  if (v === 3 || v === 13) setChip('c-loc', '正常', 'ok');
-  else if (v === 1) setChip('c-loc', '丢失', 'bad');
-  else setChip('c-loc', '状态 ' + v, 'warn');
+  st.loc = v;
+  setChip('c-loc', locText(v), v === 3 || v === 13 ? 'ok' : v === 1 ? 'bad' : 'warn');
+}
+
+function locText(v) {
+  return v === 3 || v === 13 ? '正常' : v === 1 ? '丢失' : '状态 ' + v;
+}
+
+// /androidmsg_chargestatus（manager 发）：41 没充电，44 充电失败，45/46 自动/手动充电中，47/48 自动/手动充满。
+const CHARGE_TEXT = { 41: '未充电', 44: '充电失败', 45: '自动充电中', 46: '手动充电中', 47: '已充满', 48: '已充满' };
+const CHARGING = new Set([45, 46, 47, 48]);
+
+function onCharge(m) {
+  const v = m.data;
+  st.charge = v;
+  setChip('c-chg', CHARGE_TEXT[v] || '状态 ' + v, CHARGING.has(v) ? 'ok' : v === 44 ? 'bad' : '');
+  if (st.charging && CHARGING.has(v)) endCharging('已对上桩，开始充电', true);
+}
+
+// /androidmsg_navigationstatus：manager 主循环一直在发。回充依次是 71 去充电桩 → 85 开始对桩 → 86 对桩成功；
+// 87 对桩失败（manager 会自己重试），51 去桩失败，52 没有充电桩，84 开机后没重定位过，3 导航失败。
+// 任务结束后 manager 会把状态复位成 83，所以对桩成功后也会看到 83，成功与否以充电状态为准。
+const TASK_TEXT = { 71: '去充电桩', 85: '对桩中', 86: '对桩成功', 87: '对桩失败，重试中', 51: '去桩失败',
+                    52: '没有充电桩', 84: '没重定位过', 83: '已取消', 3: '导航失败' };
+
+function onTaskStatus(m) {
+  const v = m.data, c = st.charging;
+  st.task = v;
+  if (!c) return;
+  // 刚发 /autocharge 时还是旧状态，变过一次之后才算 manager 接手了。
+  if (v !== c.before) c.moved = true;
+  if (!c.moved) return updateNavChip();
+  if (v === 86 || (v === 83 && CHARGING.has(st.charge))) endCharging('已对上桩，开始充电', true);
+  else if (v === 51 || v === 52 || v === 3 || v === 83) endCharging('回充结束：' + TASK_TEXT[v]);
+  else updateNavChip();
+}
+
+function endCharging(text, ok = false) {
+  st.charging = null;
+  st.active = null;
+  toast(text, ok);
+  updateNavChip();
+  redraw();
 }
 
 // /local_global_score[1]：定位对时约 0.86，错时约 0.29。
@@ -289,6 +342,7 @@ function onScore(m) {
 
 function onOdom(m) {
   const t = m.twist.twist;
+  st.vel = { v: t.linear.x, w: t.angular.z };
   setChip('c-vel', `${t.linear.x.toFixed(2)} m/s ${(t.angular.z * 180 / Math.PI).toFixed(0)}°/s`);
 }
 
@@ -413,7 +467,7 @@ function draw() {
   ctx.fillStyle = '#1e2227';
   ctx.fillRect(0, 0, W, H);
   if (st.map) drawGrid(st.map);
-  if (st.gcost && (layers.gcost || goalMode || pending)) drawGrid(st.gcost);
+  if (st.gcost && (layers.gcost || pickMode === 'goal' || pending)) drawGrid(st.gcost);
   if (layers.costmap && st.costmap) drawGrid(st.costmap);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   drawMeterGrid();
@@ -425,7 +479,9 @@ function draw() {
   if (picking) drawPick();
   if (layers.points) drawPoints();
   drawGoal();
-  if (layers.scan) drawScan();
+  // 重定位拖动和确认时激光画在候选位姿上，车现在位姿上的那份不画，免得两份重叠看不清；发出后再画回来用来核对。
+  if ((pickMode === 'reloc' && picking) || (reloc && !reloc.sent)) drawReloc();
+  else if (layers.scan || relocating()) drawScan();
   drawRobot();
   drawScaleBar();
 }
@@ -543,6 +599,16 @@ function drawScan() {
   });
 }
 
+// 车体系下的激光端点 pts 摆到位姿 p 上画出来。
+function drawScanAt(pts, p, color) {
+  const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+  ctx.fillStyle = color;
+  for (const [bx, by] of pts) {
+    const [sx, sy] = w2s(p.x + bx * c - by * s, p.y + bx * s + by * c);
+    ctx.fillRect(sx - 1, sy - 1, 2, 2);
+  }
+}
+
 function drawPlan(t, color) {
   if (t.pts) {
     ctx.setLineDash([6, 4]);
@@ -553,6 +619,11 @@ function drawPlan(t, color) {
   const c = t.check;
   if (c && c.worstPath && c.minPath < CLEAR_WARN) drawGhost(c.worstPath.x, c.worstPath.y, c.worstPath.yaw, '#f85149');
   if (c && c.worstStart && c.minStart < CLEAR_WARN) drawGhost(c.worstStart.x, c.worstStart.y, c.worstStart.yaw, '#f85149');
+  if (t.dock) {
+    ctx.setLineDash([4, 3]);
+    drawGhost(t.dock.x, t.dock.y, t.dock.yaw, '#3fb950');
+    ctx.setLineDash([]);
+  }
 }
 
 // 车体系下的车身轮廓点，每个圆角用 6 段折线。
@@ -599,7 +670,23 @@ function drawGhost(x, y, yaw, color) {
 }
 
 function drawPick() {
+  if (pickMode === 'reloc') return;  // 在 drawReloc 里连激光一起画
   drawGhost(picking.x, picking.y, pickYaw(picking), '#f0883e');
+}
+
+// 拖的时候：候选位姿和实时激光；确认时：拖的位姿（虚框）、微调后的位姿和匹配用的那帧激光。
+function drawReloc() {
+  if (picking) {
+    const p = { x: picking.x, y: picking.y, yaw: pickYaw(picking) };
+    drawScanAt(scanPoints(), p, RELOC_RAW);
+    drawGhost(p.x, p.y, p.yaw, RELOC_RAW);
+  } else if (reloc) {
+    ctx.setLineDash([4, 3]);
+    drawGhost(reloc.raw.x, reloc.raw.y, reloc.raw.yaw, RELOC_RAW);
+    ctx.setLineDash([]);
+    drawScanAt(reloc.pts, reloc.fit, RELOC_FIT);
+    drawGhost(reloc.fit.x, reloc.fit.y, reloc.fit.yaw, RELOC_FIT);
+  }
 }
 
 function drawRobot() {
@@ -642,7 +729,7 @@ cv.addEventListener('pointerdown', (e) => {
   if (ptrs.size === 2) {
     picking = null;
     startPinch();
-  } else if (ptrs.size === 1 && goalMode) {
+  } else if (ptrs.size === 1 && pickMode) {
     const [x, y] = s2w(e.clientX, e.clientY);
     picking = { x, y, yaw: null, sx: e.clientX, sy: e.clientY };
     redraw();
@@ -766,9 +853,10 @@ const SEARCH = 0.2;       // 碰撞检查在车身外这么远内搜障碍，更
 const START_SEG = 0.3;    // 离起点这么近的位姿算起步段（停在充电桩上时本来就贴着桩）
 const JOY_SPEEDS = [{ label: '慢 0.2 m/s', v: 0.2, w: 0.4 }, { label: '快 0.4 m/s', v: 0.4, w: 0.6 }];
 
-let goalMode = false;
-let picking = null;   // 设目标时正在拖的 {x, y, yaw, sx, sy}
-let pending = null;   // 等确认的目标 {kind, title, x, y, yaw, point, start, pts, check, danger, armed}
+let pickMode = null;  // 在地图上拖位姿的用途：'goal' 设目标，'reloc' 重定位
+let picking = null;   // 正在拖的 {x, y, yaw, sx, sy}
+let pending = null;   // 等确认的目标 {kind, title, x, y, yaw, point, dock, note, start, pts, check, danger, armed}
+let reloc = null;     // 等确认或复核中的重定位 {raw, fit, now, pts, sent}
 let joySpeed = 0, joyVec = null, joyTimer = 0;
 
 function sendOrWarn(topic, msg) {
@@ -785,14 +873,17 @@ function stopAll() {
   setTimeout(() => ros.publish('/navi_stop', { data: 5 }), 200);
   st.stopped = true;
   st.active = null;
+  st.charging = null;  // /navi_stop 5 也会让驱动退出对桩模式（manager 发 motionmode 2）
   closeConfirm();
-  setGoalMode(false);
+  closeReloc();
+  setPickMode(null);
   updateNavChip();
   toast('已发停止', true);
   redraw();
 }
 
 function navBusy() {
+  if (st.charging) return true;
   if (st.stopped) return false;
   if (st.active) return true;
   return !!st.nav && st.nav.status === 1 && performance.now() - st.nav.t < 3000;
@@ -816,25 +907,35 @@ function twist(v, w) {
 }
 
 // ----- 设目标 -----
-function setGoalMode(on) {
-  goalMode = on;
+function setPickMode(mode) {
+  pickMode = mode;
   picking = null;
-  $('b-goal').classList.toggle('on', on);
-  cv.style.cursor = on ? 'crosshair' : '';
-  if (on) toast('在地图上按下选位置，拖动定朝向', true);
+  $('b-goal').classList.toggle('on', mode === 'goal');
+  $('b-reloc').classList.toggle('on', mode === 'reloc');
+  cv.style.cursor = mode ? 'crosshair' : '';
+  if (mode === 'goal') toast('在地图上按下选位置，拖动定朝向', true);
+  if (mode === 'reloc') toast('在地图上按下车的实际位置，往车头方向拖', true);
+  applyLayerSubs();
+  redraw();
 }
 
-// 只点不拖时，朝向取车指向目标的方向。
+// 只点不拖时，设目标的朝向取车指向目标的方向，重定位沿用车现在的朝向。
 function pickYaw(t) {
   if (t.yaw !== null) return t.yaw;
   const p = st.pose;
+  if (pickMode === 'reloc') return p ? p.yaw : 0;
   return p ? Math.atan2(t.y - p.y, t.x - p.x) : 0;
 }
 
 function finishPick() {
-  const t = picking;
+  const t = picking, mode = pickMode;
   const yaw = pickYaw(t);
-  setGoalMode(false);
+  if (mode === 'reloc') {
+    // 先建好 reloc 再退出拖动模式，激光订阅不会被断开。
+    relocPreview({ x: t.x, y: t.y, yaw });
+    return setPickMode(null);
+  }
+  setPickMode(null);
   preview({ kind: 'goal', x: t.x, y: t.y, yaw,
             title: `去 (${t.x.toFixed(2)}, ${t.y.toFixed(2)})，朝向 ${deg(yaw)}°` });
 }
@@ -888,9 +989,11 @@ async function preview(t) {
     parts.push(`路径终点离目标 ${off.toFixed(2)} m`);
     if (level === 'ok') level = 'warn';
   }
+  if (t.note) parts.push(t.note);
   setConfirmInfo(parts.join('，'), level);
   t.danger = level !== 'ok';
-  setGoButton(false, level === 'bad' ? '可能碰撞，仍要出发' : t.danger ? '仍要出发' : '出发', t.danger);
+  const verb = t.kind === 'charge' ? '回充' : '出发';
+  setGoButton(false, level === 'bad' ? '可能碰撞，仍要' + verb : t.danger ? '仍要' + verb : verb, t.danger);
   redraw();
 }
 
@@ -984,8 +1087,12 @@ function checkPlan(pts, goalYaw) {
 }
 
 function setConfirmInfo(text, level = '') {
-  $('cf-info').textContent = text;
-  $('cf-info').className = level ? level + '-t' : '';
+  setInfo('cf-info', text, level);
+}
+
+function setInfo(id, text, level = '') {
+  $(id).textContent = text;
+  $(id).className = level ? level + '-t' : '';
 }
 
 function setGoButton(disabled, text, danger) {
@@ -1016,6 +1123,11 @@ function go() {
   }
   if (t.kind === 'goal') {
     if (!sendOrWarn('/move_base_simple/goal', poseMsg(t.x, t.y, t.yaw))) return;
+  } else if (t.kind === 'charge') {
+    // manager 收到后清空任务队列，把充电桩点排进去：导航到充电桩点，再让驱动自己对桩。
+    if (!sendOrWarn('/autocharge', { data: 1 })) return;
+    st.charging = { before: st.task, moved: false };
+    toast('已发回充', true);
   } else {
     if (!st.floor) return toast('还没收到 /current_floormap，不知道地图 ID');
     // 返回 status −1 不代表失败（10.16 实测），只把原始结果显示出来。
@@ -1030,6 +1142,208 @@ function go() {
   $('confirm').classList.remove('open');
   updateNavChip();
   redraw();
+}
+
+// ----- 手动重定位 -----
+// 在地图上拖出车的实际位姿当初值，网页里用当前这帧激光和地图做局部匹配微调，
+// 确认后调 /set_relocation：manager 原样转发 /initialpose 给 cartographer，cartographer 还会在附近再匹配一次。
+// 车端收到后约 2.3 s 不发 /tracked_pose，3.5 s 后恢复（10.18 实测），复核只看这之后的位姿。导航时绝不能重定位。
+const RELOC_RAW = '#a371f7', RELOC_FIT = '#39c5cf';
+const RELOC_SETTLE = 3500;
+// 吻合度：激光端点 1.5 格内有占据栅格的比例。10.21 室内地图上位姿对的时候约 0.67（杂物多，有些点打在图外）。
+const MATCH_OK = 0.55, MATCH_WARN = 0.4;
+// RViz 2D Pose Estimate 的默认协方差，cartographer 不看它。
+const RELOC_COV = Array.from({ length: 36 }, (_, i) => (i === 0 || i === 7 ? 0.25 : i === 35 ? 0.0685 : 0));
+
+function relocating() {
+  return pickMode === 'reloc' || !!reloc;
+}
+
+function relocBlocked() {
+  if (navBusy()) return '导航进行中，先按停止再重定位';
+  if (joyTimer) return '摇杆在用，松手再重定位';
+  if (st.vel && (Math.abs(st.vel.v) > 0.02 || Math.abs(st.vel.w) > 0.05)) return '车在动，停稳再重定位';
+  if (!st.map) return '还没收到地图';
+  return '';
+}
+
+// 当前这帧激光的有效端点（车体系）。
+function scanPoints() {
+  const sc = st.scan, out = [];
+  if (!sc) return out;
+  for (let i = 0; i < sc.ranges.length; i++) {
+    const r = sc.ranges[i];
+    if (!(r >= sc.range_min && r <= sc.range_max)) continue;
+    const a = sc.angle_min + i * sc.angle_increment;
+    out.push([r * Math.cos(a), r * Math.sin(a)]);
+  }
+  return out;
+}
+
+// 每格到最近占据栅格（≥50）的距离，单位是格。两遍倒角距离变换，结果挂在地图对象上缓存。
+function distField(g) {
+  if (g.dist) return g.dist;
+  const { width: w, height: h } = g.info, D = new Float32Array(w * h), s2 = Math.SQRT2;
+  for (let i = 0; i < w * h; i++) D[i] = g.data[i] >= 50 ? 0 : 1e9;
+  const relax = (i, j, d) => {
+    if (D[j] + d < D[i]) D[i] = D[j] + d;
+  };
+  for (let r = 0; r < h; r++) {
+    for (let c = 0; c < w; c++) {
+      const i = r * w + c;
+      if (c > 0) relax(i, i - 1, 1);
+      if (r === 0) continue;
+      relax(i, i - w, 1);
+      if (c > 0) relax(i, i - w - 1, s2);
+      if (c < w - 1) relax(i, i - w + 1, s2);
+    }
+  }
+  for (let r = h - 1; r >= 0; r--) {
+    for (let c = w - 1; c >= 0; c--) {
+      const i = r * w + c;
+      if (c < w - 1) relax(i, i + 1, 1);
+      if (r === h - 1) continue;
+      relax(i, i + w, 1);
+      if (c < w - 1) relax(i, i + w + 1, s2);
+      if (c > 0) relax(i, i + w - 1, s2);
+    }
+  }
+  g.dist = D;
+  return D;
+}
+
+// 激光端点 pts 摆到位姿 p 上和地图比。hard 为真时返回吻合度；
+// 否则返回按距离线性衰减（4 格外为 0）的平均分，给搜索用，比 0/1 计数平滑。
+function matchScore(pts, p, hard) {
+  const g = st.map, D = distField(g);
+  const { width: w, height: h, resolution: res } = g.info;
+  const ox = g.info.origin.position.x, oy = g.info.origin.position.y;
+  const c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+  let sum = 0;
+  for (const [bx, by] of pts) {
+    const ci = Math.floor((p.x + bx * c - by * s - ox) / res), ri = Math.floor((p.y + bx * s + by * c - oy) / res);
+    if (ci < 0 || ri < 0 || ci >= w || ri >= h) continue;
+    const d = D[ri * w + ci];
+    sum += hard ? (d <= 1.5 ? 1 : 0) : Math.max(0, 1 - d / 4);
+  }
+  return pts.length ? sum / pts.length : 0;
+}
+
+// 在 p 附近 ±r（步长 step）、±a（步长 astep）网格搜索得分最高的位姿。
+function searchPose(pts, p, r, step, a, astep) {
+  let best = p, bestV = -1;
+  const n = Math.round(r / step), m = Math.round(a / astep);
+  for (let i = -n; i <= n; i++) {
+    for (let j = -n; j <= n; j++) {
+      for (let k = -m; k <= m; k++) {
+        const q = { x: p.x + i * step, y: p.y + j * step, yaw: p.yaw + k * astep };
+        const v = matchScore(pts, q, false);
+        if (v > bestV) [best, bestV] = [q, v];
+      }
+    }
+  }
+  return best;
+}
+
+// 粗搜 ±0.5 m / ±30°（激光每 4 个点取 1 个），再在结果附近 ±5 cm / ±2.5° 细搜。
+// 10.21 室内实测：初值偏 0.5 m、30° 以内都能拉回到 1 cm、0.2° 以内，约 60 ms；偏 40° 就拉不回来。
+function refinePose(pts, p) {
+  const coarse = searchPose(pts.filter((_, i) => i % 4 === 0), p, 0.5, 0.05, Math.PI / 6, Math.PI / 72);
+  const fine = searchPose(pts, coarse, 0.05, 0.0125, Math.PI / 72, Math.PI / 360);
+  return { ...fine, yaw: wrapAngle(fine.yaw) };
+}
+
+function pct(v) {
+  return (v * 100).toFixed(0) + '%';
+}
+
+function poseText(p) {
+  return `(${p.x.toFixed(2)}, ${p.y.toFixed(2)}, ${deg(p.yaw)}°)`;
+}
+
+function matchLevel(v) {
+  return v >= MATCH_OK ? 'ok' : v >= MATCH_WARN ? 'warn' : 'bad';
+}
+
+function relocPreview(raw) {
+  const why = relocBlocked();
+  if (why) return toast(why);
+  const pts = scanPoints();
+  if (!pts.length) return toast('还没收到激光，稍等再拖');
+  const fit = refinePose(pts, raw);
+  raw.score = matchScore(pts, raw, true);
+  fit.score = matchScore(pts, fit, true);
+  const now = st.pose ? matchScore(pts, st.pose, true) : null;
+  reloc = { raw, fit, now, pts, sent: null };
+  const moved = Math.hypot(fit.x - raw.x, fit.y - raw.y), turned = Math.abs(wrapAngle(fit.yaw - raw.yaw));
+  const lines = [
+    `拖的位姿 ${poseText(raw)}：吻合度 ${pct(raw.score)}`,
+    `微调后 ${poseText(fit)}：吻合度 ${pct(fit.score)}（挪了 ${(moved * 100).toFixed(0)} cm、转了 ${deg(turned)}°）`,
+  ];
+  if (now !== null) lines.push(`车端现在的位姿：吻合度 ${pct(now)}`);
+  if (fit.score < MATCH_WARN) lines.push('微调后也对不上，初值可能偏太多（超过 0.5 m 或 30°），重新拖一次');
+  else if (now !== null && now >= fit.score - 0.03) lines.push('车端现在的位姿已经和地图吻合，可能不用重定位');
+  setInfo('rl-info', lines.join('\n'), matchLevel(fit.score));
+  setRelocButtons(true);
+  $('reloc').classList.add('open');
+  applyLayerSubs();
+  redraw();
+}
+
+function setRelocButtons(choosing) {
+  $('rl-raw').hidden = $('rl-go').hidden = !choosing;
+  $('rl-cancel').textContent = choosing ? '取消' : '关闭';
+}
+
+function closeReloc() {
+  reloc = null;
+  $('reloc').classList.remove('open');
+  applyLayerSubs();
+  redraw();
+}
+
+async function sendReloc(p) {
+  const r0 = reloc;
+  if (!r0 || r0.sent) return;
+  const why = relocBlocked();
+  if (why) return setInfo('rl-info', why, 'bad');
+  setRelocButtons(false);
+  setInfo('rl-info', `已发 ${poseText(p)}，等车端定位刷新（约 4 s）…`);
+  const point = { header: { frame_id: 'map' }, pose: { pose: poseMsg(p.x, p.y, p.yaw).pose, covariance: RELOC_COV } };
+  let r;
+  try {
+    r = await ros.call('/set_relocation', { point });
+  } catch (e) {
+    if (reloc === r0) setInfo('rl-info', '/set_relocation 调用失败：' + e.message, 'bad');
+    return;
+  }
+  if (reloc !== r0) return;
+  // result 1 是 manager 还没拿到地图 TF；0 只说明转发出去了，对不对看下面的复核。
+  if (r.result !== 0) return setInfo('rl-info', `车端没接受（result ${r.result}，地图还没就绪）`, 'bad');
+  r0.sent = { ...p, t: performance.now() };
+  st.trail = [];
+  redraw();
+  setTimeout(() => checkReloc(r0), RELOC_SETTLE);
+}
+
+// 复核：车端位姿和发出的差多少，新位姿下激光和地图的吻合度。
+function checkReloc(r0) {
+  if (reloc !== r0) return;
+  const s = r0.sent, p = st.pose;
+  if (!p || p.t < s.t + RELOC_SETTLE) {
+    if (performance.now() - s.t > 10000) {
+      return setInfo('rl-info', '10 s 内没收到新的 /tracked_pose，车端可能没处理，看一下车的状态', 'bad');
+    }
+    return setTimeout(() => checkReloc(r0), 500);
+  }
+  const score = matchScore(scanPoints(), p, true);
+  const d = Math.hypot(p.x - s.x, p.y - s.y), a = Math.abs(wrapAngle(p.yaw - s.yaw));
+  const level = st.loc === 1 ? 'bad' : matchLevel(score);
+  setInfo('rl-info', [
+    `车端位姿 ${poseText(p)}，和发出的差 ${(d * 100).toFixed(1)} cm、${(a * 180 / Math.PI).toFixed(1)}°`,
+    `激光和地图吻合度 ${pct(score)}，定位状态 ${st.loc === null ? '—' : locText(st.loc)}`,
+    level === 'ok' ? '重定位完成' : '吻合度偏低，看一下红色激光和地图是不是对齐了，不对就重新拖',
+  ].join('\n'), level);
 }
 
 // ----- 摇杆：按住才发，10 Hz；松手、切后台都会发零 -----
@@ -1093,12 +1407,14 @@ $('b-resume').onclick = () => {
 };
 $('b-goal').onclick = () => {
   closeConfirm();
+  closeReloc();
   $('points').classList.remove('open');
-  setGoalMode(!goalMode);
+  setPickMode(pickMode === 'goal' ? null : 'goal');
 };
 $('b-nav').onclick = () => {
   closeConfirm();
-  setGoalMode(false);
+  closeReloc();
+  setPickMode(null);
   const list = $('point-list');
   list.textContent = '';
   // 系统点（充电桩、初始点、桩位置）贴着充电桩，导航过去可能撞桩，不列出来。
@@ -1118,6 +1434,30 @@ $('b-nav').onclick = () => {
 $('pt-close').onclick = () => $('points').classList.remove('open');
 $('cf-cancel').onclick = closeConfirm;
 $('cf-go').onclick = go;
+$('b-reloc').onclick = () => {
+  closeConfirm();
+  closeReloc();
+  $('points').classList.remove('open');
+  if (pickMode === 'reloc') return setPickMode(null);
+  const why = relocBlocked();
+  if (why) return toast(why);
+  setPickMode('reloc');
+};
+$('rl-cancel').onclick = closeReloc;
+$('rl-raw').onclick = () => reloc && sendReloc(reloc.raw);
+$('rl-go').onclick = () => reloc && sendReloc(reloc.fit);
+$('b-charge').onclick = () => {
+  closeReloc();
+  setPickMode(null);
+  $('points').classList.remove('open');
+  if (CHARGING.has(st.charge)) return toast(`车已经在充电（${CHARGE_TEXT[st.charge]}）`, true);
+  const dock = st.points.find((p) => p.sys && p.name === '充电桩');
+  if (!dock) return toast('地图里没有充电桩点，先在 App 里设好');
+  const home = st.points.find((p) => p.sys && p.name === '初始点');
+  preview({ kind: 'charge', x: dock.x, y: dock.y, yaw: dock.yaw, dock: home,
+            title: '回充：先去充电桩点，再由车自己对桩',
+            note: '对桩段由车自己完成，不在检查里' + (home ? '（绿色虚框是初始点，即充电时车的位置）' : '') });
+};
 $('b-joy').onclick = () => {
   const open = !$('joy').classList.contains('open');
   if (!open) joyRelease();
@@ -1126,8 +1466,9 @@ $('b-joy').onclick = () => {
 };
 addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
-  setGoalMode(false);
+  setPickMode(null);
   closeConfirm();
+  closeReloc();
   $('points').classList.remove('open');
 });
 
@@ -1163,5 +1504,7 @@ setInterval(() => {
   if (st.pose && performance.now() - st.pose.t > POSE_STALE_MS) redraw();
 }, 500);
 
+// 放到最后：applyLayerSubs 要读上面才声明的拖动和重定位状态。
+applyLayerSubs();
 addEventListener('resize', resize);
 resize();
