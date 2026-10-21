@@ -18,9 +18,9 @@ class TfFrameLabelsNode:
     _MARKER_LIFETIME_SEC = 0.5
 
     def __init__(self):
-        self.fixed_frame = self._required_string_param('~fixed_frame', 'map')
+        self.fixed_frame = self._required_string_param('~fixed_frame', 'px4_map')
         topic = self._required_string_param(
-            '~topic', '/seeker_visualization/tf_frame_labels'
+            '~topic', '/orange_visualization/tf_frame_labels'
         )
         self.text_height_m = self._positive_float_param(
             '~text_height_m', self._DEFAULT_TEXT_HEIGHT_M
@@ -34,11 +34,11 @@ class TfFrameLabelsNode:
 
         self.labels = (
             self._label_spec(
-                '~map_frame', 'map', '~map_offset', (-0.055, -0.055, 0.025),
+                '~map_frame', 'px4_map', '~map_offset', (-0.055, -0.055, 0.025),
                 (1.0, 1.0, 1.0),
             ),
             self._label_spec(
-                '~base_frame', 'base_link', '~base_offset', (0.055, -0.040, 0.035),
+                '~base_frame', 'drone_base', '~base_offset', (0.055, -0.040, 0.035),
                 (0.2, 0.8, 1.0),
             ),
             self._label_spec(

@@ -17,7 +17,7 @@ class Harness:
         self.now += dt
         self.radius += speed * dt
         values = dict(stamp=1000 + self.now, position=(self.radius, 0, 0),
-                      orientation=(0, 0, 0, 1), frame_id='world', child_frame_id='base_link',
+                      orientation=(0, 0, 0, 1), frame_id='drone_odom', child_frame_id='drone_base',
                       now=self.now, source_now=1000 + self.now)
         values.update(overrides)
         return self.controller.observe(**values)
@@ -158,7 +158,7 @@ class MotionTests(unittest.TestCase):
         for i in range(30):
             stamp = 1800000000.0 + i * 0.02
             state = c.observe(stamp, (2 - 0.1 * i * 0.02, 0, 0),
-                              (0, 0, 0, 1), 'world', 'base_link', 1 + i * 0.02, stamp)
+                              (0, 0, 0, 1), 'drone_odom', 'drone_base', 1 + i * 0.02, stamp)
         self.assertAlmostEqual(state.radial_velocity_mps, -0.1, places=5)
 
 
@@ -213,7 +213,7 @@ class FaultTests(unittest.TestCase):
         for i in range(20):
             source = 500 + 0.02 * (i + 1)
             state = h.controller.observe(source, (2, 0, 0), (0, 0, 0, 1),
-                                         'world', 'base_link', h.now + 0.02 * (i + 1), source)
+                                         'drone_odom', 'drone_base', h.now + 0.02 * (i + 1), source)
         self.assertTrue(state.input_valid)
         self.assertEqual(state.mode, 'FAULT')
         self.assertTrue(h.controller.enable(h.now + 0.4, 500.4)[0])

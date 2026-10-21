@@ -1,16 +1,16 @@
 <launch>
-  <node pkg="seeker_visualization"
+  <node pkg="orange_visualization"
         type="mavros_odom_tf_node.py"
         name="test_mavros_odom_tf_node"
         clear_params="true"
         output="screen">
-    <param name="odom_topic" value="/test_seeker_visualization/odom" />
+    <param name="odom_topic" value="/test_orange_visualization/odom" />
     <param name="map_frame" value="test_map" />
     <param name="base_frame" value="test_base_link" />
   </node>
 
   <test test-name="mavros_odom_tf"
-        pkg="seeker_visualization"
+        pkg="orange_visualization"
         type="test_mavros_odom_tf.py"
         time-limit="15.0" />
 </launch>

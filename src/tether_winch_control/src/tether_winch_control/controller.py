@@ -33,8 +33,8 @@ def vector(values, size, name):
 class Config:
     anchor: tuple = (0.0, 0.0, 0.0)
     attachment_offset: tuple = (0.0, 0.0, 0.0)
-    frame_id: str = 'world'
-    child_frame_id: str = 'base_link'
+    frame_id: str = 'drone_odom'
+    child_frame_id: str = 'drone_base'
     low_duty: int = 100
     high_duty: int = 300
     fallback_duty: int = 100

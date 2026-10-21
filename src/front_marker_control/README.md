@@ -4,9 +4,9 @@ ROS Noetic 前视 Marker 运动控制包。唯一视觉输入是标准
 `geometry_msgs/PoseStamped` `/front_marker/pose`；节点不依赖视觉包的自定义消息、OpenCV
 或 CameraInfo。
 
-节点使用 TF2 将输入 Pose 按源时间戳转换到 `base_link`，再计算目标位置
+节点使用 TF2 将输入 Pose 按源时间戳转换到 `drone_base`，再计算目标位置
 `[0.8, 0.0, 0.0]` 的误差和机体 FLU 速度。独立启动时必须由外部提供
-`base_link ← pose.header.frame_id` TF：
+`drone_base ← pose.header.frame_id` TF：
 
 ```bash
 roslaunch front_marker_control front_marker_control.launch
@@ -39,9 +39,9 @@ YAML”表达，加载顺序固定为先公共、后场景：
 - `config/front_marker_control.yaml` —— 公共配置（跟踪场景的默认值）。
 - `config/front_marker_control_rviz.yaml` —— RViz 可视化场景差异项
   （关闭 `enable_yaw_control` 和 `enable_setpoint_output`，由
-  `seeker_visualization` 入口自动叠加）。
+  `orange_visualization` 入口自动叠加）。
 
-只启动控制节点（需要外部提供 `base_link <- pose.header.frame_id` TF）：
+只启动控制节点（需要外部提供 `drone_base <- pose.header.frame_id` TF）：
 
 ```bash
 roslaunch front_marker_control front_marker_control.launch
@@ -71,7 +71,7 @@ roslaunch front_marker_control front_marker_tracking.launch \
   control_config:=/tmp/my_control.yaml vision_config:=/tmp/my_vision.yaml
 ```
 
-相机静态 TF（`base_link -> usb_camera_optical_frame`）数值在
+相机静态 TF（`drone_base -> usb_camera_optical_frame`）数值在
 `config/front_camera_tf.yaml` 中维护，由 `front_camera_static_tf_node.py` 读取并
 发布，不再使用 launch 命令行数值；节点会拒绝非法配置（非有限值、非单位四元数、
 空或相同坐标系）。
@@ -239,7 +239,7 @@ roslaunch front_marker_control ov13855_marker_tracking.launch camera:=false
 ```
 
 此时 AprilTag 用 fusion 的视觉 YAML（tag 43.7 mm），只与 `qr_top_tag_bottom` / `dm_top_tag_bottom` 版式一致。
-悬停目标 `target_xyz_body: [0.8, 0, 0]` 是 tag 相对 base_link 的位置；相机在 base_link 前 0.18 m，所以到位时
+悬停目标 `target_xyz_body: [0.8, 0, 0]` 是 tag 相对 drone_base 的位置；相机在 drone_base 前 0.18 m，所以到位时
 相机到 tag 约 0.62 m。到位后自动读码见 `barcode_arrival_trigger`（`auto_read.launch`），手动拨杆读码见
 `barcode_rc_trigger`（`manual_read.launch`，CSV 会记下拨杆时的控制模式）。
 可选参数：`roslaunch --ros-args front_marker_control ov13855_marker_tracking.launch`。

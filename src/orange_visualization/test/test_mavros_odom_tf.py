@@ -16,7 +16,7 @@ class MavrosOdometryTfTest(unittest.TestCase):
         self.lock = threading.Lock()
         self.transforms = []
         self.odom_pub = rospy.Publisher(
-            '/test_seeker_visualization/odom', Odometry, queue_size=1
+            '/test_orange_visualization/odom', Odometry, queue_size=1
         )
         self.tf_sub = rospy.Subscriber('/tf', TFMessage, self.tf_callback, queue_size=20)
 
@@ -97,7 +97,7 @@ class MavrosOdometryTfTest(unittest.TestCase):
 if __name__ == '__main__':
     rospy.init_node('test_mavros_odom_tf')
     rostest.rosrun(
-        'seeker_visualization',
+        'orange_visualization',
         'mavros_odom_tf',
         MavrosOdometryTfTest,
     )

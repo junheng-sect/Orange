@@ -19,8 +19,8 @@
 | `tcp.timeout_sec` | 0.2 秒 | 分别限制连接和发送；允许大于 0、不超过 5 秒 |
 | `tcp.resend_sec` | 1 秒 | 稳定档位的重发间隔，最小 0.05 秒 |
 | `odom_topic` | `/fastlio/odom_world` | `nav_msgs/Odometry` |
-| `controller.frame_id` / `child_frame_id` | `world` / `base_link` | 严格检查消息坐标系 |
-| `controller.anchor` | `[0, 0, 0]` | 固定出线点在当次 world 坐标系中的坐标（米） |
+| `controller.frame_id` / `child_frame_id` | `drone_odom` / `drone_base` | 严格检查消息坐标系 |
+| `controller.anchor` | `[0, 0, 0]` | 固定出线点在当次 drone_odom 坐标系中的坐标（米） |
 | `controller.attachment_offset` | `[0, 0, 0]` | 雷达 IMU 到挂线点的偏移，按机体轴表达（米） |
 
 三个 DUTY 均必须是 **0～500 的整数**，拒绝浮点数、布尔值、越界值，且要求
@@ -133,7 +133,7 @@ catkin_test_results build/tether_winch_control/test_results
 ```
 
 单元测试使用 localhost 随机端口。rostest 使用隔离的 ROS Master 和 localhost:18080，
-注入 world/base_link 里程计，验证实际 YAML、状态、服务、掉定位、错误帧、TCP 中断恢复、
+注入 drone_odom/drone_base 里程计，验证实际 YAML、状态、服务、掉定位、错误帧、TCP 中断恢复、
 人工重新启用和正常退出。测试不使用硬件 IP；请保持本机测试端口 18080 空闲。
 
 无需 ROS 的轨迹模拟：

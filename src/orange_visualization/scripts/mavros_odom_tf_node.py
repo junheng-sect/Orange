@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Broadcast a validated map-to-base transform from MAVROS Odometry."""
+"""Broadcast a validated px4_map-to-base transform from MAVROS Odometry."""
 
 import math
 
@@ -18,8 +18,8 @@ class MavrosOdometryTfNode:
         self.odom_topic = str(
             rospy.get_param('~odom_topic', '/mavros/local_position/odom')
         )
-        self.map_frame = str(rospy.get_param('~map_frame', 'map'))
-        self.base_frame = str(rospy.get_param('~base_frame', 'base_link'))
+        self.map_frame = str(rospy.get_param('~map_frame', 'px4_map'))
+        self.base_frame = str(rospy.get_param('~base_frame', 'drone_base'))
         if not self.odom_topic:
             raise ValueError('odom_topic must not be empty')
         if not self.map_frame or not self.base_frame:

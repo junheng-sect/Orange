@@ -34,7 +34,7 @@ class InputTest(unittest.TestCase):
                 image.width=image.height=800;image.step=800;image.encoding='mono8';image.data=scene.tobytes()
                 image_pub.publish(image);time.sleep(.10)
             self.assertGreater(len(errors),start)
-            error=errors[-1];self.assertEqual(error.header.frame_id,'base_link')
+            error=errors[-1];self.assertEqual(error.header.frame_id,'drone_base')
             pose=next(p for p in reversed(poses) if p.header.stamp==error.header.stamp)
             # Existing extrinsic: x_body=.18+z_cam, y_body=-x_cam, z_body=-y_cam.
             self.assertAlmostEqual(error.vector.x,.18+pose.pose.position.z-.8,places=6)

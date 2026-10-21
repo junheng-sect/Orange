@@ -12,7 +12,7 @@ class TfFrameLabelsTest(unittest.TestCase):
     def setUp(self):
         self.message = None
         self.subscriber = rospy.Subscriber(
-            '/test_seeker_visualization/tf_frame_labels',
+            '/test_orange_visualization/tf_frame_labels',
             MarkerArray,
             self.marker_callback,
             queue_size=1,
@@ -94,5 +94,5 @@ class TfFrameLabelsTest(unittest.TestCase):
 if __name__ == '__main__':
     rospy.init_node('test_tf_frame_labels')
     rostest.rosrun(
-        'seeker_visualization', 'tf_frame_labels', TfFrameLabelsTest
+        'orange_visualization', 'tf_frame_labels', TfFrameLabelsTest
     )

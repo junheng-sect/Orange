@@ -9,8 +9,8 @@ tcp:
 odom_topic: /fastlio/odom_world
 status_rate_hz: 20.0
 controller:
-  frame_id: world
-  child_frame_id: base_link
+  frame_id: drone_odom
+  child_frame_id: drone_base
   # Fixed ground cable exit in frame_id. Must be measured before handheld use.
   anchor: [0.0, 0.0, 0.0]
   # Cable attachment relative to the lidar IMU position origin, in body axes.

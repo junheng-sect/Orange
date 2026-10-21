@@ -101,7 +101,7 @@ class LockScopeTest(unittest.TestCase):
         node.max_pose_latency_sec = 0.5
         node.future_stamp_tolerance_sec = 0.1
         node.tf_buffer = transform
-        node.base_frame = 'base_link'
+        node.base_frame = 'drone_base'
         node.tf_lookup_timeout_sec = 0.05
         node.target_xyz_body = (0.8, 0.0, 0.0)
         node.setpoint_publish_rate_hz = 20.0
@@ -146,7 +146,7 @@ class LockScopeTest(unittest.TestCase):
         node.loss_decel = 1.0
         node.last_observation_issue = ''
         node.enable_yaw_control = False
-        node.base_frame = 'base_link'
+        node.base_frame = 'drone_base'
         node.enable_position_hold = False
         node.control_mode = 'ALIGN'
         node.mode_reason = ''
@@ -202,7 +202,7 @@ class LockScopeTest(unittest.TestCase):
 
     def test_tf_lookup_does_not_hold_shared_state_lock(self):
         transformed = pose_at(self.now)
-        transformed.header.frame_id = 'base_link'
+        transformed.header.frame_id = 'drone_base'
         blocking_transform = BlockingTransform(transformed)
         node = self.pose_node(blocking_transform)
         source = pose_at(self.now)
@@ -215,7 +215,7 @@ class LockScopeTest(unittest.TestCase):
 
     def test_error_publish_does_not_hold_shared_state_lock(self):
         transformed = pose_at(self.now)
-        transformed.header.frame_id = 'base_link'
+        transformed.header.frame_id = 'drone_base'
         blocking_publisher = BlockingPublisher()
         node = self.pose_node(
             ImmediateTransform(transformed),
@@ -300,7 +300,7 @@ class PositionHoldRegressionTest(unittest.TestCase):
         node.enable_setpoint_output = False
         node.enable_yaw_control = False
         node.enable_position_hold = True
-        node.base_frame = 'base_link'
+        node.base_frame = 'drone_base'
         node.velocity_limiter = FakeVelocityLimiter()
         node.max_accel = 0.5
         node.loss_decel = 1.0

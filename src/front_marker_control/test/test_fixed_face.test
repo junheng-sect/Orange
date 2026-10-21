@@ -2,7 +2,7 @@
   <node pkg="tf2_ros"
         type="static_transform_publisher"
         name="fixed_face_camera_tf"
-        args="0 0 0 -0.5 0.5 -0.5 0.5 base_link usb_camera_optical_frame" />
+        args="0 0 0 -0.5 0.5 -0.5 0.5 drone_base usb_camera_optical_frame" />
 
   <!-- yaw_mode 不覆盖：验证主 YAML 默认即 fixed_face。 -->
   <node pkg="front_marker_control"

@@ -21,7 +21,7 @@ class Integration(unittest.TestCase):
         self.status = None
         self.speed = 0.0
         self.available = False
-        self.frame = 'world'
+        self.frame = 'drone_odom'
         publisher = rospy.Publisher('/fastlio/odom_world', Odometry, queue_size=1)
         subscriber = rospy.Subscriber('/tether_winch_control/status', WinchStatus,
                                       lambda message: setattr(self, 'status', message))
@@ -35,7 +35,7 @@ class Integration(unittest.TestCase):
                 message = Odometry()
                 message.header.stamp = rospy.Time.now()
                 message.header.frame_id = self.frame
-                message.child_frame_id = 'base_link'
+                message.child_frame_id = 'drone_base'
                 message.pose.pose.position.x = radius
                 message.pose.pose.orientation.w = 1.0
                 publisher.publish(message)
@@ -50,8 +50,8 @@ class Integration(unittest.TestCase):
             self.assertEqual(set(server.messages), {b'DUTY=100#'})
             self.available = True
             wait_for(lambda: self.status.input_valid and not self.status.communication_error, 10)
-            self.assertEqual(rospy.get_param('/tether_winch_control/controller/low_duty'), 100)
-            self.assertEqual(rospy.get_param('/tether_winch_control/controller/high_duty'), 300)
+            self.assertEqual(rospy.get_param('/tether_winch_control/controller/low_duty'), 10)
+            self.assertEqual(rospy.get_param('/tether_winch_control/controller/high_duty'), 220)
             self.assertEqual(rospy.get_param('/tether_winch_control/odom_topic'), '/fastlio/odom_world')
             self.assertFalse(self.status.hardware_feedback_valid)
             self.assertTrue(math.isnan(self.status.applied_duty))
@@ -63,8 +63,8 @@ class Integration(unittest.TestCase):
                 self.assertTrue(enable(True).success)
             self.speed = -0.3
             wait_for(lambda: self.status.mode == 'HIGH')
-            wait_for(lambda: b'DUTY=300#' in server.messages)
-            self.assertEqual(self.status.target_duty, 300)
+            wait_for(lambda: b'DUTY=220#' in server.messages)
+            self.assertEqual(self.status.target_duty, 220)
 
             self.available = False
             wait_for(lambda: self.status.mode == 'FAULT')
@@ -99,12 +99,12 @@ class Integration(unittest.TestCase):
             self.frame = 'wrong'
             wait_for(lambda: self.status.mode == 'FAULT')
             wait_for(lambda: server.messages[-1] == b'DUTY=100#')
-            self.frame = 'world'
+            self.frame = 'drone_odom'
             wait_for(lambda: self.status.input_valid)
             self.assertTrue(enable(True).success)
             wait_for(lambda: self.status.mode == 'HIGH')
-            wait_for(lambda: server.messages[-1] == b'DUTY=300#')
-            wait_for(lambda: self.status.last_sent_duty == 300)
+            wait_for(lambda: server.messages[-1] == b'DUTY=220#')
+            wait_for(lambda: self.status.last_sent_duty == 220)
             self.assertGreater(self.status.last_send_time.to_sec(), 0)
             rosnode.kill_nodes(['/tether_winch_control'])
             wait_for(lambda: server.messages[-1] == b'DUTY=100#')

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(seeker_visualization)
+project(orange_visualization)
 
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs

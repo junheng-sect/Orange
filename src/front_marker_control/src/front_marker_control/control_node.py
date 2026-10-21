@@ -87,7 +87,7 @@ class FrontMarkerControlNode(object):
         self.face_issue = ''
         # 机体速度（Odometry twist 模长），仅用于 fixed_face 锁定前的静止判定。
         self.latest_local_velocity_norm = float('inf')
-        # 最近的 Marker 观测（源时间 s, base_link 下 Marker 位置），锁定时取对准窗口中位数。
+        # 最近的 Marker 观测（源时间 s, drone_base 下 Marker 位置），锁定时取对准窗口中位数。
         self.recent_markers = deque(maxlen=64)
         self.aligned_start_stamp = None
         self.refiner = None
@@ -260,7 +260,7 @@ class FrontMarkerControlNode(object):
         self.refinement_parameters = {name: float(get('~' + name, value))
                                       for name, value in DEFAULTS.items()}
         validate_parameters(self.refinement_parameters)
-        self.base_frame = str(get('~base_frame', 'base_link'))
+        self.base_frame = str(get('~base_frame', 'drone_base'))
         if not self.base_frame:
             raise ValueError('base_frame must not be empty')
         self.target_xyz_body = finite_vector3(

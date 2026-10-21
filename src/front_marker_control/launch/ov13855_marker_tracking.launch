@@ -14,7 +14,7 @@
  <arg name="vision_config" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml"
       doc="AprilTag 视觉参数文件（只在 camera:=true 时用）" />
  <arg name="camera_tf_config" default="$(find front_marker_control)/config/ov13855_camera_tf.yaml"
-      doc="相机相对 base_link 的静态外参" />
+      doc="相机相对 drone_base 的静态外参" />
  <arg name="control_config" default="$(find front_marker_control)/config/front_marker_control.yaml"
       doc="控制参数文件（悬停目标 target_xyz_body、对准容差、速度限幅等）" />
  <arg name="control_scene_config" default=""

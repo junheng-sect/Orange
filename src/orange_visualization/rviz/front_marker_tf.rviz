@@ -33,20 +33,22 @@ Visualization Manager:
         Z: 0
       Plane: XY
       Plane Cell Count: 40
-      Reference Frame: map
+      Reference Frame: <Fixed Frame>
       Value: true
     - Class: rviz/TF
       Enabled: true
       Filter (blacklist): ""
-      Filter (whitelist): map|base_link|usb_camera_optical_frame|front_marker
+      Filter (whitelist): px4_map|drone_odom|drone_base|usb_camera_optical_frame|front_marker
       Frame Timeout: 1
       Frames:
         All Enabled: true
-        base_link:
+        drone_base:
+          Value: true
+        drone_odom:
           Value: true
         front_marker:
           Value: true
-        map:
+        px4_map:
           Value: true
         usb_camera_optical_frame:
           Value: true
@@ -61,7 +63,7 @@ Visualization Manager:
       Value: true
     - Class: rviz/MarkerArray
       Enabled: true
-      Marker Topic: /seeker_visualization/tf_frame_labels
+      Marker Topic: /orange_visualization/tf_frame_labels
       Name: TF Labels
       Namespaces:
         tf_frame_label_leaders: true
@@ -84,18 +86,18 @@ Visualization Manager:
       Class: rviz/Axes
       Enabled: true
       Length: 0.1
-      Name: map
+      Name: fixed frame
       Radius: 0.005
-      Reference Frame: map
+      Reference Frame: <Fixed Frame>
       Show Trail: false
       Value: true
     - Alpha: 1
       Class: rviz/Axes
       Enabled: true
       Length: 0.1
-      Name: base_link
+      Name: drone_base
       Radius: 0.005
-      Reference Frame: base_link
+      Reference Frame: drone_base
       Show Trail: false
       Value: true
     - Alpha: 1
@@ -120,7 +122,7 @@ Visualization Manager:
   Global Options:
     Background Color: 38; 38; 38
     Default Light: true
-    Fixed Frame: map
+    Fixed Frame: px4_map
     Frame Rate: 30
   Name: root
   Tools:
@@ -151,7 +153,7 @@ Visualization Manager:
       Name: Current View
       Near Clip Distance: 0.01
       Pitch: 0.65
-      Target Frame: map
+      Target Frame: px4_map
       Yaw: 0.8
     Saved: ~
 Window Geometry:

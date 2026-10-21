@@ -42,7 +42,7 @@ def _unit_quaternion(values):
 def main():
     rospy.init_node('front_camera_static_transform')
 
-    base_frame = str(rospy.get_param('~base_frame', 'base_link')).strip()
+    base_frame = str(rospy.get_param('~base_frame', 'drone_base')).strip()
     camera_frame = str(
         rospy.get_param('~camera_frame', 'usb_camera_optical_frame')
     ).strip()

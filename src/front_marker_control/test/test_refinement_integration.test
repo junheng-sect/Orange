@@ -2,7 +2,7 @@
   <node pkg="tf2_ros"
         type="static_transform_publisher"
         name="refine_camera_tf"
-        args="0 0 0 -0.5 0.5 -0.5 0.5 base_link usb_camera_optical_frame" />
+        args="0 0 0 -0.5 0.5 -0.5 0.5 drone_base usb_camera_optical_frame" />
 
   <node pkg="front_marker_control"
         type="front_marker_control_node"
@@ -21,7 +21,7 @@
     <param name="setpoint_preview_topic" value="/test_refine/preview" />
     <param name="status_topic" value="/test_refine/status" />
     <param name="control_mode_topic" value="/test_refine/control_mode" />
-    <param name="base_frame" value="base_link" />
+    <param name="base_frame" value="drone_base" />
     <param name="kp_x" value="0.5" />
     <param name="kp_y" value="0.5" />
     <param name="kp_z" value="0.5" />

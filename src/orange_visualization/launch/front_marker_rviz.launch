@@ -4,8 +4,14 @@
        关闭 yaw 控制与控制输出。 -->
   <arg name="start_tracking" default="true" />
   <arg name="show_frame_labels" default="true" />
-  <arg name="rviz_config" default="$(find seeker_visualization)/rviz/front_marker_tf.rviz" />
-  <arg name="config_file" default="$(find seeker_visualization)/config/seeker_visualization.yaml" />
+  <!-- publish_mavros_tf：是否把 MAVROS 里程计转发成 px4_map -> drone_base。
+       orange 上 drone_base 已由 FAST-LIO 的重力桥发布（body -> drone_base），两边同时发会让
+       drone_base 有两个父帧，所以默认 false：不起转发节点，RViz 和标签都以 drone_odom 为参考系。
+       只在没跑 FAST-LIO 时设 true，参考系换成 px4_map。 -->
+  <arg name="publish_mavros_tf" default="false" />
+  <arg name="fixed_frame" default="$(eval 'px4_map' if arg('publish_mavros_tf') else 'drone_odom')" />
+  <arg name="rviz_config" default="$(find orange_visualization)/rviz/front_marker_tf.rviz" />
+  <arg name="config_file" default="$(find orange_visualization)/config/orange_visualization.yaml" />
   <arg name="control_scene_config" default="$(find front_marker_control)/config/front_marker_control_rviz.yaml" />
 
   <!-- Full pipeline owns the camera driver, camera static TF and dynamic marker TF. -->
@@ -16,25 +22,29 @@
 
   <!-- With start_tracking:=false the full tracking pipeline must already be
        running elsewhere and owns the camera and marker TF edges. -->
-  <node pkg="seeker_visualization"
+  <node pkg="orange_visualization"
         type="mavros_odom_tf_node.py"
         name="mavros_odom_tf_node"
-        output="screen">
+        output="screen"
+        if="$(arg publish_mavros_tf)">
     <rosparam command="load" file="$(arg config_file)" />
   </node>
 
-  <!-- RViz TF names cannot be offset per frame; publish readable labels separately. -->
-  <node pkg="seeker_visualization"
+  <!-- RViz TF names cannot be offset per frame; publish readable labels separately.
+       The "map" label sits on the fixed frame, whichever one is in use. -->
+  <node pkg="orange_visualization"
         type="tf_frame_labels_node.py"
         name="tf_frame_labels_node"
         output="screen"
         if="$(arg show_frame_labels)">
     <rosparam command="load" file="$(arg config_file)" />
+    <param name="fixed_frame" value="$(arg fixed_frame)" />
+    <param name="map_frame" value="$(arg fixed_frame)" />
   </node>
 
   <node pkg="rviz"
         type="rviz"
         name="front_marker_rviz"
-        args="-d $(arg rviz_config)"
+        args="-d $(arg rviz_config) -f $(arg fixed_frame)"
         output="screen" />
 </launch>

@@ -1,19 +1,20 @@
-# seeker_visualization 公共运行参数（mavros_odom_tf_node 与 tf_frame_labels_node）。
+# orange_visualization 公共运行参数（mavros_odom_tf_node 与 tf_frame_labels_node）。
 # 加载顺序固定：先本文件，后场景差异文件（当前无场景差异文件时仅加载本文件）。
 
 # ---- 里程计 TF（mavros_odom_tf_node） ----
 # 输入里程计话题
 odom_topic: /mavros/local_position/odom
-# 里程计父坐标系（TF 边 map -> base_link 的父端）
-map_frame: map
+# 里程计父坐标系（TF 边 px4_map -> drone_base 的父端）
+map_frame: px4_map
 # 里程计子坐标系（TF 边的子端）
-base_frame: base_link
+base_frame: drone_base
 
 # ---- 坐标系标签（tf_frame_labels_node） ----
-# 标签显示的固定参考系
-fixed_frame: map
+# 标签显示的固定参考系；front_marker_rviz.launch 会按 publish_mavros_tf 覆盖它和 map_frame
+# （默认 drone_odom，publish_mavros_tf:=true 时 px4_map），单独起 tf_frame_labels_node 时才用这里的值
+fixed_frame: px4_map
 # 标签 MarkerArray 输出话题
-topic: /seeker_visualization/tf_frame_labels
+topic: /orange_visualization/tf_frame_labels
 # 标签文字高度（m）
 text_height_m: 0.03
 # 引线宽度（m）
