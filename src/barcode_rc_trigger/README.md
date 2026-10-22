@@ -12,7 +12,7 @@
 cd /home/orangepi/mid360s_ws/scripts && ./fusion.sh
 # 终端 2
 source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash
-export ROS_IP=192.168.31.32
+source /home/orangepi/mid360s_ws/scripts/ros_net.sh
 roslaunch barcode_rc_trigger manual_read.launch
 ```
 

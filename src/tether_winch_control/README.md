@@ -92,8 +92,7 @@ source /opt/ros/noetic/setup.bash
 cd /home/orangepi/orange
 catkin build tether_winch_control
 source /home/orangepi/orange/devel/setup.bash
-export ROS_MASTER_URI=http://192.168.31.32:11311
-export ROS_IP=192.168.31.32
+source /home/orangepi/mid360s_ws/scripts/ros_net.sh
 roslaunch tether_winch_control tether_winch.launch
 ```
 
@@ -102,8 +101,7 @@ roslaunch tether_winch_control tether_winch.launch
 ```bash
 source /opt/ros/noetic/setup.bash
 source /home/orangepi/orange/devel/setup.bash
-export ROS_MASTER_URI=http://192.168.31.32:11311
-export ROS_IP=192.168.31.32
+source /home/orangepi/mid360s_ws/scripts/ros_net.sh
 rostopic echo /tether_winch_control/status
 # 默认自动启用，无需以下启用命令；它保留用于故障恢复或 auto_enable=false：
 rosservice call /tether_winch_control/set_enabled 'data: true'

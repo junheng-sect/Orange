@@ -12,7 +12,7 @@
 # 终端 1：fusion
 cd /home/orangepi/mid360s_ws/scripts && ./fusion.sh
 # 终端 2、3 先执行：
-source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash && export ROS_IP=192.168.31.32
+source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash && source /home/orangepi/mid360s_ws/scripts/ros_net.sh
 # 终端 2：相机 TF + 控制（到位判定）；camera:=false 用 fusion 起的相机和 AprilTag
 roslaunch front_marker_control ov13855_marker_tracking.launch camera:=false
 # 终端 3：相机读码节点 + 到位触发节点
