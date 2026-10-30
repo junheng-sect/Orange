@@ -3,6 +3,8 @@
 # 手机打开 http://<台式机 IP>:8080；台式机自己也可以直接用浏览器打开 index.html。
 # 页面在浏览器里直接连车端 rosbridge（车的几个地址同时试，见 app.js 开头），这里只提供静态文件，
 # 放在哪台机器上都不影响数据路径。
+# 顶栏的无人机状态（drone.js）另从本机状态桥 http://<打开页面的主机>:8091/status 取：在 mid360s_ws 的
+# docker/ros-noetic-rviz 下先跑 ./scripts/run_drone_status.sh；桥没开只影响无人机那两格。
 # 用法：tools/car_web/serve.sh [端口]
 set -e
 cd "$(dirname "$0")"
