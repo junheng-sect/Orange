@@ -3,9 +3,15 @@
 // 阶段 1：只读显示。阶段 2：停止、暂停/继续、点地图设目标、按点位导航、摇杆；
 // 发目标前先用 /get_plan_movebase 规划（不动车），再按车身轮廓做碰撞检查，确认后才发。
 // 阶段 3：手动重定位（拖出初值，网页里用激光和地图局部匹配微调，再调 /set_relocation）、回充（/autocharge）。
-// 默认走 Xiaomi 网的 192.168.31.231；连车热点时用 ?ws=ws://10.7.5.88:9090。
+// 车的地址：Xiaomi 网固定 192.168.31.231，chuangxiangG209 网固定 192.168.8.231，车热点 10.7.5.88。
+// 没给 ?ws= 时三个同时试，用最先连上的那个，断线重连时重新挑；?ws=ws://<地址>:9090 手动指定。
 
-const WS_URL = new URLSearchParams(location.search).get('ws') || 'ws://192.168.31.231:9090';
+const WS_URLS = (() => {
+  const url = new URLSearchParams(location.search).get('ws');
+  return url ? [url] : ['ws://192.168.31.231:9090', 'ws://192.168.8.231:9090', 'ws://10.7.5.88:9090'];
+})();
+// 一轮里都没连上就全部关掉重来：本机代理会接管不在本网段的地址，握手可能一直挂着不失败。
+const WS_TRY_MS = 5000;
 // base_footprint→scan 只有 z=0.2（2026-10-18 实测 /tf），平面上和车体原点重合。
 // /tracked_pose 就是 map→base_footprint，激光直接按它投到地图上。
 const POSE_STALE_MS = 2000;
@@ -15,9 +21,10 @@ const BODY_L = 0.65, BODY_W = 0.55, BODY_R = 0.08;
 
 // ---------- rosbridge 客户端 ----------
 class Rosbridge {
-  constructor(url, onState) {
-    this.url = url;
+  constructor(urls, onState) {
+    this.urls = urls;
     this.onState = onState;
+    this.ws = null;
     this.subs = new Map();     // topic → {type, cb, throttle}
     this.pending = new Map();  // id → {resolve, reject, timer}
     this.advs = new Map();     // topic → type
@@ -25,16 +32,36 @@ class Rosbridge {
     this.connect();
   }
 
+  // 所有候选地址同时连，第一个打开的留下，其余关掉。
   connect() {
     this.onState('connecting');
-    const ws = new WebSocket(this.url);
+    const tries = this.urls.map((url) => new WebSocket(url));
+    let won = false, left = tries.length;
+    const timer = setTimeout(() => tries.forEach((ws) => ws.close()), WS_TRY_MS);
+    for (const ws of tries) {
+      ws.onopen = () => {
+        if (won) return ws.close();
+        won = true;
+        clearTimeout(timer);
+        for (const other of tries) if (other !== ws) other.close();
+        this.attach(ws);
+      };
+      ws.onclose = () => {
+        if (won || --left > 0) return;
+        clearTimeout(timer);
+        this.onState('closed');
+        setTimeout(() => this.connect(), 2000);
+      };
+    }
+  }
+
+  attach(ws) {
     this.ws = ws;
-    ws.onopen = () => {
-      this.onState('open');
-      for (const [topic, type] of this.advs) this.send({ op: 'advertise', topic, type });
-      for (const [topic, s] of this.subs) this.sendSub(topic, s);
-    };
+    this.onState('open', new URL(ws.url).hostname);
+    for (const [topic, type] of this.advs) this.send({ op: 'advertise', topic, type });
+    for (const [topic, s] of this.subs) this.sendSub(topic, s);
     ws.onclose = () => {
+      this.ws = null;
       this.onState('closed');
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
@@ -44,6 +71,10 @@ class Rosbridge {
       setTimeout(() => this.connect(), 2000);
     };
     ws.onmessage = (ev) => this.onMessage(parseJson(ev.data));
+  }
+
+  isOpen() {
+    return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
   onMessage(m) {
@@ -61,7 +92,7 @@ class Rosbridge {
   }
 
   send(obj) {
-    if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(obj));
+    if (this.isOpen()) this.ws.send(JSON.stringify(obj));
   }
 
   sendSub(topic, s) {
@@ -89,14 +120,14 @@ class Rosbridge {
 
   // 返回是否真的发出去了。
   publish(topic, msg) {
-    if (this.ws.readyState !== WebSocket.OPEN) return false;
+    if (!this.isOpen()) return false;
     this.send({ op: 'publish', topic, msg });
     return true;
   }
 
   call(service, args = {}, timeoutMs = 5000) {
     return new Promise((resolve, reject) => {
-      if (this.ws.readyState !== WebSocket.OPEN) return reject(new Error('未连接'));
+      if (!this.isOpen()) return reject(new Error('未连接'));
       const id = 'call:' + (++this.seq);
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -165,7 +196,7 @@ function savePrefs(key, v) {
 }
 
 // ---------- 订阅 ----------
-const ros = new Rosbridge(WS_URL, onConnState);
+const ros = new Rosbridge(WS_URLS, onConnState);
 
 ros.subscribe('/map', 'nav_msgs/OccupancyGrid', onMap, 1000);
 ros.subscribe('/tracked_pose', 'geometry_msgs/PoseStamped', onPose);
@@ -210,8 +241,8 @@ function yawOf(q) {
   return Math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z));
 }
 
-function onConnState(s) {
-  if (s === 'open') setChip('c-conn', '已连接', 'ok');
+function onConnState(s, host) {
+  if (s === 'open') setChip('c-conn', '已连接 ' + host, 'ok');
   else if (s === 'connecting') setChip('c-conn', '连接中', 'warn');
   else setChip('c-conn', '断开，重连中', 'bad');
   if (s === 'open') loadPoints();
