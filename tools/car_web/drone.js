@@ -7,8 +7,7 @@
 (() => {
   const BASE = (new URLSearchParams(location.search).get('drone') || `http://${location.hostname || '127.0.0.1'}:8091`)
     .replace(/\/$/, '');
-  const POLL_MS = 1000, TIMEOUT_MS = 2000, MSG_SHOW = 6;
-  const SEVERITY = ['紧急', '警报', '严重', '错误', '警告', '注意', '信息', '调试'];
+  const POLL_MS = 1000, TIMEOUT_MS = 2000;
   const LEVEL = { ok: 'ok', bad: 'bad', unknown: 'warn' };
   const panel = $('drone');
   let open = false, snap = null, err = '';
@@ -92,15 +91,6 @@
     else {
       out.push(`<div class="row">${b.percent === null ? '?' : b.percent + '%'} · ${b.voltage.toFixed(2)} V`
         + `${b.current === null ? '' : ' · ' + b.current.toFixed(1) + ' A'}</div>`);
-    }
-    out.push('<h4>最近飞控消息</h4>');
-    const msgs = d.messages.slice(-MSG_SHOW).reverse();
-    if (!msgs.length) out.push('<div class="row"><small>本机状态桥起来后还没有（飞控只在检查结果变化时发）</small></div>');
-    for (const m of msgs) {
-      const cls = m.severity <= 3 ? 'bad-t' : m.severity === 4 ? 'warn-t' : '';
-      const ago = Math.max(0, Math.round(d.t - m.t));
-      out.push(`<div class="row"><small>${ago} s 前</small> <span class="${cls}">${SEVERITY[m.severity] || m.severity}</span>`
-        + ` ${esc(m.text)}</div>`);
     }
     out.push(`<small>数据：${esc(BASE)}/status · 板端 ${d.master.ok ? '已连上' : '连不上'}</small>`);
     return out.join('');
