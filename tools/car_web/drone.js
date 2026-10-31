@@ -53,7 +53,8 @@
       setChip('c-dbat', '—');
       if (open) {
         panel.innerHTML = `<div class="lamp warn-t">本机状态桥连不上（${esc(err)}）</div>
-          <small>${esc(BASE)}/status<br>在本机 mid360s_ws/docker/ros-noetic-rviz 下运行 ./scripts/run_drone_status.sh</small>`;
+          <small>${esc(BASE)}/status<br>本机用户服务 drone-status：systemctl --user status drone-status<br>
+          没装就在本机 mid360s_ws/docker/ros-noetic-rviz 下运行 ./scripts/run_drone_status.sh --install</small>`;
       }
       return;
     }
@@ -73,7 +74,9 @@
   function detail(d) {
     const out = [`<div class="lamp ${LEVEL[d.lamp.level]}-t">${esc(d.lamp.text)}</div>`];
     for (const c of d.checks) {
-      const [mark, cls] = c.ok === true ? ['✓', 'ok-t'] : c.ok === false ? ['✗', 'bad-t'] : ['?', 'warn-t'];
+      // required === false：当前模式用不上这一项（如 ALTCTL 下的定位），只作参考、不算进总灯
+      const [mark, cls] = c.ok === true ? ['✓', 'ok-t'] : c.required === false ? ['–', 'mute-t']
+        : c.ok === false ? ['✗', 'bad-t'] : ['?', 'warn-t'];
       out.push(`<div class="row"><span class="${cls}">${mark} ${esc(c.name)}</span> ${esc(c.text)}</div>`);
     }
     const f = d.flight;
