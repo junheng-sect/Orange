@@ -1,0 +1,8 @@
+string map_id
+geometry_msgs/PoseStamped[] waypoints
+---
+bool success
+string reason
+---
+uint32 waypoint_index
+string state

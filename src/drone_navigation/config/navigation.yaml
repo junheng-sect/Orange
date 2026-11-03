@@ -1,0 +1,12 @@
+# PREVIEW geometry only. Replace with measured dimensions and matching map before enabling real output.
+config:
+  deployment_verified: false
+  map_id: ""
+  lever_body: [0.0, 0.0, 0.0] # lidar IMU -> PX4 control reference, body FLU
+  sensor_offset_imu: [-0.011, -0.02329, 0.04412] # laser origin in IMU axes; verify calibration
+  body_half_extent: [0.25, 0.25, 0.10]
+  clearance: 0.15
+  bounds_min: [-5.0, -5.0, 0.2] # navigation reference, drone_odom; verify per startup
+  bounds_max: [5.0, 5.0, 3.0]
+  max_vel: 0.5
+  max_acc: 0.5

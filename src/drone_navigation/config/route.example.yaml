@@ -1,0 +1,6 @@
+# Copy and replace map_id/points after observing the actual map. Angles are degrees.
+map_id: REPLACE_WITH_EXACT_RELOCALIZATION_MAP_DIRECTORY
+waypoints:
+  - [0.0, 0.0, 1.0, 0.0]
+  - [1.0, 0.0, 1.0, 90.0]
+  - [1.0, 1.0, 1.5, 90.0]

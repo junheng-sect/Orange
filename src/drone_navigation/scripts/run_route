@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+import sys,math,yaml,rospy,actionlib
+from geometry_msgs.msg import PoseStamped
+from drone_navigation.msg import ExecuteRouteAction,ExecuteRouteGoal
+if __name__=='__main__':
+    rospy.init_node('run_route',anonymous=True)
+    with open(sys.argv[1]) as f: route=yaml.safe_load(f)
+    g=ExecuteRouteGoal(map_id=route['map_id'])
+    for p in route['waypoints']:
+        m=PoseStamped();m.header.frame_id='drone_map';m.pose.position.x,m.pose.position.y,m.pose.position.z=map(float,p[:3]);m.pose.orientation.z=math.sin(math.radians(p[3])/2);m.pose.orientation.w=math.cos(math.radians(p[3])/2);g.waypoints.append(m)
+    c=actionlib.SimpleActionClient('/drone_nav/execute_route',ExecuteRouteAction);c.wait_for_server();rospy.on_shutdown(c.cancel_goal);c.send_goal(g);c.wait_for_result();print(c.get_result())

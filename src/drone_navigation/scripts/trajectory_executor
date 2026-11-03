@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+import rospy
+from drone_navigation.executor import Executor
+if __name__=='__main__':
+    rospy.init_node('trajectory_executor')
+    node=Executor()
+    rospy.spin()
