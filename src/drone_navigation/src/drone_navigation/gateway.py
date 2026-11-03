@@ -46,6 +46,9 @@ class Gateway:
         with self.lock:
             off=m.connected and m.armed and m.mode=='OFFBOARD'
             if self.was_offboard and not off:self.fail('OFFBOARD exited; explicit prepare/start required');self.prepared=False
+            # Freeze the latest measured hold point on the OFFBOARD edge, including
+            # movement since the preceding 50 Hz tick. Never retain the prepare pose.
+            if off and not self.was_offboard and self.prepared:self.capture_hold()
             self.was_offboard=off;self.state=m;self.state_at=time.monotonic()
     def on_est(self,m):
         with self.lock:self.est=m;self.est_at=time.monotonic()
@@ -84,6 +87,9 @@ class Gateway:
             except Exception as e:
                 if self.prepared:self.fail(str(e));self.prepared=False
                 self.alignment=Alignment()
+    def capture_hold(self):
+        if self.px is not None:
+            self.hold_p=xyz(self.px.pose.pose.position);self.hold_v=np.zeros(3);self.hold_yaw=yaw(quat(self.px.pose.pose.orientation))
     def capture_brake(self):
         if self.px is not None:
             self.hold_p=xyz(self.px.pose.pose.position);self.hold_v=rotation(quat(self.px.pose.pose.orientation))@xyz(self.px.twist.twist.linear);self.hold_yaw=yaw(quat(self.px.pose.pose.orientation))
@@ -94,8 +100,7 @@ class Gateway:
         with self.lock:
             if self.alignment.r is None or not fresh(self.px,self.px_at) or not self.input_ok or not self.owners_ok or time.monotonic()-self.owners_at>1.5:
                 return TriggerResponse(False,'alignment, inputs or exclusive ownership not ready')
-            self.fault='';self.prepared=True;self.running=False;self.cmd=None;self.goal_stamp=None;self.expected_gen=None;self.prepared_at=time.monotonic();self.capture_brake()
-            self.hold_v=np.zeros(3)
+            self.fault='';self.prepared=True;self.running=False;self.cmd=None;self.goal_stamp=None;self.expected_gen=None;self.prepared_at=time.monotonic();self.capture_hold()
             return TriggerResponse(True,'prepared: hold stream; manually select OFFBOARD, then start route')
     def estimator_ok(self):
         e=self.est
@@ -112,6 +117,8 @@ class Gateway:
                 if not self.input_ok or wall-self.input_at>.3 or wall-self.clock_at>.3:self.fail('navigation inputs/clock stale')
                 if self.running and not fresh(self.cmd,self.cmd_at,.3):self.fail('trajectory command stale')
                 if not pxok:self.fail('PX4 local estimate unavailable')
+            # Pre-stream at the current measured pose while the pilot is in control.
+            if self.prepared and pxok and not self.was_offboard:self.capture_hold()
             ready=self.prepared and not self.fault and pxok and (not self.real or (self.was_offboard and wall-self.state_at<2. and wall-self.prepared_at>=1.))
             status(self.stat,'READY' if ready else ('FAULT' if self.fault else 'PREPARED' if self.prepared else 'ALIGNING'),reason=self.fault,real_output=self.real)
             if not self.prepared or not pxok or self.hold_p is None:return

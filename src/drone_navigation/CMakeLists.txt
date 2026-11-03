@@ -10,4 +10,5 @@ catkin_install_python(PROGRAMS scripts/nav_inputs scripts/waypoint_manager scrip
 install(DIRECTORY config launch DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 if(CATKIN_ENABLE_TESTING)
  catkin_add_nosetests(test/test_core.py)
+ catkin_add_nosetests(test/test_runtime.py)
 endif()

@@ -56,7 +56,7 @@ RViz 单点发到 `/drone_nav/goal`，PoseStamped 的 frame_id 必须为 drone_m
 2D Goal 工具必须显式设置高度，默认拒绝 z=0 的二维点击，避免误以为是保持当前高度。
 
 真实输出只在另行完成地面与仿真验收、核验飞控 OFFBOARD 丢失策略后启用：
-`navigation.launch enable_output:=true config:=...`。先 prepare 并保持至少 1 秒设定值预发送，再人工进入 OFFBOARD，最后明确发送路线。
+`navigation.launch enable_output:=true config:=...`。先 prepare 并保持至少 1 秒设定值预发送，再人工进入 OFFBOARD，最后明确发送路线。等待 OFFBOARD 时每拍跟随当前 PX4 位置和航向、速度置零；收到 OFFBOARD 切换状态时冻结保持点。
 检测到其他 MAVROS 设定值输入话题发布者（target_*、trajectory/desired 等 MAVROS 自身反馈不计入）会拒绝准备或停止导航；不要同时启动 front_marker_control、vz_step/chirp 等运动节点。
 
 ## 行为与接口
@@ -83,7 +83,7 @@ RViz 单点发到 `/drone_nav/goal`，PoseStamped 的 frame_id 必须为 drone_m
 ```bash
 source /opt/ros/noetic/setup.bash
 source /home/orangepi/orange/devel/setup.bash
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s /home/orangepi/orange/src/drone_navigation/test -p test_core.py -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s /home/orangepi/orange/src/drone_navigation/test -p 'test_*.py' -v
 ```
 
 隔离集成测试（脚本自行起停专用 Master 和测试节点，11431 被占用时拒绝运行）：
@@ -96,7 +96,13 @@ bash /home/orangepi/orange/src/drone_navigation/test/run_isolated.sh
 它不启动飞控、雷达、相机或绕线器，不向 MAVROS 的真实 setpoint 话题发布。
 结果只证明数学、ROS接口和合成场景行为，不是实机避障/飞行验收。
 
-现有 RC 录包登记导航点云、速度、B样条、状态、目标、预览与实际设定值及TF；点云会增加磁盘吞吐，正式长时间使用前检查存储负载。
+现有 RC 录包登记导航点云、速度、B样条、状态、目标、预览与实际设定值及TF。原始世界系 `/cloud_registered` 由 `record_registered_cloud` 单独控制，默认关闭；需要时在 rc_record.yaml 启用或用 `RC_RECORD_REGISTERED_CLOUD=true` 覆盖。`/drone_nav/cloud` 仍在导航录制清单中。
 固定上游版本和适配范围见 `../ego_swarm/UPSTREAM.md`；上游示例launch不作为实机入口。
 
 低速 EGO 适配初值：控制点间距0.2m、碰撞权重10、可行性权重1、重分配轨迹保持权重10、已膨胀障碍外软距离0.15m。以上仅经合成场景验证，不能直接视为现场参数验收。
+
+执行器保留当前已校验样条和待校验样条；新样条通过后才切换，校验期间继续采样仍通过时效、碰撞和连续性检查的旧样条。
+换航点时可继续保持前一段终点，新的航向只在当前目标对应的样条到点后调整；新目标仍受3秒规划等待限制。
+运行中意外返回 WAIT_TARGET 会取消执行；初次等待规划与 EGO 正常提前最多10ms完成的终点边界允许通过。
+
+手持预览待验收：保持未知空间拒绝策略，统计 `unknown footprint` 拒绝次数并结合爬升段和雷达可见区域检查。本轮没有开展实机预览。

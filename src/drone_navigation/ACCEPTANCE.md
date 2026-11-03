@@ -28,3 +28,18 @@
 单元回归：source ROS和orange/devel后，`catkin run_tests drone_navigation --no-status`。
 隔离脚本只起停自己的测试节点与11431端口，不启停常驻roscore/MAVROS、Livox、FAST-LIO、相机或绕线器。
 运行和部署参数见README.md；固定上游修订与许可证见../ego_swarm/UPSTREAM.md。
+
+
+## Review 修复回归（2026-11-03）
+
+证据目录：`/home/orangepi/test_data/navigation_acceptance/20261103_review_fixes.7DaS14`。
+
+- 导航 catkin 构建通过；单元测试23项（原13项＋运行回归10项），0错误、0失败。
+- 新增运行回归使用实际 Gateway/Executor 回调、mock ROS传输和时钟：prepare后水平/竖直移动1米，切换OFFBOARD第一帧位置等于切换状态回调时最新PX4位置，速度为零；切换后保持点冻结。
+- 新样条校验期间继续旧样条；新候选未知时保留仍有效旧样条；换点等待超过0.3s仍有命令；旧轨迹碰撞、校验过期、取消和跳变检查仍生效；漏FAULT后WAIT_TARGET会停止未完成轨迹，正常终点和初次规划不误停。
+- 11431隔离集成完整通过：连续不同高度航点与终点转向、墙体绕行、取消、断云与恢复不续飞、规划器退出、暂停ROS时钟；合成最大命令速度0.34116377541239357m/s。
+- Header.seq由rospy单一目标发布者填写，Gateway/Executor取同一已接收序号；双航点集成覆盖了序号序列化后的代次匹配。
+- 本轮只构建并运行独立Master的合成预览，不启停硬件或发送真实设定值。未知空间策略未改，手持预览中的unknown footprint次数尚未统计。
+
+- FAST-LIO板端catkin构建通过（fast_lio及Livox依赖）；保留既有PCL uint16_t弃用警告。
+- 录包新增4项测试通过：默认不订阅世界点云、开关启用且不重复订阅、显式自定义清单、缺少导航消息仍可登记原生速度和点云；既有录包策略回归及11432独立Master端到端测试通过，两个bag及latch内容读回正确。

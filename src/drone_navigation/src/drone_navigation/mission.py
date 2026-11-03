@@ -11,7 +11,7 @@ from .ros_common import *
 
 class Mission:
     def __init__(self):
-        self.c=config();self.odom=None;self.odom_at=0.;self.ready=False;self.gw_at=0.;self.reloc={};self.reloc_at=0.;self.map_result={};self.cancelled=False;self.dispatch_seq=0
+        self.c=config();self.odom=None;self.odom_at=0.;self.ready=False;self.gw_at=0.;self.reloc={};self.reloc_at=0.;self.map_result={};self.cancelled=False
         self.buf=tf2_ros.Buffer();self.listener=tf2_ros.TransformListener(self.buf)
         self.goal_pub=rospy.Publisher('/drone_nav/planner_goal',PoseStamped,queue_size=1)
         self.cancel_pub=rospy.Publisher('/drone_nav/cancel',Empty,queue_size=1)
@@ -56,7 +56,10 @@ class Mission:
                 goals.append(q)
         except Exception as e:self.abort(str(e));return
         for i,goal in enumerate(goals):
-            self.cancelled=False;self.dispatch_seq+=1;goal.header.seq=self.dispatch_seq;goal.header.stamp=rospy.Time.now();self.goal_pub.publish(goal);start=time.monotonic();settled=None
+            # rospy supplies Header.seq on this single publisher. Gateway and executor
+            # use the same received sequence as NavigationCommand.generation; never
+            # assign a local seq that rospy will overwrite during serialization.
+            self.cancelled=False;goal.header.stamp=rospy.Time.now();self.goal_pub.publish(goal);start=time.monotonic();settled=None
             while not rospy.is_shutdown():
                 if self.server.is_preempt_requested():self.abort('cancelled by client',True);return
                 if self.cancelled or not self.ready or time.monotonic()-self.gw_at>.3 or not fresh(self.odom,self.odom_at) or not self.map_ok():self.abort('cancelled or navigation health lost');return

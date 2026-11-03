@@ -37,7 +37,7 @@ for _ in $(seq 1 30); do
 done
 setsid roslaunch drone_navigation navigation.launch config:="$NAV_TEST_DIR/navigation.yaml" enable_output:=false > "$NAV_TEST_DIR/launch.log" 2>&1 &
 NAV_LAUNCH_PID=$!
-python3 -m unittest discover -s "$NAV_TEST_PACKAGE/test" -p test_core.py -v > "$NAV_TEST_DIR/unit.log" 2>&1
+python3 -m unittest discover -s "$NAV_TEST_PACKAGE/test" -p 'test_*.py' -v > "$NAV_TEST_DIR/unit.log" 2>&1
 set +e
 timeout 100s python3 -u "$NAV_TEST_PACKAGE/test/integration.py" > "$NAV_TEST_DIR/integration.log" 2>&1
 NAV_RESULT=$?
