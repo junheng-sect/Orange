@@ -216,7 +216,7 @@ namespace ego_planner
             }
             if (l > l_upbound)
             {
-              ROS_WARN("Can't find the new base points at the opposite within the threshold. i=%d, j=%d", i, j);
+              ROS_WARN_THROTTLE(1.0, "Can't find the new base points at the opposite within the threshold. i=%d, j=%d", i, j);
 
               segments.erase(segments.begin() + i);
               RichInfoSegs.erase(RichInfoSegs.begin() + i);
@@ -233,7 +233,7 @@ namespace ego_planner
           }
           else
           {
-            ROS_WARN("base_point and control point are too close!");
+            ROS_WARN_THROTTLE(1.0, "base_point and control point are too close!");
             cout << "base_point=" << RichInfoSegs[i].first.base_point[j][0].transpose() << " control point=" << RichInfoSegs[i].first.points.col(j).transpose() << endl;
 
             segments.erase(segments.begin() + i);
@@ -291,7 +291,7 @@ namespace ego_planner
           }
           if (l > l_upbound)
           {
-            ROS_WARN("Can't find the new base points at the opposite within the threshold, 2. i=%d", i);
+            ROS_WARN_THROTTLE(1.0, "Can't find the new base points at the opposite within the threshold, 2. i=%d", i);
 
             segments.erase(segments.begin() + i);
             RichInfoSegs.erase(RichInfoSegs.begin() + i);
@@ -306,7 +306,7 @@ namespace ego_planner
         }
         else
         {
-          ROS_WARN("base_point and control point are too close!, 2");
+          ROS_WARN_THROTTLE(1.0, "base_point and control point are too close!, 2");
           cout << "base_point=" << RichInfoSegs[i].first.base_point[0][0].transpose() << " control point=" << RichInfoSegs[i].first.points.col(0).transpose() << endl;
 
           segments.erase(segments.begin() + i);
@@ -523,7 +523,7 @@ namespace ego_planner
       }
       else
       {
-        ROS_ERROR("a star error, force return!");
+        ROS_ERROR_THROTTLE(1.0, "a star error, force return!");
         vector<std::pair<int, int>> blank_ret;
         return blank_ret;
       }
@@ -1240,7 +1240,7 @@ namespace ego_planner
         }
         if (j < 0) // fail to get the obs free point
         {
-          ROS_ERROR("ERROR! the drone is in obstacle. This should not happen.");
+          ROS_ERROR_THROTTLE(1.0, "ERROR! the drone is in obstacle. This should not happen.");
           in_id = 0;
         }
 
@@ -1256,7 +1256,7 @@ namespace ego_planner
         }
         if (j >= cps_.size) // fail to get the obs free point
         {
-          ROS_WARN("WARN! terminal point of the current trajectory is in obstacle, skip this planning.");
+          ROS_WARN_THROTTLE(1.0, "WARN! terminal point of the current trajectory is in obstacle, skip this planning.");
 
           force_stop_type_ = STOP_FOR_ERROR;
           return false;
@@ -1281,7 +1281,7 @@ namespace ego_planner
         }
         else
         {
-          ROS_ERROR("a star error");
+          ROS_ERROR_THROTTLE(1.0, "a star error");
           segment_ids.erase(segment_ids.begin() + i);
           i--;
         }
@@ -1382,7 +1382,7 @@ namespace ego_planner
             }
         }
         else
-          ROS_WARN("Failed to generate direction. It doesn't matter.");
+          ROS_WARN_THROTTLE(1.0, "Failed to generate direction. It doesn't matter.");
       }
 
       force_stop_type_ = STOP_FOR_REBOUND;
@@ -1510,7 +1510,7 @@ namespace ego_planner
               //      << cps_.points.col(2).transpose() << "\n"
               //      << cps_.points.col(3).transpose() << "\n"
               //      << cps_.points.col(4).transpose() << endl;
-              ROS_WARN("First 3 control points in obstacles! return false, t=%f", t);
+              ROS_WARN_THROTTLE(1.0, "First 3 control points in obstacles! return false, t=%f", t);
               return false;
             }
 
@@ -1588,7 +1588,7 @@ namespace ego_planner
       }
       else
       {
-        ROS_WARN("Solver error. Return = %d, %s. Skip this planning.", result, lbfgs::lbfgs_strerror(result));
+        ROS_WARN_THROTTLE(1.0, "Solver error. Return = %d, %s. Skip this planning.", result, lbfgs::lbfgs_strerror(result));
         // while (ros::ok());
       }
 
@@ -1632,7 +1632,7 @@ namespace ego_planner
       }
       else
       {
-        ROS_ERROR("Solver error in refining!, return = %d, %s", result, lbfgs::lbfgs_strerror(result));
+        ROS_ERROR_THROTTLE(1.0, "Solver error in refining!, return = %d, %s", result, lbfgs::lbfgs_strerror(result));
       }
 
       UniformBspline traj = UniformBspline(cps_.points, 3, bspline_interval_);

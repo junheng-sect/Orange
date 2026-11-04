@@ -63,6 +63,9 @@ namespace ego_planner
     double emergency_time_;
     bool flag_realworld_experiment_;
     bool enable_fail_safe_;
+    double fail_retry_interval_; // min wall-clock gap between planning retries once fail_fast_retries_ is used up
+    int fail_fast_retries_;      // consecutive failed ticks still retried every tick
+    int plan_fail_count_{0};
 
     /* planning data */
     bool have_trigger_, have_target_, have_odom_, have_new_target_, have_recv_pre_agent_;
@@ -84,6 +87,7 @@ namespace ego_planner
     ros::Subscriber cancel_sub_;
     ros::Publisher nav_status_pub_;
     ros::WallTime odom_wall_;
+    ros::WallTime last_plan_fail_wall_;
     ros::Time odom_stamp_;
     void cancelCallback(const std_msgs::EmptyConstPtr&);
     ros::NodeHandle node_;
@@ -96,6 +100,8 @@ namespace ego_planner
     bool callEmergencyStop(Eigen::Vector3d stop_pos);                          // front-end and back-end method
     bool planFromGlobalTraj(const int trial_times = 1);
     bool planFromCurrentTraj(const int trial_times = 1);
+    bool planRetryPending();
+    void notePlanFailure();
 
     /* return value: std::pair< Times of the same state be continuously called, current continuously called state > */
     void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);

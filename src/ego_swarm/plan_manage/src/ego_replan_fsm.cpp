@@ -25,6 +25,11 @@ namespace ego_planner
     nh.param("fsm/emergency_time", emergency_time_, 1.0);
     nh.param("fsm/realworld_experiment", flag_realworld_experiment_, false);
     nh.param("fsm/fail_safe", enable_fail_safe_, true);
+    // A short run of failures is retried every 10 ms tick (random init often succeeds quickly).
+    // Past that the map only changes with each cloud (10 Hz); retrying every tick on an unchanged map
+    // repeats the same failure, burns about one core and floods /rosout.
+    nh.param("fsm/fail_fast_retries", fail_fast_retries_, 10);
+    nh.param("fsm/fail_retry_interval", fail_retry_interval_, 0.1);
 
     have_trigger_ = !flag_realworld_experiment_;
 
@@ -212,6 +217,7 @@ namespace ego_planner
     Eigen::Vector3d end_wp(msg->pose.position.x, msg->pose.position.y, msg->pose.position.z);
     if(msg->header.frame_id!="drone_odom" || !end_wp.allFinite() || !have_odom_ || planner_manager_->grid_map_->getOdomDepthTimeout() || planner_manager_->grid_map_->getInflateOccupancy(end_wp)!=0) return;
     have_trigger_=true;
+    plan_fail_count_=0; // a new goal starts with fast retries again
 
     planNextWaypoint(end_wp);
   }
@@ -488,6 +494,8 @@ namespace ego_planner
       {
         if (have_odom_ && have_target_ && have_trigger_)
         {
+          if (planRetryPending())
+            break;
           bool success = planFromGlobalTraj(10); // zx-todo
           if (success)
           {
@@ -497,13 +505,14 @@ namespace ego_planner
           }
           else
           {
-            ROS_ERROR("Failed to generate the first trajectory!!!");
+            ROS_ERROR_THROTTLE(1.0, "Failed to generate the first trajectory!!!");
+            notePlanFailure();
             changeFSMExecState(SEQUENTIAL_START, "FSM");
           }
         }
         else
         {
-          ROS_ERROR("No odom or no target! have_odom_=%d, have_target_=%d", have_odom_, have_target_);
+          ROS_ERROR_THROTTLE(1.0, "No odom or no target! have_odom_=%d, have_target_=%d", have_odom_, have_target_);
         }
       }
 
@@ -517,6 +526,8 @@ namespace ego_planner
       // start_yaw_(0)         = atan2(rot_x(1), rot_x(0));
       // start_yaw_(1) = start_yaw_(2) = 0.0;
 
+      if (planRetryPending())
+        break;
       bool success = planFromGlobalTraj(10); // zx-todo
       if (success)
       {
@@ -526,6 +537,7 @@ namespace ego_planner
       }
       else
       {
+        notePlanFailure();
         changeFSMExecState(GEN_NEW_TRAJ, "FSM");
       }
       break;
@@ -534,6 +546,8 @@ namespace ego_planner
     case REPLAN_TRAJ:
     {
 
+      if (planRetryPending())
+        break;
       if (planFromCurrentTraj(1))
       {
         changeFSMExecState(EXEC_TRAJ, "FSM");
@@ -541,6 +555,7 @@ namespace ego_planner
       }
       else
       {
+        notePlanFailure();
         changeFSMExecState(REPLAN_TRAJ, "FSM");
       }
 
@@ -618,6 +633,17 @@ namespace ego_planner
 
   force_return:;
     exec_timer_.start();
+  }
+
+  bool EGOReplanFSM::planRetryPending()
+  {
+    return plan_fail_count_ >= fail_fast_retries_ && (ros::WallTime::now() - last_plan_fail_wall_).toSec() < fail_retry_interval_;
+  }
+
+  void EGOReplanFSM::notePlanFailure()
+  {
+    ++plan_fail_count_;
+    last_plan_fail_wall_ = ros::WallTime::now();
   }
 
   bool EGOReplanFSM::planFromGlobalTraj(const int trial_times /*=1*/) //zx-todo
@@ -748,6 +774,7 @@ namespace ego_planner
           else
           {
             //ROS_WARN("current traj in collision, replan.");
+            notePlanFailure();
             changeFSMExecState(REPLAN_TRAJ, "SAFETY");
           }
           return;
@@ -766,7 +793,12 @@ namespace ego_planner
         planner_manager_->reboundReplan(start_pt_, start_vel_, start_acc_, local_target_pt_, local_target_vel_, (have_new_target_ || flag_use_poly_init), flag_randomPolyTraj);
     have_new_target_ = false;
 
-    cout << "refine_success=" << plan_and_refine_success << endl;
+    static bool last_refine_success = true;
+    if (plan_and_refine_success || last_refine_success)
+      cout << "refine_success=" << plan_and_refine_success << endl;
+    last_refine_success = plan_and_refine_success;
+    if (plan_and_refine_success)
+      plan_fail_count_ = 0;
 
     if (plan_and_refine_success)
     {
