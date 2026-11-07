@@ -141,7 +141,7 @@ namespace ego_planner
     int dimension = control_points_.rows();
 
     /* check vel feasibility and insert points */
-    double max_vel = -1.0;
+    double max_vel = 0.0;
     double enlarged_vel_lim = limit_vel_ * (1.0 + feasibility_tolerance_) + 1e-4;
     for (int i = 0; i < P.cols() - 1; ++i)
     {
@@ -163,7 +163,7 @@ namespace ego_planner
     }
 
     /* acc feasibility */
-    double max_acc = -1.0;
+    double max_acc = 0.0;
     double enlarged_acc_lim = limit_acc_ * (1.0 + feasibility_tolerance_) + 1e-4;
     for (int i = 0; i < P.cols() - 2; ++i)
     {
@@ -188,15 +188,17 @@ namespace ego_planner
       }
     }
 
-    ratio = max(max_vel / limit_vel_, sqrt(fabs(max_acc) / limit_acc_));
+    // Only the limits actually exceeded count: a -1 sentinel used to make this sqrt(1 / limit_acc_) whenever
+    // only the velocity was infeasible, which is 1.86 for a 0.29 m/s^2 limit.
+    ratio = max(1.0, max(max_vel / limit_vel_, sqrt(max_acc / limit_acc_)));
 
     return fea;
   }
 
-  void UniformBspline::lengthenTime(const double &ratio)
+  void UniformBspline::lengthenTime(const double &ratio, bool to_end)
   {
     int num1 = 5;
-    int num2 = getKnot().rows() - 1 - 5;
+    int num2 = to_end ? getKnot().rows() - 1 : getKnot().rows() - 1 - 5;
 
     double delta_t = (ratio - 1.0) * (u_(num2) - u_(num1));
     double t_inc = delta_t / double(num2 - num1);

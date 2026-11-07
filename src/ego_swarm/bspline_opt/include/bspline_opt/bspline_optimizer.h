@@ -109,6 +109,7 @@ namespace ego_planner
     void setWaypoints(const vector<Eigen::Vector3d> &waypts,
                       const vector<int> &waypt_idx); // N-2 constraints at most
     void setLocalTargetPt(const Eigen::Vector3d local_target_pt) { local_target_pt_ = local_target_pt; };
+    void setFixedEnd(const bool fixed_end) { fixed_end_ = fixed_end; }; // keep the last order_ control points out of the rebound optimization
 
     void optimize();
 
@@ -171,6 +172,7 @@ namespace ego_planner
     double min_cost_;               //
 
     Eigen::Vector3d local_target_pt_; 
+    bool fixed_end_{false};
 
 #define INIT_min_ellip_dist_ 123456789.0123456789
     double min_ellip_dist_;

@@ -215,8 +215,18 @@ namespace ego_planner
       }
     } while (flag_regenerate);
 
+    // Stopping at the local target: pin the last 3 control points on it (p = target, v = a = 0) and keep
+    // that end through time reallocation. A free end only gets a soft terminal cost and still moves at
+    // the end, and the refit after reallocation then trades the end position against zero velocity.
+    bool stop_at_target = local_target_vel.norm() < 1e-6;
+    if (stop_at_target)
+      start_end_derivatives[3] = Eigen::Vector3d::Zero();
+
     Eigen::MatrixXd ctrl_pts, ctrl_pts_temp;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+    if (stop_at_target)
+      ctrl_pts.rightCols(3) = local_target_pt.replicate(1, 3);
+    bspline_optimizer_->setFixedEnd(stop_at_target);
 
     vector<std::pair<int, int>> segments;
     segments = bspline_optimizer_->initControlPoints(ctrl_pts, true);
@@ -301,7 +311,7 @@ namespace ego_planner
         cout << "Need to reallocate time." << endl;
 
         Eigen::MatrixXd optimal_control_points;
-        flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points);
+        flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points, stop_at_target);
         if (flag_step_2_success)
           pos = UniformBspline(optimal_control_points, 3, ts);
       }
@@ -518,14 +528,14 @@ namespace ego_planner
     return true;
   }
 
-  bool EGOPlannerManager::refineTrajAlgo(UniformBspline &traj, vector<Eigen::Vector3d> &start_end_derivative, double ratio, double &ts, Eigen::MatrixXd &optimal_control_points)
+  bool EGOPlannerManager::refineTrajAlgo(UniformBspline &traj, vector<Eigen::Vector3d> &start_end_derivative, double ratio, double &ts, Eigen::MatrixXd &optimal_control_points, bool fixed_end)
   {
     double t_inc;
 
     Eigen::MatrixXd ctrl_pts; // = traj.getControlPoint()
 
     // std::cout << "ratio: " << ratio << std::endl;
-    reparamBspline(traj, start_end_derivative, ratio, ctrl_pts, ts, t_inc);
+    reparamBspline(traj, start_end_derivative, ratio, ctrl_pts, ts, t_inc, fixed_end);
 
     traj = UniformBspline(ctrl_pts, 3, ts);
 
@@ -551,14 +561,16 @@ namespace ego_planner
   }
 
   void EGOPlannerManager::reparamBspline(UniformBspline &bspline, vector<Eigen::Vector3d> &start_end_derivative, double ratio,
-                                         Eigen::MatrixXd &ctrl_pts, double &dt, double &time_inc)
+                                         Eigen::MatrixXd &ctrl_pts, double &dt, double &time_inc, bool fixed_end)
   {
     double time_origin = bspline.getTimeSum();
     int seg_num = bspline.getControlPoint().cols() - 3;
+    Eigen::Vector3d end_pt = bspline.getControlPoint().rightCols(1);
     // double length = bspline.getLength(0.1);
     // int seg_num = ceil(length / pp_.ctrl_pt_dist);
 
-    bspline.lengthenTime(ratio);
+    // A fixed end is at rest (v = a = 0) for any knot spacing, so stretch up to the end and slow the braking down too.
+    bspline.lengthenTime(ratio, fixed_end);
     double duration = bspline.getTimeSum();
     dt = duration / double(seg_num);
     time_inc = duration - time_origin;
@@ -569,6 +581,9 @@ namespace ego_planner
       point_set.push_back(bspline.evaluateDeBoorT(time));
     }
     UniformBspline::parameterizeToBspline(dt, point_set, start_end_derivative, ctrl_pts);
+    // The least-squares refit is only close at the end; put a fixed end back exactly (refine keeps the last 3 points).
+    if (fixed_end)
+      ctrl_pts.rightCols(3) = end_pt.replicate(1, 3);
   }
 
 } // namespace ego_planner

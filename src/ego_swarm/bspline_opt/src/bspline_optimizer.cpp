@@ -1434,8 +1434,8 @@ namespace ego_planner
   {
     iter_num_ = 0;
     int start_id = order_;
-    // int end_id = this->cps_.size - order_; //Fixed end
-    int end_id = this->cps_.size; // Free end
+    // Fixed end when the trajectory has to stop at the local target, free end (soft terminal cost) otherwise
+    int end_id = fixed_end_ ? this->cps_.size - order_ : this->cps_.size;
     variable_num_ = 3 * (end_id - start_id);
 
     ros::Time t0 = ros::Time::now(), t1, t2;

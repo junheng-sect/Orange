@@ -64,7 +64,7 @@ namespace ego_planner
 
     void setPhysicalLimits(const double &vel, const double &acc, const double &tolerance);
     bool checkFeasibility(double &ratio, bool show = false);
-    void lengthenTime(const double &ratio);
+    void lengthenTime(const double &ratio, bool to_end = false); // to_end: also stretch the end segments (end at rest)
 
     /* for performance evaluation */
 
