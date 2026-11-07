@@ -15,6 +15,7 @@ class Mission:
         self.buf=tf2_ros.Buffer();self.listener=tf2_ros.TransformListener(self.buf)
         self.goal_pub=rospy.Publisher('/drone_nav/planner_goal',PoseStamped,queue_size=1)
         self.cancel_pub=rospy.Publisher('/drone_nav/cancel',Empty,queue_size=1)
+        self.arrived_pub=rospy.Publisher('/drone_nav/arrived',Empty,queue_size=1)
         self.check=rospy.ServiceProxy('/drone_nav/check_trajectory',CheckTrajectory)
         rospy.Subscriber('/drone_nav/odom',Odometry,self.on_odom,queue_size=1)
         rospy.Subscriber('/drone_nav/gateway_status',String,self.on_gateway,queue_size=1)
@@ -73,5 +74,6 @@ class Mission:
                 if settled and time.monotonic()-settled>=1.:break
                 if time.monotonic()-start>120:self.abort('waypoint timeout');return
                 time.sleep(.02)
-        # Cancel EGO/executor; gateway transitions into local braking/hold without resuming an old trajectory.
-        self.cancel_pub.publish(Empty());self.server.set_succeeded(ExecuteRouteResult(success=True,reason='all waypoints settled'))
+        # Cancel EGO/executor without resuming an old trajectory. arrived tells the gateway this stop is a
+        # normal arrival, so it holds the final trajectory point instead of braking where the vehicle is.
+        self.arrived_pub.publish(Empty());self.cancel_pub.publish(Empty());self.server.set_succeeded(ExecuteRouteResult(success=True,reason='all waypoints settled'))

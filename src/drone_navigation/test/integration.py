@@ -25,6 +25,7 @@ class Harness:
   for topic in ('input_status','planner_status','executor_status','gateway_status'):
    rospy.Subscriber('/drone_nav/'+topic,String,lambda m,t=topic:self.status.update({t:m.data}))
   rospy.Subscriber('/drone_nav/command',NavigationCommand,self.cmd)
+  self.arrived=0;rospy.Subscriber('/drone_nav/arrived',Empty,lambda m:setattr(self,'arrived',self.arrived+1))
   from mavros_msgs.msg import PositionTarget
   rospy.Subscriber('/drone_nav/setpoint_preview',PositionTarget,lambda m:self.preview.append(m))
   rospy.Subscriber('/drone_nav/cloud',PointCloud2,lambda m:setattr(self,'cloud_out',m))
@@ -117,10 +118,15 @@ def main():
   h.wait(lambda:h.command is not None,5,'first valid spline reaches executor')
   stale_pub=rospy.Publisher('/drone_nav/bspline',Bspline,queue_size=1);time.sleep(.1)
   stale=Bspline();stale.start_time=rospy.Time(1);stale.traj_id=999999;stale_pub.publish(stale)
-  h.wait(lambda:c.get_state() in (2,3,4,5,8),45,'route terminates')
+  h.wait(lambda:c.get_state() in (2,3,4,5,8) and c.get_result() is not None,45,'route terminates')
   print('ROUTE_RESULT',c.get_result(),h.status,flush=True)
   assert c.get_result().success
   print('PASS two heights, repeated 3D goal, measured settle, terminal yaw and stale spline rejection',flush=True)
+  time.sleep(.3);run=[m for m in h.preview if m.type_mask==2048];acc=np.linalg.norm([[m.acceleration_or_force.x,m.acceleration_or_force.y,m.acceleration_or_force.z] for m in run],axis=1)
+  assert len(run)>10 and np.all(acc<=.5005) and acc.max()>.01
+  last,end=h.preview[-1],run[-1];assert h.arrived==1 and last.type_mask==2496
+  assert np.linalg.norm([last.position.x-end.position.x,last.position.y-end.position.y,last.position.z-end.position.z])<1e-6
+  print('PASS trajectory setpoints carry acceleration feedforward (max %.3f); normal arrival holds the final trajectory point'%acc.max(),flush=True)
   h.track=False;h.command=None;h.v=np.zeros(3);h.omega=0.;time.sleep(.5)
   h.wall=True
   h.wait(lambda:not check(path_of([[.6,.5,1.4],[2.,0.,1.4]])).valid,6,'wall occupies direct path')
@@ -129,7 +135,7 @@ def main():
   assert prepare().success;time.sleep(.4);h.track=True
   before=len(h.command_history)
   c.send_goal(goal([[2.,0.,1.4,math.radians(30)]]))
-  h.wait(lambda:c.get_state() in (2,3,4,5,8),50,'obstacle navigation terminates')
+  h.wait(lambda:c.get_state() in (2,3,4,5,8) and c.get_result() is not None,50,'obstacle navigation terminates')
   print('OBSTACLE_RESULT',c.get_result(),h.status, 'history_tail',h.command_history[-12:],flush=True)
   assert c.get_result().success
   history=np.array(h.command_history[before:]);assert len(history)>10
@@ -140,7 +146,8 @@ def main():
   h.track=False;h.command=None;h.v=np.zeros(3);h.omega=0.;h.wall=False;time.sleep(1.)
   assert prepare().success
   time.sleep(.4)
-  c.send_goal(goal([[2.,1.,1.4,math.radians(30)]]));time.sleep(.5);c.cancel_goal();assert c.wait_for_result(rospy.Duration(5));assert not c.get_result().success;print('PASS action cancellation',flush=True)
+  arrived=h.arrived
+  c.send_goal(goal([[2.,1.,1.4,math.radians(30)]]));time.sleep(.5);c.cancel_goal();assert c.wait_for_result(rospy.Duration(5));assert not c.get_result().success;assert h.arrived==arrived;print('PASS action cancellation (no arrival reported)',flush=True)
   # Explicit prepare is required after any fault. No stale spline may resume when sensor stream returns.
   h.track=False;h.command=None;h.v=np.zeros(3);time.sleep(.4);assert prepare().success
   h.wait(lambda:'READY' in h.status.get('gateway_status',''),3,'reprepare after cancellation')
@@ -151,7 +158,7 @@ def main():
   assert prepare().success;time.sleep(.3)
   c.send_goal(goal([[2.,1.,1.4,math.radians(30)]]));time.sleep(.5)
   rosnode.kill_nodes(['/drone_0_ego_planner_node'])
-  h.wait(lambda:c.get_state() in (2,3,4,5,8),5,'planner loss terminates task')
+  h.wait(lambda:c.get_state() in (2,3,4,5,8) and c.get_result() is not None,5,'planner loss terminates task')
   assert not c.get_result().success
   print('PASS planner loss cannot keep an old trajectory alive',flush=True)
   # Restart only the preview gateway with simulated clock; the route test itself uses real time.

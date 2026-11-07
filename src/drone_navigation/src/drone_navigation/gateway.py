@@ -9,6 +9,8 @@ from drone_navigation.msg import NavigationCommand
 from .core import Alignment,brake,deployment,yaw,heading,rz,competing_publishers
 from .ros_common import *
 
+STOPPED='task stopped; prepare before next route'
+
 class Gateway:
     def __init__(self):
         self.c=config();self.real=bool(rospy.get_param('~enable_output',False))
@@ -18,7 +20,7 @@ class Gateway:
             height=rospy.get_param('/drone_0_ego_planner_node/grid_map/nav_half_height')
             if not math.isfinite(radius) or not math.isfinite(height) or radius<max(self.c['body_half_extent'][:2])+self.c['clearance'] or height<self.c['body_half_extent'][2]+self.c['clearance']:
                 raise ValueError('planner inflation smaller than measured body+clearance')
-        self.lock=threading.RLock();self.alignment=Alignment();self.odom=None;self.px=None;self.px_at=0.;self.state=None;self.state_at=0.;self.est=None;self.est_at=0.;self.cmd=None;self.cmd_at=0.;self.goal_stamp=None;self.expected_gen=None;self.input_ok=False;self.input_at=0.;self.fault='';self.prepared=False;self.running=False;self.was_offboard=False;self.prepared_at=0.;self.owners_ok=False;self.owners_at=0.;self.hold_p=None;self.hold_v=np.zeros(3);self.hold_yaw=0.;self.last_clock=None;self.clock_at=time.monotonic()
+        self.lock=threading.RLock();self.alignment=Alignment();self.odom=None;self.px=None;self.px_at=0.;self.state=None;self.state_at=0.;self.est=None;self.est_at=0.;self.cmd=None;self.cmd_at=0.;self.goal_stamp=None;self.expected_gen=None;self.input_ok=False;self.input_at=0.;self.fault='';self.prepared=False;self.running=False;self.was_offboard=False;self.prepared_at=0.;self.owners_ok=False;self.owners_at=0.;self.hold_p=None;self.hold_v=np.zeros(3);self.hold_yaw=0.;self.last_clock=None;self.clock_at=time.monotonic();self.terminal=None;self.arrived_at=-math.inf
         self.preview=rospy.Publisher('/drone_nav/setpoint_preview',PositionTarget,queue_size=1)
         self.output=rospy.Publisher('/mavros/setpoint_raw/local',PositionTarget,queue_size=1) if self.real else None
         self.stat=rospy.Publisher('/drone_nav/gateway_status',String,queue_size=1)
@@ -33,6 +35,7 @@ class Gateway:
         rospy.Subscriber('/drone_nav/input_status',String,self.on_input,queue_size=1)
         rospy.Subscriber('/drone_nav/executor_status',String,self.on_executor,queue_size=1)
         rospy.Subscriber('/drone_nav/cancel',Empty,self.on_cancel,queue_size=1)
+        rospy.Subscriber('/drone_nav/arrived',Empty,self.on_arrived,queue_size=1)
         rospy.Service('/drone_nav/prepare',Trigger,self.prepare)
         loop(self.ownership,2);loop(self.tick)
     def ownership(self):
@@ -62,8 +65,18 @@ class Gateway:
             self.cmd=None
             if self.running:
                 self.capture_brake()
-                self.fault=self.fault or "task stopped; prepare before next route"
+                self.fault=self.fault or STOPPED
             self.running=False
+            self.hold_terminal()
+    def on_arrived(self,_):
+        with self.lock:self.arrived_at=time.monotonic();self.hold_terminal()
+    def hold_terminal(self):
+        # The mission reports a normal arrival with arrived + cancel; either may land first. Then hold the
+        # final trajectory point streamed just before, not the braked current pose (that freezes wherever
+        # the settle check fired). Any other stop (faults, action cancel, health loss) keeps braking in place.
+        now=time.monotonic()
+        if self.terminal is None or self.running or self.fault!=STOPPED or now-self.arrived_at>.3 or now-self.terminal[2]>.3:return
+        self.hold_p,self.hold_v,self.hold_yaw=self.terminal[0].copy(),np.zeros(3),self.terminal[1];self.terminal=None
     def on_goal(self,m):
         with self.lock:
             if self.prepared and not self.fault:
@@ -71,7 +84,7 @@ class Gateway:
     def on_cmd(self,m):
         with self.lock:
             if self.prepared and not self.fault and self.goal_stamp is not None and m.generation==self.expected_gen and m.header.stamp>=self.goal_stamp and m.header.frame_id=='drone_odom' and fresh(m,time.monotonic()):
-                if not np.isfinite(xyz(m.position)).all() or not np.isfinite(xyz(m.velocity)).all() or not math.isfinite(m.yaw) or np.linalg.norm(xyz(m.velocity))>self.c['max_vel']*1.001:
+                if not np.isfinite(xyz(m.position)).all() or not np.isfinite(xyz(m.velocity)).all() or not np.isfinite(xyz(m.acceleration)).all() or not math.isfinite(m.yaw) or np.linalg.norm(xyz(m.velocity))>self.c['max_vel']*1.001 or np.linalg.norm(xyz(m.acceleration))>self.c['max_acc']*1.001:
                     self.fail('invalid navigation command');return
                 self.cmd=m;self.cmd_at=time.monotonic();self.running=True
     def on_pair(self,o,p):
@@ -100,7 +113,7 @@ class Gateway:
         with self.lock:
             if self.alignment.r is None or not fresh(self.px,self.px_at) or not self.input_ok or not self.owners_ok or time.monotonic()-self.owners_at>1.5:
                 return TriggerResponse(False,'alignment, inputs or exclusive ownership not ready')
-            self.fault='';self.prepared=True;self.running=False;self.cmd=None;self.goal_stamp=None;self.expected_gen=None;self.prepared_at=time.monotonic();self.capture_hold()
+            self.fault='';self.prepared=True;self.running=False;self.cmd=None;self.goal_stamp=None;self.expected_gen=None;self.prepared_at=time.monotonic();self.terminal=None;self.capture_hold()
             return TriggerResponse(True,'prepared: hold stream; manually select OFFBOARD, then start route')
     def estimator_ok(self):
         e=self.est
@@ -123,12 +136,17 @@ class Gateway:
             status(self.stat,'READY' if ready else ('FAULT' if self.fault else 'PREPARED' if self.prepared else 'ALIGNING'),reason=self.fault,real_output=self.real)
             if not self.prepared or not pxok or self.hold_p is None:return
             if self.real and (self.state is None or wall-self.state_at>2. or not self.state.connected):return
+            acc=None
             if ready and self.running and self.cmd is not None:
-                r,t=self.alignment.r,self.alignment.t;p=r@xyz(self.cmd.position)+t;v=r@xyz(self.cmd.velocity);a=heading(r,self.cmd.yaw)
+                r,t=self.alignment.r,self.alignment.t;p=r@xyz(self.cmd.position)+t;v=r@xyz(self.cmd.velocity);acc=r@xyz(self.cmd.acceleration);a=heading(r,self.cmd.yaw)
+                self.terminal=(p,a,wall) if self.cmd.terminal else None
             else:
                 self.hold_p,self.hold_v=brake(self.hold_p,self.hold_v,self.c['max_acc']);p,v,a=self.hold_p,self.hold_v,self.hold_yaw
             m=PositionTarget();m.header.stamp=rospy.Time.now();m.header.frame_id='px4_map';m.coordinate_frame=PositionTarget.FRAME_LOCAL_NED
-            m.type_mask=PositionTarget.IGNORE_AFX|PositionTarget.IGNORE_AFY|PositionTarget.IGNORE_AFZ|PositionTarget.IGNORE_YAW_RATE
+            # Trajectory setpoints carry EGO's acceleration as PX4 feedforward (less overshoot when braking);
+            # the hold/brake stream stays position + velocity only.
+            m.type_mask=PositionTarget.IGNORE_YAW_RATE if acc is not None else PositionTarget.IGNORE_AFX|PositionTarget.IGNORE_AFY|PositionTarget.IGNORE_AFZ|PositionTarget.IGNORE_YAW_RATE
             put(m.position,p);put(m.velocity,v);m.yaw=a
+            if acc is not None:put(m.acceleration_or_force,acc)
             self.preview.publish(m)
             if self.output:self.output.publish(m)

@@ -65,14 +65,16 @@ RViz 单点发到 `/drone_nav/goal`，PoseStamped 的 frame_id 必须为 drone_m
 - `/drone_nav/planner_goal`：任务层变换后的 EGO 三维目标，禁止直接用它绕过地图身份检查。
 - `/drone_nav/odom`：drone_odom → drone_nav_base（控制参考点），twist 为标准机体系速度和角速度；位姿协方差传播到补偿后的参考点。速度旁路不提供速度协方差，导航 Odometry 只供规划使用，不作为额外融合源。
 - `/drone_nav/sensor_odom`：同时间戳激光发射点，专供射线起点；`/drone_nav/cloud` 为实际变换后的世界系点云。
-- `/drone_nav/bspline`：EGO 原生 traj_utils/Bspline；`/drone_nav/command` 是采样后的带代次位置/速度/yaw。
+- `/drone_nav/bspline`：EGO 原生 traj_utils/Bspline；`/drone_nav/command` 是采样后的带代次位置/速度/加速度/yaw。
 - `/drone_nav/cancel`：std_msgs/Empty，取消规划和执行；action cancel 同样生效。
+- `/drone_nav/arrived`：std_msgs/Empty，任务层判到点后和 cancel 一起发。网关据此悬停在最后发出的轨迹终点（即目标），而不是判到点那一刻飞机所在的位置；其他原因停止（故障、action 取消、健康检查失败）仍按当前位置和速度减速保持。
 - prepare 锁定本轮坐标对齐；对齐残差超过 0.15m/3°即故障。不会在线漂移转换来移动目标。
 - 平移保持段起始航向，终点停稳后按 10°/s 转到目标 yaw；0.15m、0.1m/s、5°内持续 1s判到点。
 - 未知/占据/越界目标拒绝执行；射线地图保留占据证据，只有实际自由射线降低其占据概率。检查整条剩余轨迹：`body_half_extent` 机体框内必须已观测为空闲；外层到 radius/half_height 的余量只拒绝观测到的占据（膨胀层），未知不拒绝——室外头顶开阔天空没有回波，余量壳顶层会一直是未知（2026-11-05 实飞回放：+0.3m 层未知导致执行器 3s 超时）。
 - 点云/状态/规划心跳超时、时钟回退、退出 OFFBOARD、action取消都会清旧轨迹。输入恢复不自动恢复故障任务，需 prepare 和新任务。
 - 导航故障且 PX4 估计仍有效时生成减速保持；这不是对突现障碍的独立物理制动保证。PX4 定位无效时停止依赖其位置的输出。
 - PX4 的 `/local_position/odom` 速度为机体系；导航坐标对齐包含同步参考点补偿。`FRAME_LOCAL_NED` 消息填 ENU，由 MAVROS 转换，不能再次手动交换坐标。
+- 执行轨迹时设定值为位置 + 速度 + 加速度前馈（type_mask 2048，只忽略 yaw rate），加速度取 EGO 样条二阶导；保持 / 刹停流仍为位置 + 速度（2496）。
 
 局部地图是有界栅格，默认20×20×6m/0.1m（上限600万格）；大仓库应拆分已验证路线范围，当前不做地图滑动和通道图搜索。
 全路线目标预检必须已观测到；不会飞入未知区域去探索。启动重定位仍为一次性，局部避障不解决长期绝对漂移。

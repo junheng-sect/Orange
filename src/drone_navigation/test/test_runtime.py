@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise actual runtime callbacks with ROS transports/timers mocked; no FCU I/O."""
 import copy
+import json
 import math
 import unittest
 from contextlib import ExitStack
@@ -10,10 +11,12 @@ import numpy as np
 import rospy
 from geometry_msgs.msg import Point, PoseStamped
 from nav_msgs.msg import Odometry
-from mavros_msgs.msg import State, EstimatorStatus
+from mavros_msgs.msg import PositionTarget, State, EstimatorStatus
 from std_msgs.msg import String
 from traj_utils.msg import Bspline
-from drone_navigation.gateway import Gateway
+from drone_navigation.core import rz
+from drone_navigation.gateway import Gateway, STOPPED
+from drone_navigation.msg import NavigationCommand
 from drone_navigation.executor import Executor
 from drone_navigation.ros_common import put, xyz
 
@@ -83,6 +86,69 @@ class RuntimeTests(unittest.TestCase):
                 np.testing.assert_allclose(xyz(frozen.position), switch_p)
                 self.assertAlmostEqual(frozen.yaw, .4)
 
+    def running_gateway(self, r, t):
+        g = self.gateway(); g.alignment.r = r; g.alignment.t = t
+        g.on_state(State(connected=True, armed=True, mode='OFFBOARD'))
+        # READY needs 1 s of pre-stream after prepare; refresh the inputs that age meanwhile.
+        self.now += 1.; g.px = self.odom(); g.px_at = g.input_at = g.owners_at = self.now
+        g.on_state(State(connected=True, armed=True, mode='OFFBOARD'))
+        g.on_goal(self.goal(seq=1))
+        return g
+
+    def command(self, p, v=(0., 0., 0.), acc=(0., 0., 0.), terminal=False):
+        c = NavigationCommand(); c.header.stamp = rospy.Time.now(); c.header.frame_id = 'drone_odom'
+        put(c.position, p); put(c.velocity, v); put(c.acceleration, acc)
+        c.generation = 1; c.terminal = terminal
+        return c
+
+    def test_trajectory_stream_sends_acceleration_feedforward(self):
+        r, t = rz(math.pi/2), np.array([2., 3., .3])
+        g = self.running_gateway(r, t)
+        g.on_cmd(self.command((.5, 0., 1.), (.2, 0., 0.), (-.3, .1, 0.))); g.tick()
+        m = g.output.publish.call_args[0][0]
+        self.assertEqual(m.type_mask, PositionTarget.IGNORE_YAW_RATE)
+        np.testing.assert_allclose(xyz(m.position), r@[.5, 0., 1.]+t)
+        np.testing.assert_allclose(xyz(m.acceleration_or_force), r@[-.3, .1, 0.])
+        # Hold / brake stream keeps the position + velocity mask.
+        g.on_cancel(None); g.tick()
+        self.assertEqual(g.output.publish.call_args[0][0].type_mask, 2496)
+        g = self.running_gateway(r, t); g.on_cmd(self.command((.5, 0., 1.), acc=(.6, 0., 0.)))
+        self.assertEqual(g.fault, 'invalid navigation command')
+
+    def test_normal_arrival_holds_final_trajectory_point(self):
+        r, t, end = rz(math.pi/2), np.array([2., 3., .3]), np.array([1., 0., 1.])
+        for order in ('cancel first', 'arrived first'):
+            with self.subTest(order=order):
+                g = self.running_gateway(r, t)
+                g.on_cmd(self.command(end, terminal=True)); g.tick()
+                # The settle check fires while the vehicle is still 5 cm past the endpoint.
+                g.px = self.odom(r@end+t+[.05, 0., 0.]); g.px_at = self.now
+                events = (g.on_cancel, g.on_arrived) if order == 'cancel first' else (g.on_arrived, g.on_cancel)
+                for event in events: event(None)
+                g.tick(); m = g.output.publish.call_args[0][0]
+                self.assertEqual(g.fault, STOPPED); self.assertEqual(m.type_mask, 2496)
+                np.testing.assert_allclose(xyz(m.position), r@end+t)
+                np.testing.assert_allclose(xyz(m.velocity), 0.)
+                self.assertAlmostEqual(m.yaw, math.pi/2)
+
+    def test_other_stops_still_brake_in_place(self):
+        end = np.array([1., 0., 1.]); here = end+[.05, 0., 0.]
+        def fault(g):
+            g.on_executor(String(json.dumps({'state': 'FAULT'}))); g.on_arrived(None); g.on_cancel(None)
+        def stale(g):
+            g.on_arrived(None); self.now += .4; g.px = self.odom(here); g.px_at = self.now; g.on_cancel(None)
+        cases = {'cancel without arrival': (True, lambda g: g.on_cancel(None)),
+                 'arrival after a fault': (True, fault),
+                 'stale arrival': (True, stale),
+                 'arrival mid-trajectory': (False, lambda g: (g.on_arrived(None), g.on_cancel(None)))}
+        for name, (terminal, stop) in cases.items():
+            with self.subTest(case=name):
+                g = self.running_gateway(np.eye(3), np.zeros(3))
+                g.on_cmd(self.command(end, (0. if terminal else .2, 0., 0.), terminal=terminal)); g.tick()
+                g.px = self.odom(here); g.px_at = self.now
+                stop(g); g.tick()
+                np.testing.assert_allclose(xyz(g.output.publish.call_args[0][0].position), here)
+
     def goal(self, seq=1, yaw=0.):
         g = PoseStamped(); g.header.stamp = rospy.Time.from_sec(self.now-.1)
         g.header.seq = seq; g.header.frame_id = 'drone_odom'
@@ -105,6 +171,20 @@ class RuntimeTests(unittest.TestCase):
 
     def refresh(self, e):
         e.on_odom(self.odom()); e.on_plan(String('4'))
+
+    def test_command_carries_spline_acceleration_and_zero_at_end(self):
+        e = self.build(Executor, 'drone_navigation.executor')
+        e.on_odom(self.odom()); e.on_plan(String('4')); e.on_goal(self.goal())
+        e.check.return_value = SimpleNamespace(valid=True, reason='clear')
+        b = self.spline(1); b.pos_pts = [Point(x=x, z=1.) for x in (0., 0., .1, .3)]
+        e.on_spline(b); e.validate()
+        self.now += .5; self.refresh(e); e.validate(); e.tick()
+        acc = e.spline.state(.5)[2]; self.assertGreater(np.linalg.norm(acc), .05)
+        np.testing.assert_allclose(xyz(e.pub.publish.call_args[0][0].acceleration), acc)
+        self.now += .6; self.refresh(e); e.validate(); e.tick()
+        cmd = e.pub.publish.call_args[0][0]
+        self.assertTrue(cmd.terminal)
+        np.testing.assert_allclose(xyz(cmd.velocity), 0.); np.testing.assert_allclose(xyz(cmd.acceleration), 0.)
 
     def test_replan_keeps_approved_stream_until_candidate_passes(self):
         e = self.executor(); e.on_spline(self.spline(2, .02))

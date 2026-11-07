@@ -1,7 +1,7 @@
 <launch>
   <arg name="config" default="$(find drone_navigation)/config/navigation.yaml"/>
   <arg name="enable_output" default="false"/>
-  <arg name="radius" default="0.4"/><arg name="half_height" default="0.25"/>
+  <arg name="radius" default="0.4"/><arg name="half_height" default="0.3"/><!-- EGO inflates ceil(value/0.1 m) cells: 0.25 and 0.3 are both 3; 0.3 passes the gateway check for a 0.15 body + 0.13 clearance -->
   <arg name="max_vel" default="0.5"/><arg name="max_acc" default="0.5"/>
   <rosparam ns="drone_nav" command="load" file="$(arg config)"/>
   <include file="$(find drone_navigation)/launch/ego.launch"><arg name="radius" value="$(arg radius)"/><arg name="half_height" value="$(arg half_height)"/><arg name="max_vel" value="$(arg max_vel)"/><arg name="max_acc" value="$(arg max_acc)"/></include>

@@ -109,10 +109,10 @@ class Executor:
                     self.fail('discontinuous trajectory reference');return
             self.last_reference=(p.copy(),now)
             at_end=t>=s.duration;terminal=at_end and self.spline_goal is self.goal
-            if at_end:v=np.zeros(3)
+            if at_end:v,a=np.zeros(3),np.zeros(3)
             if terminal:
                 if np.linalg.norm(xyz(self.odom.pose.pose.position)-p)<=.15 and np.linalg.norm(xyz(self.odom.twist.twist.linear))<=.1:
                     delta=wrap(yaw(quat(self.goal.pose.orientation))-self.yaw)
                     self.yaw=wrap(self.yaw+max(-math.radians(10)*.02,min(math.radians(10)*.02,delta)))
-            cmd=NavigationCommand();cmd.header.stamp=rospy.Time.now();cmd.header.frame_id='drone_odom';put(cmd.position,p);put(cmd.velocity,v);cmd.yaw=self.yaw;cmd.generation=self.gen;cmd.terminal=terminal
+            cmd=NavigationCommand();cmd.header.stamp=rospy.Time.now();cmd.header.frame_id='drone_odom';put(cmd.position,p);put(cmd.velocity,v);put(cmd.acceleration,a);cmd.yaw=self.yaw;cmd.generation=self.gen;cmd.terminal=terminal
             self.pub.publish(cmd);status(self.stat,'HOLD' if terminal else 'RUNNING',trajectory_id=s.id)
