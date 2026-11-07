@@ -11,6 +11,9 @@ void GridMap::initMap(ros::NodeHandle &nh)
   std::vector<double> lo,hi;
   if(!node_.getParam("/drone_nav/config/bounds_min",lo)||!node_.getParam("/drone_nav/config/bounds_max",hi)||lo.size()!=3||hi.size()!=3) throw std::runtime_error("navigation bounds required");
   for(int i=0;i<3;++i){nav_min_[i]=lo[i];nav_max_[i]=hi[i];}
+  std::vector<double> body;
+  if(!node_.getParam("/drone_nav/config/body_half_extent",body)||body.size()!=3||!(body[0]>0&&body[1]>0&&body[2]>0)) throw std::runtime_error("navigation body_half_extent required");
+  nav_body_xy_=std::max(body[0],body[1]);nav_body_z_=body[2];
   check_service_=node_.advertiseService("check_trajectory", &GridMap::checkPath,this);
 
   /* get parameter */
@@ -800,8 +803,12 @@ bool GridMap::checkPath(traj_utils::CheckTrajectory::Request &req, traj_utils::C
   if(steps>2000) {res.reason="path segment too long";return true;}
   for(int k=0;k<=steps;++k) {
    Eigen::Vector3d c=prev+(p-prev)*(double(k)/steps);
+   // Obstacles anywhere in the radius/half_height footprint are caught by the inflation layer.
+   // Only the measured body volume must be observed free: open sky above the lidar never returns
+   // a ray, so the clearance shell beyond the body may stay unknown outdoors.
    if(getInflateOccupancy(c)!=0) {res.reason="occupied, unknown or outside flight volume";return true;}
-   int r=ceil(nav_radius_/mp_.resolution_),h=ceil(nav_half_height_/mp_.resolution_);
+   int r=std::min(ceil(nav_body_xy_/mp_.resolution_),ceil(nav_radius_/mp_.resolution_));
+   int h=std::min(ceil(nav_body_z_/mp_.resolution_),ceil(nav_half_height_/mp_.resolution_));
    for(int dx=-r;dx<=r;++dx) for(int dy=-r;dy<=r;++dy) for(int dz=-h;dz<=h;++dz) {
     Eigen::Vector3d q=c+mp_.resolution_*Eigen::Vector3d(dx,dy,dz);
     if(!isInMap(q)||isUnknown(q)) {res.reason="unknown footprint at "+std::to_string(q.x())+","+std::to_string(q.y())+","+std::to_string(q.z());return true;}

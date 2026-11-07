@@ -198,7 +198,7 @@ private:
   ros::WallTime last_cloud_wall_, last_odom_wall_;
   ros::Time last_cloud_stamp_, last_odom_stamp_;
   ros::ServiceServer check_service_;
-  double nav_radius_, nav_half_height_;
+  double nav_radius_, nav_half_height_, nav_body_xy_, nav_body_z_;
   Eigen::Vector3d nav_min_, nav_max_;
   bool checkPath(traj_utils::CheckTrajectory::Request&, traj_utils::CheckTrajectory::Response&);
   MappingParameters mp_;
