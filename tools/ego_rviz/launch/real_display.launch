@@ -1,0 +1,31 @@
+<launch>
+  <arg name="config" default="/home/ros/.rviz/ego_swarm_real.rviz"/>
+  <arg name="odom" default="/drone_nav/odom"/>
+  <arg name="map_file" default=""/>
+  <group ns="ego_swarm_view">
+    <group if="$(eval arg('map_file') != '')">
+      <node pkg="pcl_ros" type="pcd_to_pointcloud" name="saved_map" output="screen" required="true">
+        <param name="file_name" value="$(arg map_file)"/>
+        <param name="frame_id" value="drone_map"/>
+        <param name="latch" value="true"/>
+        <param name="interval" value="0.0"/>
+        <remap from="cloud_pcd" to="/ego_swarm_view/saved_map"/>
+      </node>
+      <!-- A display-only origin. No transform to live drone_odom is invented. -->
+      <node pkg="tf2_ros" type="static_transform_publisher" name="map_origin" args="0 0 0 0 0 0 1 drone_map ego_swarm_map_origin"/>
+    </group>
+    <node pkg="odom_visualization" type="odom_visualization" name="odom_visualization" output="screen" required="true">
+      <remap from="~odom" to="$(arg odom)"/>
+      <param name="color/a" value="1.0"/>
+      <param name="color/r" value="0.0"/>
+      <param name="color/g" value="0.0"/>
+      <param name="color/b" value="0.0"/>
+      <param name="robot_scale" value="1.0"/>
+      <param name="tf45" value="false"/>
+      <param name="origin" value="false"/>
+      <param name="covariance_position" value="false"/>
+      <param name="covariance_velocity" value="false"/>
+    </node>
+    <node pkg="rviz" type="rviz" name="rviz" args="-d $(arg config)" output="screen" required="true"/>
+  </group>
+</launch>

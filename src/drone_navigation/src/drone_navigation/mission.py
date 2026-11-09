@@ -6,12 +6,13 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped
 from traj_utils.srv import CheckTrajectory
 from drone_navigation.msg import ExecuteRouteAction,ExecuteRouteResult,ExecuteRouteFeedback,ExecuteRouteGoal
-from .core import finite,yaw,heading,wrap
+from .core import finite,yaw,heading,wrap,check_goal_bounds
 from .ros_common import *
 
 class Mission:
     def __init__(self):
         self.c=config();self.odom=None;self.odom_at=0.;self.ready=False;self.gw_at=0.;self.reloc={};self.reloc_at=0.;self.map_result={};self.cancelled=False
+        self.last_completed_goal=None
         self.buf=tf2_ros.Buffer();self.listener=tf2_ros.TransformListener(self.buf)
         self.goal_pub=rospy.Publisher('/drone_nav/planner_goal',PoseStamped,queue_size=1)
         self.cancel_pub=rospy.Publisher('/drone_nav/cancel',Empty,queue_size=1)
@@ -48,22 +49,31 @@ class Mission:
             if not fresh(transform,time.monotonic(),.5):raise ValueError('stale map transform')
             r=rotation(quat(transform.transform.rotation));t=xyz(transform.transform.translation)
             goals=[]
-            for w in g.waypoints:
+            for index,w in enumerate(g.waypoints):
                 if w.header.frame_id!='drone_map':raise ValueError('route frame must be drone_map')
                 p=r.T@(finite(xyz(w.pose.position))-t);a=heading(r.T,yaw(quat(w.pose.orientation)))
-                if np.any(p<finite(self.c['bounds_min'])) or np.any(p>finite(self.c['bounds_max'])):raise ValueError('route outside configured bounds')
+                check_goal_bounds([p], self.c, ['waypoint #%d' % (index+1)])
                 q=PoseStamped();q.header.frame_id='drone_odom';put(q.pose.position,p);q.pose.orientation.z=math.sin(a/2);q.pose.orientation.w=math.cos(a/2)
                 if not self.check(path_of([p])).valid:raise ValueError('goal footprint unknown/occupied')
                 goals.append(q)
         except Exception as e:self.abort(str(e));return
         for i,goal in enumerate(goals):
+            # EGO rejects translations shorter than 0.2 m. Do not let the 15 cm
+            # arrival tolerance claim success before any trajectory exists. The
+            # only exception is a stationary turn at an already settled anchor.
+            if not fresh(self.odom,self.odom_at,odom_timeout(self.c)):self.abort('odometry stale before waypoint');return
+            p=xyz(goal.pose.position);distance=np.linalg.norm(xyz(self.odom.pose.pose.position)-p)
+            if distance<.2 and (self.last_completed_goal is None or
+                    np.linalg.norm(p-self.last_completed_goal)>1e-6 or distance>.15 or
+                    np.linalg.norm(xyz(self.odom.twist.twist.linear))>.1):
+                self.abort('translation below 0.2m requires an already settled identical waypoint');return
             # rospy supplies Header.seq on this single publisher. Gateway and executor
             # use the same received sequence as NavigationCommand.generation; never
             # assign a local seq that rospy will overwrite during serialization.
             self.cancelled=False;goal.header.stamp=rospy.Time.now();self.goal_pub.publish(goal);start=time.monotonic();settled=None
             while not rospy.is_shutdown():
                 if self.server.is_preempt_requested():self.abort('cancelled by client',True);return
-                if self.cancelled or not self.ready or time.monotonic()-self.gw_at>.3 or not fresh(self.odom,self.odom_at) or not self.map_ok():self.abort('cancelled or navigation health lost');return
+                if self.cancelled or not self.ready or time.monotonic()-self.gw_at>.3 or not fresh(self.odom,self.odom_at,odom_timeout(self.c)) or not self.map_ok():self.abort('cancelled or navigation health lost');return
                 try:
                     tr=self.buf.lookup_transform('drone_map','drone_odom',rospy.Time(0),rospy.Duration(.02))
                     if not fresh(tr,time.monotonic(),.5) or np.linalg.norm(xyz(tr.transform.translation)-t)>.01 or np.linalg.norm(rotation(quat(tr.transform.rotation))-r)>.01:raise ValueError('map transform reset')
@@ -74,6 +84,7 @@ class Mission:
                 if settled and time.monotonic()-settled>=1.:break
                 if time.monotonic()-start>120:self.abort('waypoint timeout');return
                 time.sleep(.02)
+            self.last_completed_goal=xyz(goal.pose.position).copy()
         # Cancel EGO/executor without resuming an old trajectory. arrived tells the gateway this stop is a
         # normal arrival, so it holds the final trajectory point instead of braking where the vehicle is.
         self.arrived_pub.publish(Empty());self.cancel_pub.publish(Empty());self.server.set_succeeded(ExecuteRouteResult(success=True,reason='all waypoints settled'))

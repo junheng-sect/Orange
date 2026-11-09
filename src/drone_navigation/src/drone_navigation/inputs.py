@@ -12,7 +12,7 @@ from .ros_common import *
 
 class Inputs:
     def __init__(self):
-        self.c=config();self.lock=threading.RLock();self.records=deque(maxlen=30);self.last=0.;self.bad='waiting';self.cloud_receipt=0.;self.pending={};self.state_pending={};self.px_queue=deque(maxlen=30)
+        self.c=config();self.age=odom_timeout(self.c);self.lock=threading.RLock();self.records=deque(maxlen=30);self.last=0.;self.bad='waiting';self.cloud_receipt=0.;self.pending={};self.state_pending={};self.px_queue=deque(maxlen=30)
         self.buf=tf2_ros.Buffer();self.listener=tf2_ros.TransformListener(self.buf)
         self.odom_pub=rospy.Publisher('/drone_nav/odom',Odometry,queue_size=5)
         self.sensor_pub=rospy.Publisher('/drone_nav/sensor_odom',Odometry,queue_size=5)
@@ -44,7 +44,7 @@ class Inputs:
     def on_state(self,o,v,px):
         try:
             if o.header.frame_id!='drone_odom' or o.child_frame_id!='drone_base' or v.header.frame_id!='camera_init' or px.header.frame_id!='px4_map' or px.child_frame_id!='drone_base':raise ValueError('state frames')
-            if o.header.stamp!=v.header.stamp or not all(fresh(m,time.monotonic()) for m in (o,v,px)):raise ValueError('state timestamps')
+            if o.header.stamp!=v.header.stamp or not all(fresh(m,time.monotonic(),self.age) for m in (o,v,px)):raise ValueError('state timestamps')
             stamp=o.header.stamp.to_sec()
             with self.lock:
                 if stamp<=self.last:raise ValueError('LIO timestamp reset/repeat')
@@ -60,7 +60,7 @@ class Inputs:
         except Exception as e:self.fail(e)
     def on_cloud(self,m):
         try:
-            if m.header.frame_id!='camera_init' or not fresh(m,time.monotonic()):raise ValueError('cloud frame/stamp')
+            if m.header.frame_id!='camera_init' or not fresh(m,time.monotonic(),self.age):raise ValueError('cloud frame/stamp')
             with self.lock:
                 records=[x for x in self.records if abs(x[0]-m.header.stamp.to_sec())<1e-6]
                 if not records:
@@ -83,5 +83,5 @@ class Inputs:
         except Exception as e:self.fail(e)
     def tick(self):
         with self.lock:
-            ok=self.records and fresh(self.records[-1][1],time.monotonic()) and time.monotonic()-self.cloud_receipt<.3 and not self.bad
+            ok=self.records and fresh(self.records[-1][1],time.monotonic(),self.age) and time.monotonic()-self.cloud_receipt<self.age and not self.bad
             status(self.stat,'READY' if ok else 'FAULT',reason=self.bad or ('stale inputs' if not ok else ''))

@@ -15,6 +15,12 @@ def fresh(m,receipt,age=.3):
     if m is None or time.monotonic()-receipt>age:return False
     stamp=m.header.stamp.to_sec();delta=rospy.Time.now().to_sec()-stamp
     return stamp>0 and -.05<=delta<=age
+def odom_timeout(c):
+    # Age limit for everything paced by the 10 Hz LIO odometry/cloud, including PX4 samples paired with them.
+    # 0.3 s left ~0.15 s for a board-wide stall; a 0.2 s one (11-07) aborted a flight. navigation.launch sets it.
+    t=float(c.get('odom_timeout',.5))
+    if not .1<=t<=1.:raise ValueError('odom_timeout must be in [0.1, 1] s')
+    return t
 
 def status(pub,state,**kw):
     kw.update(state=state,stamp=rospy.Time.now().to_sec());pub.publish(String(json.dumps(kw,allow_nan=False)))

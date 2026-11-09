@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import numpy as np
 import rospy
-from geometry_msgs.msg import Point, PoseStamped
+from geometry_msgs.msg import Point, PoseStamped, TransformStamped
 from nav_msgs.msg import Odometry
 from mavros_msgs.msg import PositionTarget, State, EstimatorStatus
 from std_msgs.msg import String
@@ -18,6 +18,8 @@ from drone_navigation.core import rz
 from drone_navigation.gateway import Gateway, STOPPED
 from drone_navigation.msg import NavigationCommand
 from drone_navigation.executor import Executor
+from drone_navigation.mission import Mission
+from drone_navigation.msg import ExecuteRouteGoal
 from drone_navigation.ros_common import put, xyz
 
 
@@ -171,6 +173,61 @@ class RuntimeTests(unittest.TestCase):
 
     def refresh(self, e):
         e.on_odom(self.odom()); e.on_plan(String('4'))
+
+    def test_stationary_spline_before_goal_is_buffered_then_map_validated(self):
+        e=self.build(Executor, 'drone_navigation.executor')
+        e.on_odom(self.odom());e.on_plan(String('4'))
+        e.on_spline(self.spline(1))
+        self.assertIsNone(e.spline)
+        self.assertEqual(e.last_id,-1)
+        e.on_goal(self.goal())
+        self.assertIsNotNone(e.pending_spline)
+        self.assertIsNone(e.spline)
+        e.check.return_value=SimpleNamespace(valid=True,reason='clear')
+        e.validate();e.tick()
+        self.assertEqual(e.spline.id,1)
+
+    def test_early_spline_expiry_old_goal_and_cancel_do_not_resume(self):
+        for case in ('expired','old_goal','cancelled'):
+            e=self.build(Executor, 'drone_navigation.executor')
+            e.on_spline(self.spline(1))
+            if case=='expired':self.now+=.31
+            elif case=='old_goal':self.now+=.2
+            else:e.on_cancel(None)
+            goal=self.goal()
+            if case=='old_goal':goal.header.stamp=rospy.Time.from_sec(self.now)
+            e.on_goal(goal)
+            self.assertIsNone(e.pending_spline,case)
+
+    def test_mission_rejects_short_translation_before_publishing_goal(self):
+        for target,anchor,speed in (((.1,0,1),None,0),((.1,0,1),(0,0,1),0),
+                                    ((0,0,1),(0,0,1),.11),((.18,0,1),(.18,0,1),0)):
+            m=self.short_mission(anchor,speed)
+            goal=PoseStamped();goal.header.frame_id='drone_map';put(goal.pose.position,target);goal.pose.orientation.w=1.
+            m.execute(ExecuteRouteGoal(map_id='synthetic',waypoints=[goal]))
+            m.goal_pub.publish.assert_not_called()
+            self.assertIn('below 0.2m',m.abort.call_args[0][0])
+
+    def short_mission(self, anchor, speed=0.):
+        m=Mission.__new__(Mission)
+        m.c=dict(map_id='synthetic',bounds_min=[-5,-5,.4],bounds_max=[5,5,2.5])
+        m.ready=True;m.gw_at=self.now;m.map_ok=lambda:True
+        m.odom=self.odom();m.odom.twist.twist.linear.x=speed;m.odom_at=self.now
+        m.last_completed_goal=None if anchor is None else np.array(anchor)
+        tr=TransformStamped();tr.header.stamp=rospy.Time.now();tr.transform.rotation.w=1.
+        m.buf=Mock();m.buf.lookup_transform.return_value=tr
+        m.check=Mock(return_value=SimpleNamespace(valid=True))
+        m.server=Mock();m.server.is_preempt_requested.return_value=True
+        m.abort=Mock();m.goal_pub=Mock()
+        return m
+
+    def test_mission_allows_turn_at_completed_identical_anchor(self):
+        m=self.short_mission((0,0,1))
+        goal=PoseStamped();goal.header.frame_id='drone_map';put(goal.pose.position,(0,0,1))
+        goal.pose.orientation.z=math.sin(math.pi/4);goal.pose.orientation.w=math.cos(math.pi/4)
+        m.execute(ExecuteRouteGoal(map_id='synthetic',waypoints=[goal]))
+        m.goal_pub.publish.assert_called_once()
+        self.assertEqual(m.abort.call_args[0][0],'cancelled by client')
 
     def test_command_carries_spline_acceleration_and_zero_at_end(self):
         e = self.build(Executor, 'drone_navigation.executor')

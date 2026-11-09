@@ -13,6 +13,12 @@ from .ros_common import *
 class Executor:
     def __init__(self):
         self.lock=threading.RLock();self.spline=None;self.spline_goal=None;self.pending_spline=None;self.goal=None;self.odom=None;self.odom_at=0.;self.active=False;self.gen=0;self.yaw=0.;self.last_id=-1;self.plan_at=0.;self.plan='';self.fault='';self.goal_at=0.;self.c=config();self.checked_id=None;self.checked_at=0.;self.check_reason='waiting for map validation';self.last_reference=None
+        self.early_spline=None;self.early_at=0.
+        self.odom_age=odom_timeout(self.c)
+        # Turn on the spot at yaw_rate_deg (deg/s, default 10), one step per 50 Hz tick.
+        rate=float(self.c.get('yaw_rate_deg',10.))
+        if not 0.<rate<=90.:raise ValueError('yaw_rate_deg must be in (0, 90]')
+        self.yaw_step=math.radians(rate)*.02
         self.pub=rospy.Publisher('/drone_nav/command',NavigationCommand,queue_size=1)
         self.stat=rospy.Publisher('/drone_nav/executor_status',String,queue_size=1)
         self.cancel=rospy.Publisher('/drone_nav/cancel',Empty,queue_size=1)
@@ -28,7 +34,7 @@ class Executor:
     def on_odom(self,m):
         with self.lock:self.odom=m;self.odom_at=time.monotonic()
     def on_cancel(self,_):
-        with self.lock:self.active=False;self.spline=None;self.spline_goal=None;self.pending_spline=None;self.goal=None
+        with self.lock:self.active=False;self.spline=None;self.spline_goal=None;self.pending_spline=None;self.goal=None;self.early_spline=None
     def on_goal(self,m):
         with self.lock:
             # Retain the approved reference (normally its endpoint on a waypoint
@@ -37,9 +43,23 @@ class Executor:
             if self.spline is None:
                 self.checked_id=None;self.checked_at=0.;self.last_reference=None
                 if self.odom is not None:self.yaw=yaw(quat(self.odom.pose.pose.orientation))
+            # A stationary planner can publish before this subscriber receives
+            # the goal on its separate connection. Adopt only a recent candidate
+            # whose start timestamp belongs to this goal; map validation remains
+            # mandatory before it can become the command reference.
+            candidate=self.early_spline;self.early_spline=None
+            if candidate is not None and time.monotonic()-self.early_at<=.3:
+                self.on_spline(candidate)
     def on_spline(self,m):
         with self.lock:
-            if not self.active or self.goal is None or m.start_time<self.goal.header.stamp or m.traj_id<=self.last_id:return
+            if not self.active or self.goal is None:
+                try:
+                    Spline(m.order,m.knots,[[p.x,p.y,p.z] for p in m.pos_pts],m.start_time.to_sec(),m.traj_id)
+                    if abs(rospy.Time.now().to_sec()-m.start_time.to_sec())<=.3 and m.traj_id>self.last_id:
+                        self.early_spline=copy.deepcopy(m);self.early_at=time.monotonic()
+                except Exception:pass
+                return
+            if m.start_time<self.goal.header.stamp or m.traj_id<=self.last_id:return
             try:
                 s=Spline(m.order,m.knots,[[p.x,p.y,p.z] for p in m.pos_pts],m.start_time.to_sec(),m.traj_id)
                 if abs(rospy.Time.now().to_sec()-s.start)>.3:raise ValueError('stale/future spline')
@@ -49,7 +69,7 @@ class Executor:
         self.fault=reason;self.active=False;self.spline=None;self.spline_goal=None;self.pending_spline=None;self.cancel.publish(Empty());status(self.stat,'FAULT',reason=reason)
     def validate(self):
         with self.lock:
-            if not self.active or not fresh(self.odom,self.odom_at):return
+            if not self.active or not fresh(self.odom,self.odom_at,self.odom_age):return
             current,pending,goal=self.spline,self.pending_spline,self.goal
             origin=xyz(self.odom.pose.pose.position)
         # Refresh the current trajectory's clearance lease before checking a new one.
@@ -77,7 +97,7 @@ class Executor:
     def tick(self):
         with self.lock:
             if not self.active:status(self.stat,'FAULT' if self.fault else 'IDLE',reason=self.fault);return
-            if not fresh(self.odom,self.odom_at):
+            if not fresh(self.odom,self.odom_at,self.odom_age):
                 self.fail('executor odometry stale');return
             if self.plan in ('FAULT','5'):
                 self.fail('planner reported emergency');return
@@ -113,6 +133,6 @@ class Executor:
             if terminal:
                 if np.linalg.norm(xyz(self.odom.pose.pose.position)-p)<=.15 and np.linalg.norm(xyz(self.odom.twist.twist.linear))<=.1:
                     delta=wrap(yaw(quat(self.goal.pose.orientation))-self.yaw)
-                    self.yaw=wrap(self.yaw+max(-math.radians(10)*.02,min(math.radians(10)*.02,delta)))
+                    self.yaw=wrap(self.yaw+max(-self.yaw_step,min(self.yaw_step,delta)))
             cmd=NavigationCommand();cmd.header.stamp=rospy.Time.now();cmd.header.frame_id='drone_odom';put(cmd.position,p);put(cmd.velocity,v);put(cmd.acceleration,a);cmd.yaw=self.yaw;cmd.generation=self.gen;cmd.terminal=terminal
             self.pub.publish(cmd);status(self.stat,'HOLD' if terminal else 'RUNNING',trajectory_id=s.id)

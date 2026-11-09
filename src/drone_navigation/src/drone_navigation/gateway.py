@@ -4,12 +4,13 @@ import rospy,message_filters,rosgraph
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String,Empty
 from std_srvs.srv import Trigger,TriggerResponse
-from mavros_msgs.msg import PositionTarget,State,EstimatorStatus
+from mavros_msgs.msg import PositionTarget,State,EstimatorStatus,ExtendedState
 from drone_navigation.msg import NavigationCommand
-from .core import Alignment,brake,deployment,yaw,heading,rz,competing_publishers
+from .core import Alignment,brake,deployment,yaw,heading,rz,competing_publishers,climb_profile
 from .ros_common import *
 
 STOPPED='task stopped; prepare before next route'
+GROUND_DROP=.3 # landed, before the climb: stream the hold this far below the vehicle so PX4 does not start its takeoff
 
 class Gateway:
     def __init__(self):
@@ -21,6 +22,13 @@ class Gateway:
             if not math.isfinite(radius) or not math.isfinite(height) or radius<max(self.c['body_half_extent'][:2])+self.c['clearance'] or height<self.c['body_half_extent'][2]+self.c['clearance']:
                 raise ValueError('planner inflation smaller than measured body+clearance')
         self.lock=threading.RLock();self.alignment=Alignment();self.odom=None;self.px=None;self.px_at=0.;self.state=None;self.state_at=0.;self.est=None;self.est_at=0.;self.cmd=None;self.cmd_at=0.;self.goal_stamp=None;self.expected_gen=None;self.input_ok=False;self.input_at=0.;self.fault='';self.prepared=False;self.running=False;self.was_offboard=False;self.prepared_at=0.;self.owners_ok=False;self.owners_at=0.;self.hold_p=None;self.hold_v=np.zeros(3);self.hold_yaw=0.;self.last_clock=None;self.clock_at=time.monotonic();self.terminal=None;self.arrived_at=-math.inf
+        # PX4 samples are only taken in pairs with LIO odometry, so their age follows the LIO limit too.
+        self.odom_age=odom_timeout(self.c)
+        # Ground takeoff: prepare_takeoff while armed on the ground, select OFFBOARD, then takeoff climbs takeoff_height
+        # above the landed hold point at max_vel_z / max_acc_z and holds there.
+        self.ext=None;self.ext_at=0.;self.takeoff_mode=False;self.climb=None;self.climb_end=None;self.takeoff_state='';self.ready=False
+        self.takeoff_h=float(self.c.get('takeoff_height',1.));self.takeoff_v=float(self.c.get('max_vel_z',.3));self.takeoff_a=float(self.c.get('max_acc_z',.3))
+        if not .3<=self.takeoff_h<=2.5 or not 0.<self.takeoff_v<=1. or not 0.<self.takeoff_a<=1.:raise ValueError('takeoff_height must be in [0.3, 2.5] m, max_vel_z/max_acc_z in (0, 1]')
         self.preview=rospy.Publisher('/drone_nav/setpoint_preview',PositionTarget,queue_size=1)
         self.output=rospy.Publisher('/mavros/setpoint_raw/local',PositionTarget,queue_size=1) if self.real else None
         self.stat=rospy.Publisher('/drone_nav/gateway_status',String,queue_size=1)
@@ -36,7 +44,10 @@ class Gateway:
         rospy.Subscriber('/drone_nav/executor_status',String,self.on_executor,queue_size=1)
         rospy.Subscriber('/drone_nav/cancel',Empty,self.on_cancel,queue_size=1)
         rospy.Subscriber('/drone_nav/arrived',Empty,self.on_arrived,queue_size=1)
+        rospy.Subscriber('/mavros/extended_state',ExtendedState,self.on_ext,queue_size=1)
         rospy.Service('/drone_nav/prepare',Trigger,self.prepare)
+        rospy.Service('/drone_nav/prepare_takeoff',Trigger,self.prepare_takeoff)
+        rospy.Service('/drone_nav/takeoff',Trigger,self.takeoff)
         loop(self.ownership,2);loop(self.tick)
     def ownership(self):
         try:
@@ -55,6 +66,10 @@ class Gateway:
             self.was_offboard=off;self.state=m;self.state_at=time.monotonic()
     def on_est(self,m):
         with self.lock:self.est=m;self.est_at=time.monotonic()
+    def on_ext(self,m):
+        with self.lock:self.ext=m;self.ext_at=time.monotonic()
+    def on_ground(self):
+        return self.ext is not None and time.monotonic()-self.ext_at<1. and self.ext.landed_state==ExtendedState.LANDED_STATE_ON_GROUND
     def on_input(self,m):
         with self.lock:self.input_ok=read_status(m).get('state')=='READY';self.input_at=time.monotonic()
     def on_executor(self,m):
@@ -91,7 +106,7 @@ class Gateway:
         with self.lock:
             try:
                 if o.header.frame_id!='drone_odom' or p.header.frame_id!='px4_map' or p.child_frame_id!='drone_base':raise ValueError('alignment frames')
-                if not fresh(o,time.monotonic()) or not fresh(p,time.monotonic()):raise ValueError('alignment stale')
+                if not fresh(o,time.monotonic(),self.odom_age) or not fresh(p,time.monotonic(),self.odom_age):raise ValueError('alignment stale')
                 if self.px is not None and p.header.stamp<=self.px.header.stamp:raise ValueError('PX4 timestamp rollback')
                 po,pp=xyz(o.pose.pose.position),xyz(p.pose.pose.position);ao,ap=yaw(quat(o.pose.pose.orientation)),yaw(quat(p.pose.pose.orientation))
                 self.odom=o;self.px=p;self.px_at=time.monotonic()
@@ -109,39 +124,72 @@ class Gateway:
     def fail(self,reason):
         if not self.fault:
             self.fault=reason;self.capture_brake();self.running=False;self.cmd=None;self.cancel.publish(Empty())
+            self.climb=None
+            if self.takeoff_state:self.takeoff_state='STOPPED'
     def prepare(self,_):
         with self.lock:
-            if self.alignment.r is None or not fresh(self.px,self.px_at) or not self.input_ok or not self.owners_ok or time.monotonic()-self.owners_at>1.5:
+            if self.alignment.r is None or not fresh(self.px,self.px_at,self.odom_age) or not self.input_ok or not self.owners_ok or time.monotonic()-self.owners_at>1.5:
                 return TriggerResponse(False,'alignment, inputs or exclusive ownership not ready')
             self.fault='';self.prepared=True;self.running=False;self.cmd=None;self.goal_stamp=None;self.expected_gen=None;self.prepared_at=time.monotonic();self.terminal=None;self.capture_hold()
+            self.takeoff_mode=False;self.climb=None;self.climb_end=None;self.takeoff_state=''
             return TriggerResponse(True,'prepared: hold stream; manually select OFFBOARD, then start route')
+    def prepare_takeoff(self,_):
+        with self.lock:
+            if not self.on_ground():return TriggerResponse(False,'PX4 does not report landed')
+            if self.real and (self.state is None or time.monotonic()-self.state_at>2. or not self.state.armed or self.was_offboard):
+                return TriggerResponse(False,'arm on the ground outside OFFBOARD first')
+            r=self.prepare(None)
+            if r.success:
+                self.takeoff_mode=True;self.takeoff_state='GROUND'
+                r.message='prepared for takeoff: hold streamed %.1f m below the vehicle; select OFFBOARD, then call takeoff'%GROUND_DROP
+            return r
+    def takeoff(self,_):
+        with self.lock:
+            if not self.takeoff_mode or not self.ready or self.climb is not None or self.climb_end is not None:
+                return TriggerResponse(False,'not prepared for takeoff, not READY in OFFBOARD, or already climbed')
+            if not self.on_ground():return TriggerResponse(False,'PX4 does not report landed')
+            self.climb=(time.monotonic(),self.hold_p.copy());self.takeoff_state='CLIMBING'
+            return TriggerResponse(True,'climbing %.2f m at %.2f m/s'%(self.takeoff_h,self.takeoff_v))
     def estimator_ok(self):
         e=self.est
-        return fresh(e,self.est_at,2.) and e.attitude_status_flag and e.velocity_horiz_status_flag and e.velocity_vert_status_flag and (e.pos_horiz_rel_status_flag or e.pos_horiz_abs_status_flag) and (e.pos_vert_abs_status_flag or e.pos_vert_agl_status_flag) and not e.const_pos_mode_status_flag
+        # const_pos also means "vehicle at rest" (EV still fused): accepted only while landed and preparing a takeoff.
+        return fresh(e,self.est_at,2.) and e.attitude_status_flag and e.velocity_horiz_status_flag and e.velocity_vert_status_flag and (e.pos_horiz_rel_status_flag or e.pos_horiz_abs_status_flag) and (e.pos_vert_abs_status_flag or e.pos_vert_agl_status_flag) and (not e.const_pos_mode_status_flag or (self.takeoff_mode and self.on_ground()))
     def tick(self):
         with self.lock:
             wall=time.monotonic();now=rospy.Time.now().to_sec()
             if self.last_clock is None or now>self.last_clock:self.clock_at=wall
             if self.last_clock is not None and now<self.last_clock:self.fail('ROS clock rollback');self.prepared=False
             self.last_clock=now
-            pxok=fresh(self.px,self.px_at) and (not self.real or self.estimator_ok())
+            pxok=fresh(self.px,self.px_at,self.odom_age) and (not self.real or self.estimator_ok())
             if self.prepared:
                 if not self.owners_ok or wall-self.owners_at>1.5:self.fail('another setpoint publisher or ownership check lost');self.prepared=False
-                if not self.input_ok or wall-self.input_at>.3 or wall-self.clock_at>.3:self.fail('navigation inputs/clock stale')
+                if not self.input_ok or wall-self.input_at>self.odom_age or wall-self.clock_at>.3:self.fail('navigation inputs/clock stale')
                 if self.running and not fresh(self.cmd,self.cmd_at,.3):self.fail('trajectory command stale')
                 if not pxok:self.fail('PX4 local estimate unavailable')
+                # Takeoff ends when PX4 leaves the ground; still landed 3 s after the climb means it never lifted.
+                if self.takeoff_mode and self.climb_end is not None and not self.fault:
+                    if self.ext is not None and wall-self.ext_at<1. and not self.on_ground():self.takeoff_mode=False;self.takeoff_state='DONE'
+                    elif wall-self.climb_end>3.:self.fail('takeoff not detected by PX4')
             # Pre-stream at the current measured pose while the pilot is in control.
             if self.prepared and pxok and not self.was_offboard:self.capture_hold()
-            ready=self.prepared and not self.fault and pxok and (not self.real or (self.was_offboard and wall-self.state_at<2. and wall-self.prepared_at>=1.))
-            status(self.stat,'READY' if ready else ('FAULT' if self.fault else 'PREPARED' if self.prepared else 'ALIGNING'),reason=self.fault,real_output=self.real)
+            ready=self.ready=self.prepared and not self.fault and pxok and (not self.real or (self.was_offboard and wall-self.state_at<2. and wall-self.prepared_at>=1.))
+            if self.climb is not None and not ready:self.climb=None;self.takeoff_state='STOPPED' # never resume a climb clock that kept running
+            status(self.stat,'READY' if ready else ('FAULT' if self.fault else 'PREPARED' if self.prepared else 'ALIGNING'),reason=self.fault,real_output=self.real,takeoff=self.takeoff_state)
             if not self.prepared or not pxok or self.hold_p is None:return
             if self.real and (self.state is None or wall-self.state_at>2. or not self.state.connected):return
             acc=None
             if ready and self.running and self.cmd is not None:
                 r,t=self.alignment.r,self.alignment.t;p=r@xyz(self.cmd.position)+t;v=r@xyz(self.cmd.velocity);acc=r@xyz(self.cmd.acceleration);a=heading(r,self.cmd.yaw)
                 self.terminal=(p,a,wall) if self.cmd.terminal else None
+            elif ready and self.climb is not None:
+                # The hold follows the climb, so any interruption brakes from the last climb setpoint.
+                t0,p0=self.climb;s,ds,dds,T=climb_profile(wall-t0,self.takeoff_h,self.takeoff_v,self.takeoff_a)
+                p=p0+[0.,0.,s];v=np.array([0.,0.,ds]);acc=np.array([0.,0.,dds]);a=self.hold_yaw
+                self.hold_p,self.hold_v=p.copy(),v.copy()
+                if wall-t0>=T:self.climb=None;self.climb_end=wall;self.takeoff_state='HOLD';self.hold_v=np.zeros(3)
             else:
                 self.hold_p,self.hold_v=brake(self.hold_p,self.hold_v,self.c['max_acc']);p,v,a=self.hold_p,self.hold_v,self.hold_yaw
+                if self.takeoff_mode and self.on_ground() and (self.climb_end is None or self.fault):p=p-[0.,0.,GROUND_DROP]
             m=PositionTarget();m.header.stamp=rospy.Time.now();m.header.frame_id='px4_map';m.coordinate_frame=PositionTarget.FRAME_LOCAL_NED
             # Trajectory setpoints carry EGO's acceleration as PX4 feedforward (less overshoot when braking);
             # the hold/brake stream stays position + velocity only.

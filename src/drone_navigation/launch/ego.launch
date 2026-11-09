@@ -16,6 +16,13 @@
 
   <arg name="max_vel" default="0.5"/>
   <arg name="max_acc" default="0.5"/>
+  <!-- Vertical limits in m/s, m/s^2, taken as is and capped at the per-axis max_vel/sqrt(3), max_acc/sqrt(3); -1 = that cap -->
+  <arg name="max_vel_z" default="-1"/>
+  <arg name="max_acc_z" default="-1"/>
+  <!-- Replan knot span = control point distance / path speed limit * this. Upstream 1.5 planned 2/3 of the limit -->
+  <arg name="replan_ts_scale" default="1.0"/>
+  <!-- Odometry/cloud wall-clock age (s) before the map reports stale and the FSM drops its target -->
+  <arg name="odom_timeout" default="0.5"/>
   <arg name="planning_horizon" default="3.0"/>
 
   <arg name="point_num" default="0"/>
@@ -65,7 +72,7 @@
     <remap from="~check_trajectory" to="/drone_nav/check_trajectory"/>
     <param name="grid_map/nav_radius" value="$(arg radius)"/>
     <param name="grid_map/nav_half_height" value="$(arg half_height)"/>
-    <param name="grid_map/odom_depth_timeout" value="0.3"/>
+    <param name="grid_map/odom_depth_timeout" value="$(arg odom_timeout)"/>
     <!-- planning fsm -->
     <param name="fsm/flight_type" value="$(arg flight_type)" type="int"/>
     <param name="fsm/thresh_replan_time" value="1.0" type="double"/>
@@ -136,6 +143,9 @@
   <!-- planner manager -->
     <param name="manager/max_vel" value="$(eval float(arg('max_vel')) / 1.7320508075688772)" type="double"/>
     <param name="manager/max_acc" value="$(eval float(arg('max_acc')) / 1.7320508075688772)" type="double"/>
+    <param name="manager/max_vel_z" value="$(eval min(float(arg('max_vel_z')), float(arg('max_vel')) / 1.7320508075688772) if float(arg('max_vel_z')) &gt; 0 else -1.0)" type="double"/>
+    <param name="manager/max_acc_z" value="$(eval min(float(arg('max_acc_z')), float(arg('max_acc')) / 1.7320508075688772) if float(arg('max_acc_z')) &gt; 0 else -1.0)" type="double"/>
+    <param name="manager/replan_ts_scale" value="$(arg replan_ts_scale)" type="double"/>
     <param name="manager/max_jerk" value="4" type="double"/>
     <param name="manager/control_points_distance" value="0.2" type="double"/>
     <param name="manager/feasibility_tolerance" value="0.05" type="double"/>
@@ -152,6 +162,8 @@
     <param name="optimization/swarm_clearance" value="0.5" type="double"/>
     <param name="optimization/max_vel" value="$(eval float(arg('max_vel')) / 1.7320508075688772)" type="double"/>
     <param name="optimization/max_acc" value="$(eval float(arg('max_acc')) / 1.7320508075688772)" type="double"/>
+    <param name="optimization/max_vel_z" value="$(eval min(float(arg('max_vel_z')), float(arg('max_vel')) / 1.7320508075688772) if float(arg('max_vel_z')) &gt; 0 else -1.0)" type="double"/>
+    <param name="optimization/max_acc_z" value="$(eval min(float(arg('max_acc_z')), float(arg('max_acc')) / 1.7320508075688772) if float(arg('max_acc_z')) &gt; 0 else -1.0)" type="double"/>
 
     <param name="bspline/limit_vel" value="$(eval float(arg('max_vel')) / 1.7320508075688772)" type="double"/>
     <param name="bspline/limit_acc" value="$(eval float(arg('max_acc')) / 1.7320508075688772)" type="double"/>

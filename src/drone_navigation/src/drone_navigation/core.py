@@ -11,6 +11,24 @@ def finite(v, size=3):
     return a
 
 
+def check_goal_bounds(points, config, labels=None):
+    """Check navigation reference points, with an optional inward boundary margin."""
+    lo, hi = finite(config['bounds_min']), finite(config['bounds_max'])
+    margin = float(config.get('goal_boundary_margin', 0.0))
+    if not math.isfinite(margin) or margin < 0 or np.any(hi - lo <= 2 * margin):
+        raise ValueError('invalid goal_boundary_margin/bounds')
+    for i, point in enumerate(points):
+        p = finite(point)
+        gaps = np.r_[p - lo, hi - p]
+        j = int(np.argmin(gaps))
+        if gaps[j] < margin - 1e-9:
+            label = labels[i] if labels is not None else 'waypoint #%d' % (i + 1)
+            face = ('x_min', 'y_min', 'z_min', 'x_max', 'y_max', 'z_max')[j]
+            raise ValueError('%s %s: %s clearance %.3f m < required %.3f m (drone_odom)' %
+                             (label, p.tolist(), face, gaps[j], margin))
+    return True
+
+
 def rotation(q):
     x, y, z, w = finite(q, 4)
     if abs(x*x+y*y+z*z+w*w-1.) > .002:
@@ -100,6 +118,16 @@ def brake(p,v,a=.5,dt=.02):
     return p+(v+nv)*.5*dt,nv
 
 
+def climb_profile(t,h,v,a):
+    """Rest-to-rest trapezoid over height h with speed v and acceleration a: (height, speed, acceleration, total time) at t."""
+    if not (h>0 and v>0 and a>0):raise ValueError('invalid climb profile')
+    ta=min(v/a,math.sqrt(h/a));vp=a*ta;tc=(h-a*ta*ta)/vp;T=2*ta+tc;t=min(max(t,0.),T)
+    if t<ta:return .5*a*t*t,a*t,a,T
+    if t<ta+tc:return .5*a*ta*ta+vp*(t-ta),vp,0.,T
+    r=T-t
+    return (h-.5*a*r*r,a*r,-a if r>0 else 0.,T)
+
+
 def deployment(c):
     if c.get('deployment_verified') is not True:raise ValueError('deployment geometry not verified')
     for key in ('lever_body','sensor_offset_imu','body_half_extent','bounds_min','bounds_max'):
@@ -107,6 +135,7 @@ def deployment(c):
     if np.any(finite(c['body_half_extent'])<=0) or np.any(finite(c['bounds_max'])<=finite(c['bounds_min'])):raise ValueError('invalid geometry/bounds')
     for key in ('clearance','max_vel','max_acc'):
         if not math.isfinite(float(c[key])) or c[key]<=0:raise ValueError('invalid positive '+key)
+    check_goal_bounds([], c)
     if not c.get('map_id'):raise ValueError('map_id is required')
     return True
 

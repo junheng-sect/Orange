@@ -1,0 +1,269 @@
+Panels:
+- Class: rviz/Displays
+  Help Height: 0
+  Name: Displays
+  Property Tree Widget:
+    Expanded:
+    - /drone01
+    - /drone01/Planning1
+    - /drone01/Mapping1
+    - /drone01/Visualization1
+    Splitter Ratio: 0.43611112236976624
+  Tree Height: 441
+Preferences:
+  PromptSaveOnExit: true
+Toolbars:
+  toolButtonStyle: 2
+Visualization Manager:
+  Class: ''
+  Displays:
+  - Alpha: 1.0
+    Autocompute Intensity Bounds: true
+    Autocompute Value Bounds:
+      Min Value: -0.5
+      Max Value: 10.0
+      Value: false
+    Axis: Z
+    Channel Name: intensity
+    Class: rviz/PointCloud2
+    Color: 130; 130; 130
+    Color Transformer: AxisColor
+    Decay Time: 0
+    Enabled: true
+    Invert Rainbow: false
+    Max Color: 255; 255; 255
+    Max Intensity: 4096
+    Min Color: 0; 0; 0
+    Min Intensity: 0
+    Name: saved_map
+    Position Transformer: XYZ
+    Queue Size: 1
+    Selectable: true
+    Size (Pixels): 2
+    Size (m): 0.05
+    Style: Points
+    Topic: /ego_swarm_view/saved_map
+    Unreliable: false
+    Use Fixed Frame: true
+    Use rainbow: true
+    Value: true
+  - Alpha: 0.35
+    Autocompute Intensity Bounds: true
+    Autocompute Value Bounds:
+      Max Value: 2.9000000953674316
+      Min Value: 0
+      Value: false
+    Axis: Z
+    Channel Name: intensity
+    Class: rviz/PointCloud2
+    Color: 130; 130; 130
+    Color Transformer: FlatColor
+    Decay Time: 0
+    Enabled: true
+    Invert Rainbow: false
+    Max Color: 255; 255; 255
+    Max Intensity: 4096
+    Min Color: 0; 0; 0
+    Min Intensity: 0
+    Name: live_scan
+    Position Transformer: XYZ
+    Queue Size: 10
+    Selectable: true
+    Size (Pixels): 3
+    Size (m): 0.025
+    Style: Points
+    Topic: /cloud_registered
+    Unreliable: false
+    Use Fixed Frame: true
+    Use rainbow: true
+    Value: true
+  - Class: rviz/Group
+    Displays:
+    - Class: rviz/Group
+      Displays:
+      - Class: rviz/Marker
+        Enabled: false
+        Marker Topic: /drone_0_ego_planner_node/goal_point
+        Name: goal_point
+        Namespaces: {}
+        Queue Size: 100
+        Value: false
+      - Class: rviz/Marker
+        Enabled: false
+        Marker Topic: /drone_0_ego_planner_node/global_list
+        Name: global_path
+        Namespaces: {}
+        Queue Size: 100
+        Value: false
+      - Class: rviz/Marker
+        Enabled: true
+        Marker Topic: /drone_0_ego_planner_node/optimal_list
+        Name: optimal_traj
+        Namespaces:
+          ? ''
+          : true
+        Queue Size: 100
+        Value: true
+      - Class: rviz/Marker
+        Enabled: false
+        Marker Topic: /drone_0_ego_planner_node/a_star_list
+        Name: AStar
+        Namespaces: {}
+        Queue Size: 100
+        Value: false
+      - Class: rviz/Marker
+        Enabled: false
+        Marker Topic: /drone_0_ego_planner_node/init_list
+        Name: InitTraj
+        Namespaces: {}
+        Queue Size: 100
+        Value: false
+      - Alpha: 1
+        Buffer Length: 1
+        Class: rviz/Path
+        Color: 29; 108; 212
+        Enabled: true
+        Head Diameter: 0.30000001192092896
+        Head Length: 0.20000000298023224
+        Length: 0.30000001192092896
+        Line Style: Billboards
+        Line Width: 0.10000000149011612
+        Name: drone_path
+        Offset:
+          X: 0
+          Y: 0
+          Z: 0
+        Pose Color: 255; 85; 255
+        Pose Style: None
+        Queue Size: 10
+        Radius: 0.029999999329447746
+        Shaft Diameter: 0.10000000149011612
+        Shaft Length: 0.10000000149011612
+        Topic: /ego_swarm_view/odom_visualization/path
+        Unreliable: false
+        Value: true
+      Enabled: true
+      Name: Planning
+    - Class: rviz/Group
+      Displays:
+      - Alpha: 0.8
+        Autocompute Intensity Bounds: true
+        Autocompute Value Bounds: &id001
+          Max Value: 2.8399999141693115
+          Min Value: 0.03999999910593033
+          Value: true
+        Axis: Z
+        Channel Name: intensity
+        Class: rviz/PointCloud2
+        Color: 50; 50; 50
+        Color Transformer: FlatColor
+        Decay Time: 0
+        Enabled: true
+        Invert Rainbow: false
+        Max Color: 255; 255; 255
+        Max Intensity: 4096
+        Min Color: 0; 0; 0
+        Min Intensity: 0
+        Name: occupied
+        Position Transformer: XYZ
+        Queue Size: 10
+        Selectable: true
+        Size (Pixels): 3
+        Size (m): 0.10000000149011612
+        Style: Flat Squares
+        Topic: /drone_0_ego_planner_node/grid_map/occupancy
+        Unreliable: false
+        Use Fixed Frame: true
+        Use rainbow: true
+        Value: true
+      - Alpha: 0.35
+        Autocompute Intensity Bounds: true
+        Autocompute Value Bounds: *id001
+        Axis: Z
+        Channel Name: intensity
+        Class: rviz/PointCloud2
+        Color: 29; 108; 212
+        Color Transformer: FlatColor
+        Decay Time: 0
+        Enabled: true
+        Invert Rainbow: false
+        Max Color: 255; 255; 255
+        Max Intensity: 4096
+        Min Color: 0; 0; 0
+        Min Intensity: 0
+        Name: map inflate
+        Position Transformer: XYZ
+        Queue Size: 10
+        Selectable: true
+        Size (Pixels): 3
+        Size (m): 0.10000000149011612
+        Style: Flat Squares
+        Topic: /drone_0_ego_planner_node/grid_map/occupancy_inflate
+        Unreliable: false
+        Use Fixed Frame: true
+        Use rainbow: true
+        Value: true
+      Enabled: true
+      Name: Mapping
+    - Class: rviz/Group
+      Displays:
+      - Class: rviz/Marker
+        Enabled: true
+        Marker Topic: /ego_swarm_view/odom_visualization/robot
+        Name: robot
+        Namespaces:
+          mesh: true
+        Queue Size: 100
+        Value: true
+      Enabled: true
+      Name: Visualization
+    Enabled: true
+    Name: drone0
+  Enabled: true
+  Global Options:
+    Background Color: 255; 255; 255
+    Default Light: true
+    Fixed Frame: drone_map
+    Frame Rate: 30
+  Name: root
+  Tools:
+  - Class: rviz/Interact
+  - Class: rviz/MoveCamera
+  - Class: rviz/Select
+  - Class: rviz/FocusCamera
+  - Class: rviz/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Distance: 150.0
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.05999999865889549
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Field of View: 0.7853981852531433
+      Focal Point:
+        X: 15.0
+        Y: 0.0
+        Z: 2.0
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05000000074505806
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.9
+      Target Frame: <Fixed Frame>
+      Yaw: 0.8
+    Saved: []
+Window Geometry:
+  Displays:
+    collapsed: false
+  Views:
+    collapsed: false
+  Height: 900
+  Width: 1400
+  X: 80
+  Y: 80
+  Hide Left Dock: false
+  Hide Right Dock: false

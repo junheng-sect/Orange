@@ -1,0 +1,18 @@
+{
+  "repository": "https://github.com/ZJU-FAST-Lab/ego-planner-swarm",
+  "revision": "92fe9f7227b2da819133eb8e0e8c7fc000f6ae20",
+  "sha256": {
+    "vendor/odom_visualization/CMakeLists.txt": "c21c445ce4b8d7b3b85ef8053225a8c1cb046c70ad113a02dd05fcbc62ba5e00",
+    "vendor/odom_visualization/Makefile": "273e26bc45ae236a85abfe3eafbba52f55886b0347fd8341768ccf55f44edf52",
+    "vendor/odom_visualization/mainpage.dox": "63ccc5caf090943e23f2acc8818cdc4456a76c14a586a749fbfa5823c9e6d19a",
+    "vendor/odom_visualization/meshes/hummingbird.mesh": "c2b9f892fa0ec833dd9fcdf795d81fbe4b62cfed7fda05fffdf53c0ebe356641",
+    "vendor/odom_visualization/package.xml": "dfd73bcfbb98409f6af20ec0e42f40dc83aed5978a3427b395388f7ebc0dd2e3",
+    "vendor/odom_visualization/src/odom_visualization.cpp": "fa14c5bb9421bf0dfcff4ebaf401e81ea5ee809b3d44e8c08b41c4b3481a1cc1",
+    "vendor/pose_utils/CMakeLists.txt": "b6cda80f3b0c098d3c81fa8204d68147dbbeecbd8a6641d5f1a1e8243bbccdbc",
+    "vendor/pose_utils/Makefile": "273e26bc45ae236a85abfe3eafbba52f55886b0347fd8341768ccf55f44edf52",
+    "vendor/pose_utils/include/pose_utils.h": "b0393a79651e7713f4fad38e678abcc941413d6f98d3c9e9f8bebca824895d2a",
+    "vendor/pose_utils/package.xml": "38f2e642719fd68d8d826751a28115ff6dbb4a14abfcea7a85e65d94739e8980",
+    "vendor/pose_utils/src/pose_utils.cpp": "380e9481167f323ea1facdbbaaffa23c308a42c98257324bc524d7c802f0eb8f",
+    "rviz/upstream-default.rviz": "cd37c862802424a5ce6290108546457f2bddcdc4674dbf4afc91a4aa9f7d7c54"
+  }
+}
