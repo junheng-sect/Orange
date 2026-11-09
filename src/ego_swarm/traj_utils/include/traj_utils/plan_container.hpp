@@ -192,6 +192,8 @@ namespace ego_planner
   {
     /* planning algorithm parameters */
     double max_vel_, max_acc_, max_jerk_; // physical limits
+    double max_vel_z_, max_acc_z_;        // vertical limits (default: same as max_vel_ / max_acc_)
+    double replan_ts_scale;               // knot span = ctrl_pt_dist / path speed limit * this (upstream 1.5)
     double ctrl_pt_dist;                  // distance between adjacient B-spline control points
     double feasibility_tolerance_;        // permitted ratio of vel/acc exceeding limits
     double planning_horizen_;

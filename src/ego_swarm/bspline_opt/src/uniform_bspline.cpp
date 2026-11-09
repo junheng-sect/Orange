@@ -125,10 +125,13 @@ namespace ego_planner
 
   double UniformBspline::getInterval() { return interval_; }
 
-  void UniformBspline::setPhysicalLimits(const double &vel, const double &acc, const double &tolerance)
+  void UniformBspline::setPhysicalLimits(const double &vel, const double &acc, const double &tolerance,
+                                         const double vel_z, const double acc_z)
   {
     limit_vel_ = vel;
     limit_acc_ = acc;
+    limit_vel_z_ = vel_z > 0 ? vel_z : vel;
+    limit_acc_z_ = acc_z > 0 ? acc_z : acc;
     limit_ratio_ = 1.1;
     feasibility_tolerance_ = tolerance;
   }
@@ -139,32 +142,35 @@ namespace ego_planner
 
     Eigen::MatrixXd P = control_points_;
     int dimension = control_points_.rows();
+    // Per-axis limits: x and y share limit_vel_ / limit_acc_, z has its own.
+    Eigen::VectorXd vel_lim = Eigen::VectorXd::Constant(dimension, limit_vel_);
+    Eigen::VectorXd acc_lim = Eigen::VectorXd::Constant(dimension, limit_acc_);
+    if (dimension > 2)
+    {
+      vel_lim(2) = limit_vel_z_;
+      acc_lim(2) = limit_acc_z_;
+    }
 
     /* check vel feasibility and insert points */
-    double max_vel = 0.0;
-    double enlarged_vel_lim = limit_vel_ * (1.0 + feasibility_tolerance_) + 1e-4;
+    double max_vel = 0.0; // largest |v| / limit over the axes that exceed it
     for (int i = 0; i < P.cols() - 1; ++i)
     {
       Eigen::VectorXd vel = p_ * (P.col(i + 1) - P.col(i)) / (u_(i + p_ + 1) - u_(i + 1));
 
-      if (fabs(vel(0)) > enlarged_vel_lim || fabs(vel(1)) > enlarged_vel_lim ||
-          fabs(vel(2)) > enlarged_vel_lim)
+      for (int j = 0; j < dimension; ++j)
       {
-
-        if (show)
-          cout << "[Check]: Infeasible vel " << i << " :" << vel.transpose() << endl;
-        fea = false;
-
-        for (int j = 0; j < dimension; ++j)
+        if (fabs(vel(j)) > vel_lim(j) * (1.0 + feasibility_tolerance_) + 1e-4)
         {
-          max_vel = max(max_vel, fabs(vel(j)));
+          if (show)
+            cout << "[Check]: Infeasible vel " << i << " :" << vel.transpose() << endl;
+          fea = false;
+          max_vel = max(max_vel, fabs(vel(j)) / vel_lim(j));
         }
       }
     }
 
     /* acc feasibility */
-    double max_acc = 0.0;
-    double enlarged_acc_lim = limit_acc_ * (1.0 + feasibility_tolerance_) + 1e-4;
+    double max_acc = 0.0; // largest |a| / limit over the axes that exceed it
     for (int i = 0; i < P.cols() - 2; ++i)
     {
 
@@ -173,24 +179,21 @@ namespace ego_planner
                              (P.col(i + 1) - P.col(i)) / (u_(i + p_ + 1) - u_(i + 1))) /
                             (u_(i + p_ + 1) - u_(i + 2));
 
-      if (fabs(acc(0)) > enlarged_acc_lim || fabs(acc(1)) > enlarged_acc_lim ||
-          fabs(acc(2)) > enlarged_acc_lim)
+      for (int j = 0; j < dimension; ++j)
       {
-
-        if (show)
-          cout << "[Check]: Infeasible acc " << i << " :" << acc.transpose() << endl;
-        fea = false;
-
-        for (int j = 0; j < dimension; ++j)
+        if (fabs(acc(j)) > acc_lim(j) * (1.0 + feasibility_tolerance_) + 1e-4)
         {
-          max_acc = max(max_acc, fabs(acc(j)));
+          if (show)
+            cout << "[Check]: Infeasible acc " << i << " :" << acc.transpose() << endl;
+          fea = false;
+          max_acc = max(max_acc, fabs(acc(j)) / acc_lim(j));
         }
       }
     }
 
     // Only the limits actually exceeded count: a -1 sentinel used to make this sqrt(1 / limit_acc_) whenever
     // only the velocity was infeasible, which is 1.86 for a 0.29 m/s^2 limit.
-    ratio = max(1.0, max(max_vel / limit_vel_, sqrt(max_acc / limit_acc_)));
+    ratio = max(1.0, max(max_vel, sqrt(max_acc)));
 
     return fea;
   }

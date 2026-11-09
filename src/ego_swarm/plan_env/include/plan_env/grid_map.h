@@ -167,6 +167,8 @@ public:
   inline void boundIndex(Eigen::Vector3i& id);
   inline bool isUnknown(const Eigen::Vector3i& id);
   inline bool isUnknown(const Eigen::Vector3d& pos);
+  inline bool isUnknownBlocking(Eigen::Vector3i id);
+  inline bool isUnknownBlocking(const Eigen::Vector3d& pos);
   inline bool isKnownFree(const Eigen::Vector3i& id);
   inline bool isKnownOccupied(const Eigen::Vector3i& id);
 
@@ -184,6 +186,7 @@ public:
   Eigen::Vector3d getOrigin();
   int getVoxelNum();
   bool getOdomDepthTimeout() { return last_cloud_wall_.isZero() || last_odom_wall_.isZero() || (ros::WallTime::now()-last_cloud_wall_).toSec()>mp_.odom_depth_timeout_ || (ros::WallTime::now()-last_odom_wall_).toSec()>mp_.odom_depth_timeout_; }
+  double getOdomDepthTimeoutSec() { return mp_.odom_depth_timeout_; }
 
   typedef std::shared_ptr<GridMap> Ptr;
 
@@ -200,6 +203,7 @@ private:
   ros::ServiceServer check_service_;
   double nav_radius_, nav_half_height_, nav_body_xy_, nav_body_z_;
   Eigen::Vector3d nav_min_, nav_max_;
+  bool nav_unknown_above_free_;
   bool checkPath(traj_utils::CheckTrajectory::Request&, traj_utils::CheckTrajectory::Response&);
   MappingParameters mp_;
   MappingData md_;
@@ -284,6 +288,29 @@ inline bool GridMap::isUnknown(const Eigen::Vector3d& pos) {
   return isUnknown(idc);
 }
 
+// Unknown space blocks navigation, except (allow_unknown_above) an unknown cell whose column below
+// reaches observed free space first: the lidar (vertical FOV -7..+52 deg) never sees straight up and
+// open sky returns nothing, so the column above the vehicle stays unknown outdoors. Not limited to
+// cells above the lidar: during a climb the cells just left behind fall into the downward blind cone
+// and must stay passable. Unknown cells with an obstacle, or nothing observed, below them (occlusion
+// shadows reaching the ground) still block.
+inline bool GridMap::isUnknownBlocking(Eigen::Vector3i id) {
+  boundIndex(id);
+  if (!isUnknown(id)) return false;
+  if (!nav_unknown_above_free_) return true;
+  for (int z = id(2) - 1; z >= 0; --z) {
+    Eigen::Vector3i below(id(0), id(1), z);
+    if (!isUnknown(below)) return md_.occupancy_buffer_inflate_[toAddress(below)] != 0;
+  }
+  return true;
+}
+
+inline bool GridMap::isUnknownBlocking(const Eigen::Vector3d& pos) {
+  Eigen::Vector3i idc;
+  posToIndex(pos, idc);
+  return isUnknownBlocking(idc);
+}
+
 inline bool GridMap::isKnownFree(const Eigen::Vector3i& id) {
   Eigen::Vector3i id1 = id;
   boundIndex(id1);
@@ -343,7 +370,7 @@ inline int GridMap::getInflateOccupancy(Eigen::Vector3d pos) {
 
   if ((pos.array()<nav_min_.array()).any() || (pos.array()>nav_max_.array()).any()) return 1;
   if (pos.z() < mp_.ground_height_ + nav_half_height_ || pos.z() > mp_.virtual_ceil_height_ - nav_half_height_) return 1;
-  return isUnknown(id) || int(md_.occupancy_buffer_inflate_[toAddress(id)]);
+  return isUnknownBlocking(id) || int(md_.occupancy_buffer_inflate_[toAddress(id)]);
 }
 
 inline int GridMap::getOccupancy(Eigen::Vector3i id) {

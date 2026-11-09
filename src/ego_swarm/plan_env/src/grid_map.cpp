@@ -14,6 +14,8 @@ void GridMap::initMap(ros::NodeHandle &nh)
   std::vector<double> body;
   if(!node_.getParam("/drone_nav/config/body_half_extent",body)||body.size()!=3||!(body[0]>0&&body[1]>0&&body[2]>0)) throw std::runtime_error("navigation body_half_extent required");
   nav_body_xy_=std::max(body[0],body[1]);nav_body_z_=body[2];
+  node_.param("/drone_nav/config/allow_unknown_above",nav_unknown_above_free_,false);
+  if(nav_unknown_above_free_) ROS_WARN("[grid_map] allow_unknown_above: unknown cells above observed free space are treated as free");
   check_service_=node_.advertiseService("check_trajectory", &GridMap::checkPath,this);
 
   /* get parameter */
@@ -805,13 +807,22 @@ bool GridMap::checkPath(traj_utils::CheckTrajectory::Request &req, traj_utils::C
    Eigen::Vector3d c=prev+(p-prev)*(double(k)/steps);
    // Obstacles anywhere in the radius/half_height footprint are caught by the inflation layer.
    // Only the measured body volume must be observed free: open sky above the lidar never returns
-   // a ray, so the clearance shell beyond the body may stay unknown outdoors.
-   if(getInflateOccupancy(c)!=0) {res.reason="occupied, unknown or outside flight volume";return true;}
+   // a ray, so the clearance shell beyond the body may stay unknown outdoors. With allow_unknown_above
+   // the body volume may also be unknown when it sits above observed free space (isUnknownBlocking).
+   if(getInflateOccupancy(c)!=0) {
+    if(!isInMap(c) || (c.array()<nav_min_.array()).any() || (c.array()>nav_max_.array()).any() ||
+       c.z()<mp_.ground_height_+nav_half_height_ || c.z()>mp_.virtual_ceil_height_-nav_half_height_)
+      res.reason="outside flight volume";
+    else if(isUnknownBlocking(c)) res.reason="unknown path center";
+    else res.reason="occupied inflated footprint";
+    res.reason += " at "+std::to_string(c.x())+","+std::to_string(c.y())+","+std::to_string(c.z());
+    return true;
+   }
    int r=std::min(ceil(nav_body_xy_/mp_.resolution_),ceil(nav_radius_/mp_.resolution_));
    int h=std::min(ceil(nav_body_z_/mp_.resolution_),ceil(nav_half_height_/mp_.resolution_));
    for(int dx=-r;dx<=r;++dx) for(int dy=-r;dy<=r;++dy) for(int dz=-h;dz<=h;++dz) {
     Eigen::Vector3d q=c+mp_.resolution_*Eigen::Vector3d(dx,dy,dz);
-    if(!isInMap(q)||isUnknown(q)) {res.reason="unknown footprint at "+std::to_string(q.x())+","+std::to_string(q.y())+","+std::to_string(q.z());return true;}
+    if(!isInMap(q)||isUnknownBlocking(q)) {res.reason="unknown footprint at "+std::to_string(q.x())+","+std::to_string(q.y())+","+std::to_string(q.z());return true;}
    }
   }
   prev=p;first=false;

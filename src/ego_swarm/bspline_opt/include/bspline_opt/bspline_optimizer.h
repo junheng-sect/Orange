@@ -165,6 +165,7 @@ namespace ego_planner
     //
     double dist0_, swarm_clearance_; // safe distance
     double max_vel_, max_acc_;       // dynamic limits
+    double max_vel_z_, max_acc_z_;   // vertical limits (default: same as max_vel_ / max_acc_)
 
     int variable_num_;              // optimization variables
     int iter_num_;                  // iteration of the solver

@@ -6,6 +6,35 @@
 namespace ego_planner
 {
 
+  namespace
+  {
+    // Largest speed (or acceleration) along dir that keeps |x|, |y| <= lim_xy and |z| <= lim_z: the limits are
+    // per axis, as the optimizer and checkFeasibility apply them to the control points.
+    double alongLimit(const Eigen::Vector3d &dir, double lim_xy, double lim_z)
+    {
+      double n = dir.norm(), lim = std::numeric_limits<double>::infinity();
+      if (n < 1e-6)
+        return std::min(lim_xy, lim_z);
+      for (int j = 0; j < 3; ++j)
+      {
+        double c = fabs(dir(j)) / n;
+        if (c > 1e-6)
+          lim = std::min(lim, (j == 2 ? lim_z : lim_xy) / c);
+      }
+      return lim;
+    }
+
+    // First 3 control points of a uniform cubic B-spline (knot span dt) that start exactly at p, v, a:
+    // p = (P0 + 4 P1 + P2) / 6, v = (P2 - P0) / (2 dt), a = (P0 - 2 P1 + P2) / dt^2.
+    void pinStart(Eigen::MatrixXd &ctrl_pts, double dt, const Eigen::Vector3d &p, const Eigen::Vector3d &v, const Eigen::Vector3d &a)
+    {
+      const Eigen::Vector3d p1 = p - a * dt * dt / 6.0;
+      ctrl_pts.col(0) = p1 - v * dt + a * dt * dt / 2.0;
+      ctrl_pts.col(1) = p1;
+      ctrl_pts.col(2) = p1 + v * dt + a * dt * dt / 2.0;
+    }
+  } // namespace
+
   // SECTION interfaces for setup and query
 
   EGOPlannerManager::EGOPlannerManager() {}
@@ -24,6 +53,11 @@ namespace ego_planner
     nh.param("manager/planning_horizon", pp_.planning_horizen_, 5.0);
     nh.param("manager/use_distinctive_trajs", pp_.use_distinctive_trajs, false);
     nh.param("manager/drone_id", pp_.drone_id, -1);
+    nh.param("manager/max_vel_z", pp_.max_vel_z_, -1.0);
+    nh.param("manager/max_acc_z", pp_.max_acc_z_, -1.0);
+    nh.param("manager/replan_ts_scale", pp_.replan_ts_scale, 1.5);
+    if (pp_.max_vel_z_ <= 0) pp_.max_vel_z_ = pp_.max_vel_;
+    if (pp_.max_acc_z_ <= 0) pp_.max_acc_z_ = pp_.max_acc_;
 
     local_data_.traj_id_ = 0;
     grid_map_.reset(new GridMap);
@@ -69,7 +103,13 @@ namespace ego_planner
     ros::Duration t_init, t_opt, t_refine;
 
     /*** STEP 1: INIT ***/
-    double ts = (start_pt - local_target_pt).norm() > 0.1 ? pp_.ctrl_pt_dist / pp_.max_vel_ * 1.5 : pp_.ctrl_pt_dist / pp_.max_vel_ * 5; // pp_.ctrl_pt_dist / pp_.max_vel_ is too tense, and will surely exceed the acc/vel limits
+    // Control points end up about ctrl_pt_dist apart along the path, so ts sets the planned path speed. Upstream took
+    // 2/3 of the limit ("ctrl_pt_dist / max_vel_ is too tense"): on goals beyond the first replan every 1 s replan then
+    // budgeted less speed than the drone already had, and the speed sagged mid-leg (11-07 test4 4 m: 0.58 -> 0.31 m/s).
+    // manager/replan_ts_scale sets the factor; the time reallocation below takes what still ends up over the limits.
+    const Eigen::Vector3d dir = local_target_pt - start_pt;
+    const double v_path = alongLimit(dir, pp_.max_vel_, pp_.max_vel_z_), a_path = alongLimit(dir, pp_.max_acc_, pp_.max_acc_z_);
+    double ts = dir.norm() > 0.1 ? pp_.ctrl_pt_dist / v_path * pp_.replan_ts_scale : pp_.ctrl_pt_dist / v_path * 5;
     vector<Eigen::Vector3d> point_set, start_end_derivatives;
     static bool flag_first_call = true, flag_force_polynomial = false;
     bool flag_regenerate = false;
@@ -87,7 +127,7 @@ namespace ego_planner
         PolynomialTraj gl_traj;
 
         double dist = (start_pt - local_target_pt).norm();
-        double time = pow(pp_.max_vel_, 2) / pp_.max_acc_ > dist ? sqrt(dist / pp_.max_acc_) : (dist - pow(pp_.max_vel_, 2) / pp_.max_acc_) / pp_.max_vel_ + 2 * pp_.max_vel_ / pp_.max_acc_;
+        double time = pow(v_path, 2) / a_path > dist ? sqrt(dist / a_path) : (dist - pow(v_path, 2) / a_path) / v_path + 2 * v_path / a_path;
 
         if (!flag_randomPolyTraj)
         {
@@ -224,6 +264,10 @@ namespace ego_planner
 
     Eigen::MatrixXd ctrl_pts, ctrl_pts_temp;
     UniformBspline::parameterizeToBspline(ts, point_set, start_end_derivatives, ctrl_pts);
+    // The least-squares fit only approximates the start too. Start exactly on the state being continued (the
+    // optimizers keep the first 3 points): replans 40 ms apart each started ~3 cm off and, when the executor
+    // skipped the ones in between, stacked past its 4 cm continuity check (11-07 isolated wall detour).
+    pinStart(ctrl_pts, ts, point_set.front(), start_end_derivatives[0], start_end_derivatives[2]);
     if (stop_at_target)
       ctrl_pts.rightCols(3) = local_target_pt.replicate(1, 3);
     bspline_optimizer_->setFixedEnd(stop_at_target);
@@ -297,7 +341,7 @@ namespace ego_planner
     t_start = ros::Time::now();
 
     UniformBspline pos = UniformBspline(ctrl_pts, 3, ts);
-    pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
+    pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_, pp_.max_vel_z_, pp_.max_acc_z_);
 
     /*** STEP 3: REFINE(RE-ALLOCATE TIME) IF NECESSARY ***/
     // Note: Only adjust time in single drone mode. But we still allow drone_0 to adjust its time profile.
@@ -306,14 +350,23 @@ namespace ego_planner
 
       double ratio;
       bool flag_step_2_success = true;
-      if (!pos.checkFeasibility(ratio, false))
+      // The refit after a reallocation only softly keeps the limits (a 0.5 m climb came out 30 % over the
+      // acceleration limit), so check again, up to 3 passes. A later pass failing keeps the previous result.
+      for (int pass = 0; pass < 3 && !pos.checkFeasibility(ratio, false); ++pass)
       {
         cout << "Need to reallocate time." << endl;
 
+        UniformBspline refined = pos; // refineTrajAlgo overwrites its input
+        double ts_refined = ts;
         Eigen::MatrixXd optimal_control_points;
-        flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points, stop_at_target);
-        if (flag_step_2_success)
-          pos = UniformBspline(optimal_control_points, 3, ts);
+        if (!refineTrajAlgo(refined, start_end_derivatives, ratio, ts_refined, optimal_control_points, stop_at_target))
+        {
+          flag_step_2_success = pass > 0;
+          break;
+        }
+        ts = ts_refined;
+        pos = UniformBspline(optimal_control_points, 3, ts);
+        pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_, pp_.max_vel_z_, pp_.max_acc_z_);
       }
 
       if (!flag_step_2_success)
@@ -347,6 +400,14 @@ namespace ego_planner
     // success. YoY
     continous_failures_count_ = 0;
     return true;
+  }
+
+  void EGOPlannerManager::holdPosition(const Eigen::Vector3d &position)
+  {
+    Eigen::MatrixXd points(3, 6);
+    for (int i = 0; i < 6; ++i) points.col(i) = position;
+    // Three 0.1 s spans: short nondegenerate cubic with zero derivatives.
+    updateTrajInfo(UniformBspline(points, 3, 0.1), ros::Time::now());
   }
 
   bool EGOPlannerManager::EmergencyStop(Eigen::Vector3d stop_pos)
@@ -444,7 +505,7 @@ namespace ego_planner
     Eigen::VectorXd time(pt_num - 1);
     for (int i = 0; i < pt_num - 1; ++i)
     {
-      time(i) = (pos.col(i + 1) - pos.col(i)).norm() / (pp_.max_vel_);
+      time(i) = (pos.col(i + 1) - pos.col(i)).norm() / alongLimit(pos.col(i + 1) - pos.col(i), pp_.max_vel_, pp_.max_vel_z_);
     }
 
     time(0) *= 2.0;
@@ -508,7 +569,7 @@ namespace ego_planner
     Eigen::VectorXd time(pt_num - 1);
     for (int i = 0; i < pt_num - 1; ++i)
     {
-      time(i) = (pos.col(i + 1) - pos.col(i)).norm() / (pp_.max_vel_);
+      time(i) = (pos.col(i + 1) - pos.col(i)).norm() / alongLimit(pos.col(i + 1) - pos.col(i), pp_.max_vel_, pp_.max_vel_z_);
     }
 
     time(0) *= 2.0;
@@ -566,6 +627,8 @@ namespace ego_planner
     double time_origin = bspline.getTimeSum();
     int seg_num = bspline.getControlPoint().cols() - 3;
     Eigen::Vector3d end_pt = bspline.getControlPoint().rightCols(1);
+    UniformBspline vel_traj = bspline.getDerivative();
+    const Eigen::Vector3d p0 = bspline.evaluateDeBoorT(0.0), v0 = vel_traj.evaluateDeBoorT(0.0), a0 = vel_traj.getDerivative().evaluateDeBoorT(0.0);
     // double length = bspline.getLength(0.1);
     // int seg_num = ceil(length / pp_.ctrl_pt_dist);
 
@@ -581,7 +644,9 @@ namespace ego_planner
       point_set.push_back(bspline.evaluateDeBoorT(time));
     }
     UniformBspline::parameterizeToBspline(dt, point_set, start_end_derivative, ctrl_pts);
-    // The least-squares refit is only close at the end; put a fixed end back exactly (refine keeps the last 3 points).
+    // The least-squares refit is only close at the ends; put the start state and a fixed end back exactly (refine
+    // keeps the first and last 3 points). Repeated reallocation passes would otherwise add up the start error.
+    pinStart(ctrl_pts, dt, p0, v0, a0);
     if (fixed_end)
       ctrl_pts.rightCols(3) = end_pt.replicate(1, 3);
   }

@@ -82,14 +82,22 @@ namespace ego_planner
     int current_wp_;
 
     bool flag_escape_emergency_;
+    bool have_completed_anchor_{false};
+    Eigen::Vector3d completed_anchor_;
+    bool have_requested_goal_{false};
+    Eigen::Vector3d requested_goal_;
+    ros::WallTime arrived_wall_;
+    void publishLocalTrajectory();
 
     /* ROS utils */
     ros::Subscriber cancel_sub_;
+    ros::Subscriber arrived_sub_;
     ros::Publisher nav_status_pub_;
     ros::WallTime odom_wall_;
     ros::WallTime last_plan_fail_wall_;
     ros::Time odom_stamp_;
     void cancelCallback(const std_msgs::EmptyConstPtr&);
+    void arrivedCallback(const std_msgs::EmptyConstPtr&);
     ros::NodeHandle node_;
     ros::Timer exec_timer_, safety_timer_;
     ros::Subscriber waypoint_sub_, odom_sub_, swarm_trajs_sub_, broadcast_bspline_sub_, trigger_sub_;

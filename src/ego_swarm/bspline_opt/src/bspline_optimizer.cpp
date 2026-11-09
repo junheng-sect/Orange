@@ -16,6 +16,10 @@ namespace ego_planner
     nh.param("optimization/swarm_clearance", swarm_clearance_, -1.0);
     nh.param("optimization/max_vel", max_vel_, -1.0);
     nh.param("optimization/max_acc", max_acc_, -1.0);
+    nh.param("optimization/max_vel_z", max_vel_z_, -1.0);
+    nh.param("optimization/max_acc_z", max_acc_z_, -1.0);
+    if (max_vel_z_ <= 0) max_vel_z_ = max_vel_;
+    if (max_acc_z_ <= 0) max_acc_z_ = max_acc_;
 
     nh.param("optimization/order", order_, 3);
   }
@@ -994,6 +998,8 @@ namespace ego_planner
   void BsplineOptimizer::calcFeasibilityCost(const Eigen::MatrixXd &q, double &cost,
                                              Eigen::MatrixXd &gradient)
   {
+    // Per-axis limits: x and y share the horizontal limit, z has its own (optimization/max_vel_z, max_acc_z).
+    const Eigen::Vector3d vel_lim(max_vel_, max_vel_, max_vel_z_), acc_lim(max_acc_, max_acc_, max_acc_z_);
 
     //#define SECOND_DERIVATIVE_CONTINOUS
 
@@ -1017,18 +1023,18 @@ namespace ego_planner
 
       for (int j = 0; j < 3; j++)
       {
-        if (vi(j) > max_vel_ + demarcation)
+        if (vi(j) > vel_lim(j) + demarcation)
         {
-          double diff = vi(j) - max_vel_;
+          double diff = vi(j) - vel_lim(j);
           cost += (ar * diff * diff + br * diff + cr) * ts_inv3; // multiply ts_inv3 to make vel and acc has similar magnitude
 
           double grad = (2.0 * ar * diff + br) / ts * ts_inv3;
           gradient(j, i + 0) += -grad;
           gradient(j, i + 1) += grad;
         }
-        else if (vi(j) > max_vel_)
+        else if (vi(j) > vel_lim(j))
         {
-          double diff = vi(j) - max_vel_;
+          double diff = vi(j) - vel_lim(j);
           cost += pow(diff, 3) * ts_inv3;
           ;
 
@@ -1037,18 +1043,18 @@ namespace ego_planner
           gradient(j, i + 0) += -grad;
           gradient(j, i + 1) += grad;
         }
-        else if (vi(j) < -(max_vel_ + demarcation))
+        else if (vi(j) < -(vel_lim(j) + demarcation))
         {
-          double diff = vi(j) + max_vel_;
+          double diff = vi(j) + vel_lim(j);
           cost += (al * diff * diff + bl * diff + cl) * ts_inv3;
 
           double grad = (2.0 * al * diff + bl) / ts * ts_inv3;
           gradient(j, i + 0) += -grad;
           gradient(j, i + 1) += grad;
         }
-        else if (vi(j) < -max_vel_)
+        else if (vi(j) < -vel_lim(j))
         {
-          double diff = vi(j) + max_vel_;
+          double diff = vi(j) + vel_lim(j);
           cost += -pow(diff, 3) * ts_inv3;
 
           double grad = -3 * diff * diff / ts * ts_inv3;
@@ -1069,9 +1075,9 @@ namespace ego_planner
 
       for (int j = 0; j < 3; j++)
       {
-        if (ai(j) > max_acc_ + demarcation)
+        if (ai(j) > acc_lim(j) + demarcation)
         {
-          double diff = ai(j) - max_acc_;
+          double diff = ai(j) - acc_lim(j);
           cost += ar * diff * diff + br * diff + cr;
 
           double grad = (2.0 * ar * diff + br) * ts_inv2;
@@ -1079,9 +1085,9 @@ namespace ego_planner
           gradient(j, i + 1) += -2 * grad;
           gradient(j, i + 2) += grad;
         }
-        else if (ai(j) > max_acc_)
+        else if (ai(j) > acc_lim(j))
         {
-          double diff = ai(j) - max_acc_;
+          double diff = ai(j) - acc_lim(j);
           cost += pow(diff, 3);
 
           double grad = 3 * diff * diff * ts_inv2;
@@ -1089,9 +1095,9 @@ namespace ego_planner
           gradient(j, i + 1) += -2 * grad;
           gradient(j, i + 2) += grad;
         }
-        else if (ai(j) < -(max_acc_ + demarcation))
+        else if (ai(j) < -(acc_lim(j) + demarcation))
         {
-          double diff = ai(j) + max_acc_;
+          double diff = ai(j) + acc_lim(j);
           cost += al * diff * diff + bl * diff + cl;
 
           double grad = (2.0 * al * diff + bl) * ts_inv2;
@@ -1099,9 +1105,9 @@ namespace ego_planner
           gradient(j, i + 1) += -2 * grad;
           gradient(j, i + 2) += grad;
         }
-        else if (ai(j) < -max_acc_)
+        else if (ai(j) < -acc_lim(j))
         {
-          double diff = ai(j) + max_acc_;
+          double diff = ai(j) + acc_lim(j);
           cost += -pow(diff, 3);
 
           double grad = -3 * diff * diff * ts_inv2;
@@ -1135,21 +1141,21 @@ namespace ego_planner
       //cout << "temp_v * vi=" ;
       for (int j = 0; j < 3; j++)
       {
-        if (vi(j) > max_vel_)
+        if (vi(j) > vel_lim(j))
         {
           // cout << "zx-todo VEL" << endl;
           // cout << vi(j) << endl;
-          cost += pow(vi(j) - max_vel_, 2) * ts_inv2; // multiply ts_inv3 to make vel and acc has similar magnitude
+          cost += pow(vi(j) - vel_lim(j), 2) * ts_inv2; // multiply ts_inv3 to make vel and acc has similar magnitude
 
-          gradient(j, i + 0) += -2 * (vi(j) - max_vel_) / ts * ts_inv2;
-          gradient(j, i + 1) += 2 * (vi(j) - max_vel_) / ts * ts_inv2;
+          gradient(j, i + 0) += -2 * (vi(j) - vel_lim(j)) / ts * ts_inv2;
+          gradient(j, i + 1) += 2 * (vi(j) - vel_lim(j)) / ts * ts_inv2;
         }
-        else if (vi(j) < -max_vel_)
+        else if (vi(j) < -vel_lim(j))
         {
-          cost += pow(vi(j) + max_vel_, 2) * ts_inv2;
+          cost += pow(vi(j) + vel_lim(j), 2) * ts_inv2;
 
-          gradient(j, i + 0) += -2 * (vi(j) + max_vel_) / ts * ts_inv2;
-          gradient(j, i + 1) += 2 * (vi(j) + max_vel_) / ts * ts_inv2;
+          gradient(j, i + 0) += -2 * (vi(j) + vel_lim(j)) / ts * ts_inv2;
+          gradient(j, i + 1) += 2 * (vi(j) + vel_lim(j)) / ts * ts_inv2;
         }
         else
         {
@@ -1166,23 +1172,23 @@ namespace ego_planner
       //cout << "temp_a * ai=" ;
       for (int j = 0; j < 3; j++)
       {
-        if (ai(j) > max_acc_)
+        if (ai(j) > acc_lim(j))
         {
           // cout << "zx-todo ACC" << endl;
           // cout << ai(j) << endl;
-          cost += pow(ai(j) - max_acc_, 2);
+          cost += pow(ai(j) - acc_lim(j), 2);
 
-          gradient(j, i + 0) += 2 * (ai(j) - max_acc_) * ts_inv2;
-          gradient(j, i + 1) += -4 * (ai(j) - max_acc_) * ts_inv2;
-          gradient(j, i + 2) += 2 * (ai(j) - max_acc_) * ts_inv2;
+          gradient(j, i + 0) += 2 * (ai(j) - acc_lim(j)) * ts_inv2;
+          gradient(j, i + 1) += -4 * (ai(j) - acc_lim(j)) * ts_inv2;
+          gradient(j, i + 2) += 2 * (ai(j) - acc_lim(j)) * ts_inv2;
         }
-        else if (ai(j) < -max_acc_)
+        else if (ai(j) < -acc_lim(j))
         {
-          cost += pow(ai(j) + max_acc_, 2);
+          cost += pow(ai(j) + acc_lim(j), 2);
 
-          gradient(j, i + 0) += 2 * (ai(j) + max_acc_) * ts_inv2;
-          gradient(j, i + 1) += -4 * (ai(j) + max_acc_) * ts_inv2;
-          gradient(j, i + 2) += 2 * (ai(j) + max_acc_) * ts_inv2;
+          gradient(j, i + 0) += 2 * (ai(j) + acc_lim(j)) * ts_inv2;
+          gradient(j, i + 1) += -4 * (ai(j) + acc_lim(j)) * ts_inv2;
+          gradient(j, i + 2) += 2 * (ai(j) + acc_lim(j)) * ts_inv2;
         }
         else
         {

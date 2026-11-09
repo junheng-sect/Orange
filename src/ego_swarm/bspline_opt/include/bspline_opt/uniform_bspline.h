@@ -27,6 +27,7 @@ namespace ego_planner
     Eigen::MatrixXd getDerivativeControlPoints();
 
     double limit_vel_, limit_acc_, limit_ratio_, feasibility_tolerance_; // physical limits and time adjustment ratio
+    double limit_vel_z_, limit_acc_z_;                                   // vertical limits (default: same as above)
 
   public:
     UniformBspline() {}
@@ -62,7 +63,8 @@ namespace ego_planner
 
     /* check feasibility, adjust time */
 
-    void setPhysicalLimits(const double &vel, const double &acc, const double &tolerance);
+    void setPhysicalLimits(const double &vel, const double &acc, const double &tolerance,
+                           const double vel_z = -1.0, const double acc_z = -1.0); // vel/acc: x and y
     bool checkFeasibility(double &ratio, bool show = false);
     void lengthenTime(const double &ratio, bool to_end = false); // to_end: also stretch the end segments (end at rest)
 

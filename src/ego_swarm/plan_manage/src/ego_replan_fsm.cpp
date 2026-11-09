@@ -8,6 +8,7 @@ namespace ego_planner
   {
     current_wp_ = 0;
     cancel_sub_=nh.subscribe("cancel",1,&EGOReplanFSM::cancelCallback,this);
+    arrived_sub_=nh.subscribe("/drone_nav/arrived",1,&EGOReplanFSM::arrivedCallback,this);
     nav_status_pub_=nh.advertise<std_msgs::String>("nav_status",1);
     odom_pos_.setZero();odom_vel_.setZero();odom_acc_.setZero();odom_orient_.setIdentity();
     flag_escape_emergency_=true;
@@ -196,8 +197,27 @@ namespace ego_planner
 
   void EGOReplanFSM::cancelCallback(const std_msgs::EmptyConstPtr&)
   {
+    // Mission can settle within its 15 cm tolerance before the spline's exact
+    // endpoint. Preserve an explicitly confirmed arrival across either ordering
+    // of its arrived/cancel publications; an unrelated cancellation clears it.
+    if (exec_state_ != WAIT_TARGET &&
+        (arrived_wall_.isZero() || (ros::WallTime::now()-arrived_wall_).toSec()>0.3))
+      have_completed_anchor_ = false;
     have_target_=false;have_trigger_=false;have_new_target_=false;
     exec_state_=WAIT_TARGET;planner_manager_->local_data_.start_time_=ros::Time(0);
+  }
+
+  void EGOReplanFSM::arrivedCallback(const std_msgs::EmptyConstPtr&)
+  {
+    auto &info = planner_manager_->local_data_;
+    if (!have_requested_goal_ || !have_odom_ || info.traj_id_ <= 0 || info.duration_ <= 0.0 ||
+        (ros::WallTime::now()-odom_wall_).toSec()>0.3 ||
+        (odom_pos_-requested_goal_).norm()>0.15 || odom_vel_.norm()>0.1 ||
+        (info.position_traj_.evaluateDeBoorT(info.duration_)-requested_goal_).norm()>1e-6)
+      return;
+    arrived_wall_ = ros::WallTime::now();
+    completed_anchor_ = requested_goal_;
+    have_completed_anchor_ = true;
   }
 
   void EGOReplanFSM::triggerCallback(const geometry_msgs::PoseStampedPtr &msg)
@@ -218,7 +238,26 @@ namespace ego_planner
     if(msg->header.frame_id!="drone_odom" || !end_wp.allFinite() || !have_odom_ || planner_manager_->grid_map_->getOdomDepthTimeout() || planner_manager_->grid_map_->getInflateOccupancy(end_wp)!=0) return;
     have_trigger_=true;
     plan_fail_count_=0; // a new goal starts with fast retries again
+    requested_goal_ = end_wp; have_requested_goal_ = true;
+    arrived_wall_ = ros::WallTime();
 
+    if (have_completed_anchor_ && exec_state_ == WAIT_TARGET &&
+        (end_wp - completed_anchor_).norm() <= 1e-6 &&
+        (odom_pos_ - end_wp).norm() <= 0.15 && odom_vel_.norm() <= 0.1 &&
+        (ros::WallTime::now() - odom_wall_).toSec() <= 0.3)
+    {
+      // Position stays at the last completed reference; the executor owns yaw.
+      // Use a fresh trajectory id and the normal validation/heartbeat path.
+      planner_manager_->holdPosition(end_wp);
+      end_pt_ = local_target_pt_ = end_wp;
+      end_vel_.setZero(); local_target_vel_.setZero();
+      have_target_ = true; have_new_target_ = false;
+      flag_escape_emergency_ = true;
+      publishLocalTrajectory();
+      changeFSMExecState(EXEC_TRAJ, "HOLD_GOAL");
+      return;
+    }
+    have_completed_anchor_ = false;
     planNextWaypoint(end_wp);
   }
 
@@ -451,7 +490,7 @@ namespace ego_planner
 
     std_msgs::String nav;
     nav.data=std::to_string(int(exec_state_));nav_status_pub_.publish(nav);
-    if(have_target_ && ((ros::WallTime::now()-odom_wall_).toSec()>0.3 || planner_manager_->grid_map_->getOdomDepthTimeout())) {
+    if(have_target_ && ((ros::WallTime::now()-odom_wall_).toSec()>planner_manager_->grid_map_->getOdomDepthTimeoutSec() || planner_manager_->grid_map_->getOdomDepthTimeout())) {
       have_target_=false;have_trigger_=false;exec_state_=WAIT_TARGET;
       nav.data="FAULT";nav_status_pub_.publish(nav);
     }
@@ -584,6 +623,8 @@ namespace ego_planner
       {
         if (t_cur > info->duration_ - 1e-2)
         {
+          completed_anchor_ = end_pt_;
+          have_completed_anchor_ = true;
           have_target_ = false;
           have_trigger_ = false;
 
@@ -898,6 +939,12 @@ namespace ego_planner
 
     planner_manager_->EmergencyStop(stop_pos);
 
+    publishLocalTrajectory();
+    return true;
+  }
+
+  void EGOReplanFSM::publishLocalTrajectory()
+  {
     auto info = &planner_manager_->local_data_;
 
     /* publish traj */
@@ -925,8 +972,6 @@ namespace ego_planner
     }
 
     bspline_pub_.publish(bspline);
-
-    return true;
   }
 
   void EGOReplanFSM::getLocalTarget()
