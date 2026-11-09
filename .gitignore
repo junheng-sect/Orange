@@ -21,3 +21,8 @@ devel/
 # Python bytecode caches, regenerated on every run.
 __pycache__/
 *.pyc
+
+# Private EGO RViz layouts and local map caches.
+tools/ego_rviz/home/
+tools/ego_rviz/runtime/
+tools/ego_rviz/maps/
