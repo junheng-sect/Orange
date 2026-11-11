@@ -6,11 +6,12 @@ from std_msgs.msg import String,Empty
 from std_srvs.srv import Trigger,TriggerResponse
 from mavros_msgs.msg import PositionTarget,State,EstimatorStatus,ExtendedState
 from drone_navigation.msg import NavigationCommand
-from .core import Alignment,brake,deployment,yaw,heading,rz,competing_publishers,climb_profile
+from .core import Alignment,brake,deployment,yaw,heading,rz,competing_publishers,climb_profile,descend_profile
 from .ros_common import *
 
 STOPPED='task stopped; prepare before next route'
 GROUND_DROP=.3 # landed, before the climb: stream the hold this far below the vehicle so PX4 does not start its takeoff
+LAND_PRESS=.02 # slow landing: stream the hold this far below the ground reference so the vehicle settles instead of hovering
 
 class Gateway:
     def __init__(self):
@@ -29,6 +30,11 @@ class Gateway:
         self.ext=None;self.ext_at=0.;self.takeoff_mode=False;self.climb=None;self.climb_end=None;self.takeoff_state='';self.ready=False
         self.takeoff_h=float(self.c.get('takeoff_height',1.));self.takeoff_v=float(self.c.get('max_vel_z',.3));self.takeoff_a=float(self.c.get('max_acc_z',.3))
         if not .3<=self.takeoff_h<=2.5 or not 0.<self.takeoff_v<=1. or not 0.<self.takeoff_a<=1.:raise ValueError('takeoff_height must be in [0.3, 2.5] m, max_vel_z/max_acc_z in (0, 1]')
+        # Slow landing: land_start() lets the hold stream descend at land_vel down to the ground reference recorded
+        # at prepare_takeoff, so the pilot is not forced into PX4's AUTO.LAND descent speed.
+        self.ground_z=None;self.land=None;self.land_state=''
+        self.land_v=float(rospy.get_param('~land_vel',.1))
+        if not 0.<self.land_v<=.5:raise ValueError('land_vel must be in (0, 0.5] m/s')
         self.preview=rospy.Publisher('/drone_nav/setpoint_preview',PositionTarget,queue_size=1)
         self.output=rospy.Publisher('/mavros/setpoint_raw/local',PositionTarget,queue_size=1) if self.real else None
         self.stat=rospy.Publisher('/drone_nav/gateway_status',String,queue_size=1)
@@ -48,6 +54,7 @@ class Gateway:
         rospy.Service('/drone_nav/prepare',Trigger,self.prepare)
         rospy.Service('/drone_nav/prepare_takeoff',Trigger,self.prepare_takeoff)
         rospy.Service('/drone_nav/takeoff',Trigger,self.takeoff)
+        rospy.Service('/drone_nav/land',Trigger,self.land_start)
         loop(self.ownership,2);loop(self.tick)
     def ownership(self):
         try:
@@ -98,7 +105,7 @@ class Gateway:
                 self.goal_stamp=m.header.stamp;self.expected_gen=m.header.seq
     def on_cmd(self,m):
         with self.lock:
-            if self.prepared and not self.fault and self.goal_stamp is not None and m.generation==self.expected_gen and m.header.stamp>=self.goal_stamp and m.header.frame_id=='drone_odom' and fresh(m,time.monotonic()):
+            if self.prepared and not self.fault and self.land is None and self.goal_stamp is not None and m.generation==self.expected_gen and m.header.stamp>=self.goal_stamp and m.header.frame_id=='drone_odom' and fresh(m,time.monotonic()):
                 if not np.isfinite(xyz(m.position)).all() or not np.isfinite(xyz(m.velocity)).all() or not np.isfinite(xyz(m.acceleration)).all() or not math.isfinite(m.yaw) or np.linalg.norm(xyz(m.velocity))>self.c['max_vel']*1.001 or np.linalg.norm(xyz(m.acceleration))>self.c['max_acc']*1.001:
                     self.fail('invalid navigation command');return
                 self.cmd=m;self.cmd_at=time.monotonic();self.running=True
@@ -124,14 +131,15 @@ class Gateway:
     def fail(self,reason):
         if not self.fault:
             self.fault=reason;self.capture_brake();self.running=False;self.cmd=None;self.cancel.publish(Empty())
-            self.climb=None
+            self.climb=None;self.land=None
             if self.takeoff_state:self.takeoff_state='STOPPED'
+            if self.land_state:self.land_state='STOPPED'
     def prepare(self,_):
         with self.lock:
             if self.alignment.r is None or not fresh(self.px,self.px_at,self.odom_age) or not self.input_ok or not self.owners_ok or time.monotonic()-self.owners_at>1.5:
                 return TriggerResponse(False,'alignment, inputs or exclusive ownership not ready')
             self.fault='';self.prepared=True;self.running=False;self.cmd=None;self.goal_stamp=None;self.expected_gen=None;self.prepared_at=time.monotonic();self.terminal=None;self.capture_hold()
-            self.takeoff_mode=False;self.climb=None;self.climb_end=None;self.takeoff_state=''
+            self.takeoff_mode=False;self.climb=None;self.climb_end=None;self.takeoff_state='';self.land=None;self.land_state=''
             return TriggerResponse(True,'prepared: hold stream; manually select OFFBOARD, then start route')
     def prepare_takeoff(self,_):
         with self.lock:
@@ -140,7 +148,7 @@ class Gateway:
                 return TriggerResponse(False,'arm on the ground outside OFFBOARD first')
             r=self.prepare(None)
             if r.success:
-                self.takeoff_mode=True;self.takeoff_state='GROUND'
+                self.takeoff_mode=True;self.takeoff_state='GROUND';self.ground_z=float(self.hold_p[2])
                 r.message='prepared for takeoff: hold streamed %.1f m below the vehicle; select OFFBOARD, then call takeoff'%GROUND_DROP
             return r
     def takeoff(self,_):
@@ -150,10 +158,23 @@ class Gateway:
             if not self.on_ground():return TriggerResponse(False,'PX4 does not report landed')
             self.climb=(time.monotonic(),self.hold_p.copy());self.takeoff_state='CLIMBING'
             return TriggerResponse(True,'climbing %.2f m at %.2f m/s'%(self.takeoff_h,self.takeoff_v))
+    def land_start(self,_):
+        with self.lock:
+            if not self.ready:return TriggerResponse(False,'not READY in OFFBOARD')
+            if self.land is not None:return TriggerResponse(False,'already descending')
+            if self.ground_z is None:return TriggerResponse(False,'no ground reference: prepare a takeoff on the ground first')
+            z1=float(self.ground_z)-LAND_PRESS
+            if self.hold_p[2]-z1<.05:return TriggerResponse(False,'already at the ground reference')
+            self.land=(time.monotonic(),self.hold_p.copy(),z1);self.land_state='DESCENDING'
+            return TriggerResponse(True,'descending %.2f m at %.2f m/s'%(self.hold_p[2]-z1,self.land_v))
     def estimator_ok(self):
         e=self.est
         # const_pos also means "vehicle at rest" (EV still fused): accepted only while landed and preparing a takeoff.
-        return fresh(e,self.est_at,2.) and e.attitude_status_flag and e.velocity_horiz_status_flag and e.velocity_vert_status_flag and (e.pos_horiz_rel_status_flag or e.pos_horiz_abs_status_flag) and (e.pos_vert_abs_status_flag or e.pos_vert_agl_status_flag) and (not e.const_pos_mode_status_flag or (self.takeoff_mode and self.on_ground()))
+        return fresh(e,self.est_at,2.) and e.attitude_status_flag and e.velocity_horiz_status_flag and e.velocity_vert_status_flag and (e.pos_horiz_rel_status_flag or e.pos_horiz_abs_status_flag) and (e.pos_vert_abs_status_flag or e.pos_vert_agl_status_flag) and (not e.const_pos_mode_status_flag or (self.takeoff_mode and self.on_ground()) or (self.land_state in ('DESCENDING','TOUCHED') and self.near_ground()))
+    def near_ground(self):
+        # const_pos arrives a moment before PX4's landed state at touchdown; inside the last 10 cm of a
+        # descent it is expected, not an estimator fault.
+        return self.px is not None and self.ground_z is not None and xyz(self.px.pose.pose.position)[2]-self.ground_z<.10
     def tick(self):
         with self.lock:
             wall=time.monotonic();now=rospy.Time.now().to_sec()
@@ -174,11 +195,19 @@ class Gateway:
             if self.prepared and pxok and not self.was_offboard:self.capture_hold()
             ready=self.ready=self.prepared and not self.fault and pxok and (not self.real or (self.was_offboard and wall-self.state_at<2. and wall-self.prepared_at>=1.))
             if self.climb is not None and not ready:self.climb=None;self.takeoff_state='STOPPED' # never resume a climb clock that kept running
-            status(self.stat,'READY' if ready else ('FAULT' if self.fault else 'PREPARED' if self.prepared else 'ALIGNING'),reason=self.fault,real_output=self.real,takeoff=self.takeoff_state)
+            if self.land is not None and not ready:self.land=None;self.land_state='STOPPED' # never resume a descent clock that kept running
+            status(self.stat,'READY' if ready else ('FAULT' if self.fault else 'PREPARED' if self.prepared else 'ALIGNING'),reason=self.fault,real_output=self.real,takeoff=self.takeoff_state,land=self.land_state)
             if not self.prepared or not pxok or self.hold_p is None:return
             if self.real and (self.state is None or wall-self.state_at>2. or not self.state.connected):return
             acc=None
-            if ready and self.running and self.cmd is not None:
+            if ready and self.land is not None:
+                # The descent owns the stream while it runs: velocity-limited, ending at the ground reference and
+                # holding there, so PX4's own land detector and COM_DISARM_LAND finish the touchdown.
+                t0,p0,z1=self.land;s,ds=descend_profile(wall-t0,self.land_v,self.takeoff_a)
+                p=p0.copy();p[2]=max(z1,p0[2]-s);v=np.array([0.,0.,-ds]);a=self.hold_yaw
+                self.hold_p,self.hold_v=p.copy(),v.copy()
+                if p[2]<=z1+1e-9:self.land=None;self.land_state='TOUCHED';self.hold_v=np.zeros(3);v=np.zeros(3)
+            elif ready and self.running and self.cmd is not None:
                 r,t=self.alignment.r,self.alignment.t;p=r@xyz(self.cmd.position)+t;v=r@xyz(self.cmd.velocity);acc=r@xyz(self.cmd.acceleration);a=heading(r,self.cmd.yaw)
                 self.terminal=(p,a,wall) if self.cmd.terminal else None
             elif ready and self.climb is not None:

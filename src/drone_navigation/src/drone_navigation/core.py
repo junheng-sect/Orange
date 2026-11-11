@@ -128,6 +128,14 @@ def climb_profile(t,h,v,a):
     return (h-.5*a*r*r,a*r,-a if r>0 else 0.,T)
 
 
+def descend_profile(t, v, a=.3):
+    """Distance travelled and descent speed at t for a descent that holds speed v after ramping at a (no end height)."""
+    if not (v > 0 and a > 0):
+        raise ValueError('invalid descent profile')
+    t, t1 = max(0., t), v / a
+    return (.5*a*t*t, a*t) if t < t1 else (v*v/(2*a)+v*(t-t1), v)
+
+
 def deployment(c):
     if c.get('deployment_verified') is not True:raise ValueError('deployment geometry not verified')
     for key in ('lever_body','sensor_offset_imu','body_half_extent','bounds_min','bounds_max'):

@@ -69,6 +69,7 @@ RViz 单点发到 `/drone_nav/goal`，PoseStamped 的 frame_id 必须为 drone_m
 - `/drone_nav/cancel`：std_msgs/Empty，取消规划和执行；action cancel 同样生效。
 - `/drone_nav/arrived`：std_msgs/Empty，任务层判到点后和 cancel 一起发。网关据此悬停在最后发出的轨迹终点（即目标），而不是判到点那一刻飞机所在的位置；其他原因停止（故障、action 取消、健康检查失败）仍按当前位置和速度减速保持。
 - prepare 锁定本轮坐标对齐；对齐残差超过 0.15m/3°即故障。不会在线漂移转换来移动目标。
+- `/drone_nav/land`：慢速降落。要求 READY（OFFBOARD）且本次运行已在地面 `prepare_takeoff`（据此记录地面参考）；保持流以 `~land_vel`（默认 0.1 m/s，范围 0~0.5）限速下降到地面参考下 2 cm 并停住，由 PX4 着地检测和 `COM_DISARM_LAND` 收尾，不切 `AUTO.LAND`。状态见 `/drone_nav/gateway_status` 的 `land`（`DESCENDING`/`TOUCHED`/`STOPPED`）；退出 OFFBOARD、网关故障或 READY 丢失即停止下降，按最后下降点减速保持，不续降。
 - 平移保持段起始航向，终点停稳后按 10°/s 转到目标 yaw；0.15m、0.1m/s、5°内持续 1s判到点。
 - 未知/占据/越界目标拒绝执行；射线地图保留占据证据，只有实际自由射线降低其占据概率。检查整条剩余轨迹：`body_half_extent` 机体框内必须已观测为空闲；外层到 radius/half_height 的余量只拒绝观测到的占据（膨胀层），未知不拒绝——室外头顶开阔天空没有回波，余量壳顶层会一直是未知（2026-11-05 实飞回放：+0.3m 层未知导致执行器 3s 超时）。
 - 点云/状态/规划心跳超时、时钟回退、退出 OFFBOARD、action取消都会清旧轨迹。输入恢复不自动恢复故障任务，需 prepare 和新任务。
