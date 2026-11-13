@@ -792,6 +792,22 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
   last_cloud_stamp_=img->header.stamp; last_cloud_wall_=ros::WallTime::now();md_.has_cloud_=true;
 }
 
+std::string GridMap::unknownColumnReason(const Eigen::Vector3d &pos)
+{
+ if(!isInMap(pos)) return "outside map";
+ if(!nav_unknown_above_free_) return "allow_unknown_above=false";
+ Eigen::Vector3i id;posToIndex(pos,id);
+ for(int z=id.z()-1;z>=0;--z) {
+  Eigen::Vector3i below(id.x(),id.y(),z);
+  if(isUnknown(below)) continue;
+  Eigen::Vector3d p;indexToPos(below,p);
+  return "first observed below at "+std::to_string(p.x())+","+std::to_string(p.y())+","+std::to_string(p.z())+
+    " raw="+(getOccupancy(below)?"occupied":"free")+
+    " inflated="+std::to_string(int(md_.occupancy_buffer_inflate_[toAddress(below)]));
+ }
+ return "no observed voxel below in column "+std::to_string(id.x())+","+std::to_string(id.y());
+}
+
 bool GridMap::checkPath(traj_utils::CheckTrajectory::Request &req, traj_utils::CheckTrajectory::Response &res)
 {
  res.valid=false;res.reason="stale map or invalid frame";
@@ -813,16 +829,22 @@ bool GridMap::checkPath(traj_utils::CheckTrajectory::Request &req, traj_utils::C
     if(!isInMap(c) || (c.array()<nav_min_.array()).any() || (c.array()>nav_max_.array()).any() ||
        c.z()<mp_.ground_height_+nav_half_height_ || c.z()>mp_.virtual_ceil_height_-nav_half_height_)
       res.reason="outside flight volume";
-    else if(isUnknownBlocking(c)) res.reason="unknown path center";
-    else res.reason="occupied inflated footprint";
+    else {
+      Eigen::Vector3i id;posToIndex(c,id);
+      // Known collisions must never be hidden by an unknown centre (the caller
+      // may defer observing a future goal, but must still reject known obstacles).
+      if(md_.occupancy_buffer_inflate_[toAddress(id)]) res.reason="occupied inflated footprint";
+      else res.reason="unknown path center";
+    }
     res.reason += " at "+std::to_string(c.x())+","+std::to_string(c.y())+","+std::to_string(c.z());
+    if(isUnknownBlocking(c)) res.reason += "; "+unknownColumnReason(c);
     return true;
    }
    int r=std::min(ceil(nav_body_xy_/mp_.resolution_),ceil(nav_radius_/mp_.resolution_));
    int h=std::min(ceil(nav_body_z_/mp_.resolution_),ceil(nav_half_height_/mp_.resolution_));
    for(int dx=-r;dx<=r;++dx) for(int dy=-r;dy<=r;++dy) for(int dz=-h;dz<=h;++dz) {
     Eigen::Vector3d q=c+mp_.resolution_*Eigen::Vector3d(dx,dy,dz);
-    if(!isInMap(q)||isUnknownBlocking(q)) {res.reason="unknown footprint at "+std::to_string(q.x())+","+std::to_string(q.y())+","+std::to_string(q.z());return true;}
+    if(!isInMap(q)||isUnknownBlocking(q)) {res.reason="unknown footprint at "+std::to_string(q.x())+","+std::to_string(q.y())+","+std::to_string(q.z())+"; "+unknownColumnReason(q);return true;}
    }
   }
   prev=p;first=false;

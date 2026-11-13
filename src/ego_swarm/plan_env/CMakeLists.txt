@@ -63,3 +63,11 @@ target_link_libraries(obj_generator
 set_property(TARGET plan_env PROPERTY CXX_STANDARD 14)
 
 add_dependencies(plan_env ${catkin_EXPORTED_TARGETS})
+
+if(CATKIN_ENABLE_TESTING)
+  find_package(rostest REQUIRED)
+  add_rostest_gtest(test_unknown_space test/unknown_space.test test/test_unknown_space.cpp)
+  if(TARGET test_unknown_space)
+    target_link_libraries(test_unknown_space plan_env ${catkin_LIBRARIES})
+  endif()
+endif()

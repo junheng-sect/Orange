@@ -1,0 +1,3 @@
+<launch>
+  <test test-name="unknown_space" pkg="plan_env" type="test_unknown_space" time-limit="30"/>
+</launch>

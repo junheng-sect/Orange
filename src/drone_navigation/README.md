@@ -69,16 +69,17 @@ RViz 单点发到 `/drone_nav/goal`，PoseStamped 的 frame_id 必须为 drone_m
 - `/drone_nav/cancel`：std_msgs/Empty，取消规划和执行；action cancel 同样生效。
 - `/drone_nav/arrived`：std_msgs/Empty，任务层判到点后和 cancel 一起发。网关据此悬停在最后发出的轨迹终点（即目标），而不是判到点那一刻飞机所在的位置；其他原因停止（故障、action 取消、健康检查失败）仍按当前位置和速度减速保持。
 - prepare 锁定本轮坐标对齐；对齐残差超过 0.15m/3°即故障。不会在线漂移转换来移动目标。
-- `/drone_nav/land`：慢速降落。要求 READY（OFFBOARD）且本次运行已在地面 `prepare_takeoff`（据此记录地面参考）；保持流以 `~land_vel`（默认 0.1 m/s，范围 0~0.5）限速下降到地面参考下 2 cm 并停住，由 PX4 着地检测和 `COM_DISARM_LAND` 收尾，不切 `AUTO.LAND`。状态见 `/drone_nav/gateway_status` 的 `land`（`DESCENDING`/`TOUCHED`/`STOPPED`）；退出 OFFBOARD、网关故障或 READY 丢失即停止下降，按最后下降点减速保持，不续降。
+- `/drone_nav/land`：要求 READY（OFFBOARD）且本轮在地面 `prepare_takeoff` 记录过参考。先按 `~land_vel`（默认 0.1 m/s，0<值≤0.5）保持 XY/yaw 慢降；低于参考上方15 cm、竖直速度≤0.20 m/s、水平速度≤0.25 m/s连续3 s后进入 `PRESSING`，采用0.35 m/s Z速度下压、忽略Z位置闭环，最长5 s。低/慢条件只允许下压，不当成触地。只有新鲜PX4着地确认触发 `TOUCHED`，冻结最后目标、速度清零，然后每秒最多一次普通 `/mavros/cmd/arming(value=False)`，非阻塞且不重叠；最长5 s未上锁则STOPPED并提示。真实已着地且已上锁后才为 `DONE`。从不发value=True，不用force disarm。原地面下10 cm指令位置限幅保留；到位置限幅后仍以慢降速度接近接地条件，最多2 s，不能清零下降速度；Z速度控制期间该位置字段仅为诊断，实测达到地面下10 cm立即停止并按实测位置保持。下压时速度异常、定位/反馈失效或飞手切出OFFBOARD均停止，不续降、不切AUTO.LAND。
 - 平移保持段起始航向，终点停稳后按 10°/s 转到目标 yaw；0.15m、0.1m/s、5°内持续 1s判到点。
 - 未知/占据/越界目标拒绝执行；射线地图保留占据证据，只有实际自由射线降低其占据概率。检查整条剩余轨迹：`body_half_extent` 机体框内必须已观测为空闲；外层到 radius/half_height 的余量只拒绝观测到的占据（膨胀层），未知不拒绝——室外头顶开阔天空没有回波，余量壳顶层会一直是未知（2026-11-05 实飞回放：+0.3m 层未知导致执行器 3s 超时）。
+- 室外显式启用 `allow_unknown_above` 时，未知格仅在同列向下首先遇到原始占据证据为空闲时放行；下方原始障碍或整列未观测仍阻挡。支持格附近的地面/障碍膨胀不向上无限投影，目标当前位置的膨胀碰撞检查保留。室内默认关闭此例外。
 - 点云/状态/规划心跳超时、时钟回退、退出 OFFBOARD、action取消都会清旧轨迹。输入恢复不自动恢复故障任务，需 prepare 和新任务。
 - 导航故障且 PX4 估计仍有效时生成减速保持；这不是对突现障碍的独立物理制动保证。PX4 定位无效时停止依赖其位置的输出。
 - PX4 的 `/local_position/odom` 速度为机体系；导航坐标对齐包含同步参考点补偿。`FRAME_LOCAL_NED` 消息填 ENU，由 MAVROS 转换，不能再次手动交换坐标。
 - 执行轨迹时设定值为位置 + 速度 + 加速度前馈（type_mask 2048，只忽略 yaw rate），加速度取 EGO 样条二阶导；保持 / 刹停流仍为位置 + 速度（2496）。
 
 局部地图是有界栅格，默认20×20×6m/0.1m（上限600万格）；大仓库应拆分已验证路线范围，当前不做地图滑动和通道图搜索。
-全路线目标预检必须已观测到；不会飞入未知区域去探索。启动重定位仍为一次性，局部避障不解决长期绝对漂移。
+普通整路线预检仍要求目标已观测到；不会飞入未知区域去探索。启动重定位仍为一次性，局部避障不解决长期绝对漂移。
 传感器盲区、玻璃、细杆、动态障碍、制动距离和实测CPU负载均需现场验收。
 
 ## 验证与证据边界
@@ -109,3 +110,10 @@ bash /home/orangepi/orange/src/drone_navigation/test/run_isolated.sh
 运行中意外返回 WAIT_TARGET 会取消执行；初次等待规划与 EGO 正常提前最多10ms完成的终点边界允许通过。
 
 手持预览待验收：保持未知空间拒绝策略，统计 `unknown footprint` 拒绝次数并结合爬升段和雷达可见区域检查。本轮没有开展实机预览。
+
+`test10` 按阶段使用上述检查：地面要求起飞点可用，并拒绝已知占据/越界的后续目标；仅未观测到的后续目标可以待核验。每段出发前必须由当前实时地图证明该目标包络可用，否则保持悬停、有限等待后终止，不向该目标飞行。已知膨胀碰撞优先于未知原因报告，避免待核验逻辑掩盖障碍。
+
+降落状态额外记录 `land_target_z`（位置字段）、`land_ground_z`、`land_limit_z`、`land_limit_reached`、`land_z_velocity_only`（为true时Z位置字段不参与控制）、`land_command_vz`、`land_disarm_requests`、`land_disarm_result`。状态为 DESCENDING/PRESSING/TOUCHED/DONE/STOPPED；降落及等待上锁时独占设定值。服务ACK不算上锁，仍以新鲜实际FCU状态确认。
+
+末段参考 [land_with_tracking_v2](https://github.com/junheng-sect/ROS2PUBLIC/blob/rasip_pi/src/land_with_tracking_v2/land_with_tracking_v2/land_with_tracking_v2_node.py)，保留本项目原0.1 m/s慢降、XY/yaw保持及故障停止。参考项目的0.35 m/s也是下降速度指令，不是直接最低油门；本项目仅在PX4确认着地后普通上锁，未采用其低高度启发式直接请求上锁。
+独立ROS验证：`bash /home/orangepi/orange/src/drone_navigation/test/run_landing_isolated.sh /tmp/landing_check`，只用私有Master与模拟上锁服务，不输出实机设定值。

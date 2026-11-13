@@ -72,4 +72,6 @@
   <depend>cv_bridge</depend>
   <depend>message_filters</depend>
   <depend>traj_utils</depend>
+  <test_depend>rostest</test_depend>
+  <test_depend>gtest</test_depend>
 </package>

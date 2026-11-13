@@ -193,6 +193,7 @@ public:
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
 private:
+  friend class GridMapUnknownSpaceTest;
   typedef message_filters::sync_policies::ExactTime<sensor_msgs::PointCloud2,nav_msgs::Odometry> CloudOdomPolicy;
   std::shared_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> nav_cloud_sub_;
   std::shared_ptr<message_filters::Subscriber<nav_msgs::Odometry>> nav_sensor_sub_;
@@ -204,6 +205,7 @@ private:
   double nav_radius_, nav_half_height_, nav_body_xy_, nav_body_z_;
   Eigen::Vector3d nav_min_, nav_max_;
   bool nav_unknown_above_free_;
+  std::string unknownColumnReason(const Eigen::Vector3d& pos);
   bool checkPath(traj_utils::CheckTrajectory::Request&, traj_utils::CheckTrajectory::Response&);
   MappingParameters mp_;
   MappingData md_;
@@ -292,15 +294,17 @@ inline bool GridMap::isUnknown(const Eigen::Vector3d& pos) {
 // reaches observed free space first: the lidar (vertical FOV -7..+52 deg) never sees straight up and
 // open sky returns nothing, so the column above the vehicle stays unknown outdoors. Not limited to
 // cells above the lidar: during a climb the cells just left behind fall into the downward blind cone
-// and must stay passable. Unknown cells with an obstacle, or nothing observed, below them (occlusion
-// shadows reaching the ground) still block.
+// and must stay passable. Use RAW evidence for the supporting voxel: a known-free ray near the
+// ground may lie inside the ground's inflation shell. Projecting that shell upward would turn it
+// into an infinitely tall obstacle. Collision inflation is still checked at the queried position.
+// Unknown cells with a raw obstacle, or nothing observed, below them still block.
 inline bool GridMap::isUnknownBlocking(Eigen::Vector3i id) {
   boundIndex(id);
   if (!isUnknown(id)) return false;
   if (!nav_unknown_above_free_) return true;
   for (int z = id(2) - 1; z >= 0; --z) {
     Eigen::Vector3i below(id(0), id(1), z);
-    if (!isUnknown(below)) return md_.occupancy_buffer_inflate_[toAddress(below)] != 0;
+    if (!isUnknown(below)) return getOccupancy(below) != 0;
   }
   return true;
 }
