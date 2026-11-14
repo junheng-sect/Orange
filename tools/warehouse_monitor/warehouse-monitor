@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -e
+exec python3 -c '
+import pathlib
+import runpy
+import sys
+
+launcher = pathlib.Path(sys.argv[1]).resolve()
+sys.argv = [str(launcher.with_name("desktop.py")), *sys.argv[2:]]
+sys.path.insert(0, str(launcher.parent))
+runpy.run_path(sys.argv[0], run_name="__main__")
+' "${BASH_SOURCE[0]}" "$@"

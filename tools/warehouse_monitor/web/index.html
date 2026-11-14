@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>仓库无人机 · 巡检</title>
+<link rel="stylesheet" href="/monitor.css">
+<script defer src="/monitor.js"></script>
+</head>
+<body>
+<main>
+  <header>
+    <div><h1>仓库无人机 · 巡检</h1><p class="subtitle">实时监看与路线预览</p></div>
+    <label class="map-select" hidden>显示地图
+      <select id="display-map"><option value="">跟随定位</option></select>
+    </label>
+  </header>
+  <div class="status-bar" aria-label="数据状态">
+    <b id="connection">正在连接</b>
+    <span id="loc-status">定位 · 等待</span>
+    <span id="cloud-status">点云 · 等待</span>
+    <span id="plan-status">规划 · 等待</span>
+    <span id="map-status"></span><span>定位地图 <span id="map-id">—</span></span>
+  </div>
+  <div class="workspace">
+    <section class="scene" aria-label="三维点云">
+      <div class="scene-bar">
+        <h2>地图与飞行轨迹</h2>
+        <div class="group" aria-label="视角">
+          <button data-view="room" type="button" aria-pressed="true">全图</button>
+          <button data-view="close" type="button" aria-pressed="false">无人机近景</button>
+          <button data-view="top" type="button" aria-pressed="false">正上方</button>
+        </div>
+      </div>
+      <div id="viewport" aria-label="可旋转的点云、无人机和轨迹">
+        <div class="scene-help">左键旋转 · Shift + 左键拖动平移 · 滚轮缩放</div>
+        <div id="notice">等待定位地图</div>
+        <div class="legend">
+          <span class="track"><i></i>已飞轨迹</span>
+          <span class="plan"><i></i>EGO 规划轨迹</span>
+          <span class="preview-key" hidden><i></i>巡检路线预览</span>
+          <span class="live"><i></i>实时点云</span>
+          <span><i></i>机头方向</span>
+        </div>
+        <div id="pick-help" hidden>单击地图填写 XY · Esc 退出</div>
+        <div id="render-error" role="status" hidden></div>
+      </div>
+    </section>
+    <aside class="side" aria-label="监看与巡检">
+      <div class="side-tabs">
+        <button id="tab-live" type="button" aria-pressed="true">实时监看</button>
+        <button id="tab-inspection" type="button" hidden aria-pressed="false">巡检点与路线</button>
+      </div>
+      <div id="live-panel">
+      <section class="flight-section">
+        <details id="flight-status">
+          <summary>
+            <span>飞控状态</span>
+            <span id="flight-lamp" data-level="warn">正在读取</span>
+            <span id="flight-battery"></span>
+          </summary>
+          <div id="flight-checks"></div>
+        </details>
+      </section>
+      <section>
+        <div class="pose-title"><h2>当前位姿</h2><span class="dim">drone_map</span></div>
+        <p id="phase">等待导航位姿</p>
+        <dl class="metrics">
+          <div><dt>X / m</dt><dd id="px">—</dd></div>
+          <div><dt>Y / m</dt><dd id="py">—</dd></div>
+          <div><dt>Z / m</dt><dd id="pz">—</dd></div>
+          <div><dt>航向 / °</dt><dd id="yaw">—</dd></div>
+        </dl>
+      </section>
+      <section>
+        <div class="close-title"><h2>局部俯视</h2><span class="dim">X 向右 · Y 向上</span></div>
+        <canvas id="detail" role="img" aria-label="俯视飞行轨迹和机头"></canvas>
+      </section>
+      <section>
+        <div class="pose-title"><h2>显示图层</h2><span id="point-count" class="dim"></span></div>
+        <div class="layers">
+          <label><input type="checkbox" data-layer="floor" checked>地面</label>
+          <label><input type="checkbox" data-layer="structure" checked>室内陈设</label>
+          <label><input type="checkbox" data-layer="walls" checked>外侧墙</label>
+          <label><input type="checkbox" data-layer="near">近侧墙</label>
+          <label><input type="checkbox" data-layer="roof">顶棚</label>
+          <label><input type="checkbox" id="live-cloud" checked>实时点云</label>
+          <label><input type="checkbox" id="planned" checked>规划轨迹</label>
+          <label><input type="checkbox" id="traveled" checked>已飞轨迹</label>
+        </div>
+      </section>
+      </div>
+      <div id="inspection-panel" hidden>
+        <section>
+          <div class="pose-title"><h2>巡检点</h2><button id="new-point" type="button">新增点位</button></div>
+          <p id="inspection-empty" class="dim">选择一张缓存地图开始。</p>
+          <ol id="point-list"></ol>
+          <form id="point-editor" hidden>
+            <label>名称<input id="point-name" maxlength="60" required></label>
+            <div class="coordinates">
+              <label>X (m)<input id="point-x" type="number" step="any" required></label>
+              <label>Y (m)<input id="point-y" type="number" step="any" required></label>
+              <label>Z (m)<input id="point-z" type="number" step="any" required></label>
+            </div>
+            <div class="coordinates two">
+              <label>观察航向 (°)<input id="point-yaw" type="number" min="-180" max="180" step="any" value="0" required></label>
+              <label>停留 (s)<input id="point-dwell" type="number" min="0" max="3600" step="any" value="2" required></label>
+            </div>
+            <p class="dim">航向 0° 指向 +X，逆时针为正。Z 为地图坐标。</p>
+            <div class="group">
+              <button id="pick-point" type="button" aria-pressed="false">地图点选 XY</button>
+              <button id="use-position" type="button">使用当前位姿</button>
+            </div>
+            <div class="group">
+              <button type="submit" class="primary">保存点位</button>
+              <button id="cancel-point" type="button">取消</button>
+              <button id="delete-point" type="button" hidden>删除</button>
+            </div>
+          </form>
+        </section>
+        <section class="preview-panel">
+          <h2>路线预览</h2>
+          <p class="dim">从首个勾选点出发，按列表顺序，经巡航高度连接各点。</p>
+          <label>巡航 Z (m)<input id="cruise-z" type="number" step="any"></label>
+          <div class="group"><button id="generate-preview" type="button" class="primary">生成路线</button>
+          <button id="focus-preview" type="button">查看路线</button></div>
+          <p id="inspection-status" role="status"></p>
+          <ul id="preview-errors" aria-label="无法规划的点位或航段"></ul>
+          <p class="dim">依据静态点云检查几何净空，仅用于路线预览。</p>
+        </section>
+      </div>
+    </aside>
+  </div>
+  <footer>轨迹保留最近 4,800 个采样点，从监看进程接收位姿开始记录。</footer>
+</main>
+</body>
+</html>
