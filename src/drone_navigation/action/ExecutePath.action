@@ -1,0 +1,9 @@
+# Ordered drone_map points. Only the final point is a stop.
+string map_id
+geometry_msgs/Point[] points
+---
+bool success
+string reason
+---
+uint32 point_index
+string state

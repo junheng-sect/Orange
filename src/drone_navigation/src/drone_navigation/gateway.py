@@ -1,7 +1,7 @@
 import copy,math,threading,time
 import numpy as np
 import rospy,message_filters,rosgraph
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry,Path
 from std_msgs.msg import String,Empty
 from std_srvs.srv import Trigger,TriggerResponse
 from mavros_msgs.msg import PositionTarget,State,EstimatorStatus,ExtendedState
@@ -33,6 +33,7 @@ class Gateway:
         self.lock=threading.RLock();self.alignment=Alignment();self.odom=None;self.px=None;self.px_at=0.;self.state=None;self.state_at=0.;self.est=None;self.est_at=0.;self.cmd=None;self.cmd_at=0.;self.goal_stamp=None;self.expected_gen=None;self.input_ok=False;self.input_at=0.;self.fault='';self.prepared=False;self.running=False;self.was_offboard=False;self.prepared_at=0.;self.owners_ok=False;self.owners_at=0.;self.hold_p=None;self.hold_v=np.zeros(3);self.hold_yaw=0.;self.last_clock=None;self.clock_at=time.monotonic();self.terminal=None;self.arrived_at=-math.inf
         # PX4 samples are only taken in pairs with LIO odometry, so their age follows the LIO limit too.
         self.odom_age=odom_timeout(self.c)
+        self.last_path_cancel = rospy.Time(0)
         # Ground takeoff: prepare_takeoff while armed on the ground, select OFFBOARD, then takeoff climbs takeoff_height
         # above the landed hold point at max_vel_z / max_acc_z and holds there.
         self.ext=None;self.ext_at=0.;self.takeoff_mode=False;self.climb=None;self.climb_end=None;self.takeoff_state='';self.ready=False
@@ -58,6 +59,7 @@ class Gateway:
         rospy.Subscriber('/mavros/estimator_status',EstimatorStatus,self.on_est,queue_size=1)
         from geometry_msgs.msg import PoseStamped
         rospy.Subscriber('/drone_nav/planner_goal',PoseStamped,self.on_goal,queue_size=1)
+        rospy.Subscriber('/drone_nav/planner_path',Path,self.on_path,queue_size=1)
         rospy.Subscriber('/drone_nav/command',NavigationCommand,self.on_cmd,queue_size=1)
         rospy.Subscriber('/drone_nav/input_status',String,self.on_input,queue_size=1)
         rospy.Subscriber('/drone_nav/executor_status',String,self.on_executor,queue_size=1)
@@ -100,6 +102,9 @@ class Gateway:
             if read_status(m).get('state')=='FAULT' and self.running:self.fail('executor fault')
     def on_cancel(self,_):
         with self.lock:
+            self.last_path_cancel = rospy.Time.now()
+            if self.expected_gen is not None and self.expected_gen >= PATH_GENERATION:
+                self.goal_stamp = self.expected_gen = None
             self.cmd=None
             if self.running:
                 self.capture_brake()
@@ -115,9 +120,16 @@ class Gateway:
         now=time.monotonic()
         if self.terminal is None or self.running or self.fault!=STOPPED or now-self.arrived_at>.3 or now-self.terminal[2]>.3:return
         self.hold_p,self.hold_v,self.hold_yaw=self.terminal[0].copy(),np.zeros(3),self.terminal[1];self.terminal=None
+    def on_path(self, path):
+        goal = path_endpoint(path)
+        with self.lock:
+            if goal is not None and goal.header.stamp > self.last_path_cancel:
+                self.on_goal(goal)
+
     def on_goal(self,m):
         with self.lock:
-            if self.prepared and not self.fault and self.land_state not in LAND_ACTIVE:
+            if (self.prepared and not self.fault and self.land_state not in LAND_ACTIVE and
+                    (self.goal_stamp is None or m.header.stamp > self.goal_stamp)):
                 self.goal_stamp=m.header.stamp;self.expected_gen=m.header.seq
     def on_cmd(self,m):
         with self.lock:

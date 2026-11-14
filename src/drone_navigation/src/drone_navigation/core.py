@@ -101,6 +101,9 @@ class Spline:
                 alpha=(u-knots[left])/den if den>0 else 0.
                 d[i]=(1-alpha)*d[i-1]+alpha*d[i]
         return d[k]
+    def position(self, t):
+        return self.evaluate(self.points, self.knots, self.degree, self.begin + t)
+
     def state(self,t):
         u=self.begin+max(0.,min(t,self.duration));p=self.evaluate(self.points,self.knots,self.degree,u)
         pts=self.points;knots=self.knots;k=self.degree;out=[p]

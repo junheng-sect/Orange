@@ -10,6 +10,27 @@ namespace ego_planner
   {
     // Largest speed (or acceleration) along dir that keeps |x|, |y| <= lim_xy and |z| <= lim_z: the limits are
     // per axis, as the optimizer and checkFeasibility apply them to the control points.
+    // Horizontal yaw rate is the derivative of atan2(vy, vx).
+    double maxHeadingRate(UniformBspline &position)
+    {
+      auto velocity = position.getDerivative();
+      auto acceleration = velocity.getDerivative();
+      const double duration = position.getTimeSum();
+      const int count = std::max(1, int(std::ceil(duration / 0.005)));
+      double rate = 0.0;
+      for (int i = 0; i <= count; ++i)
+      {
+        const double t = duration * i / count;
+        const auto v = velocity.evaluateDeBoorT(t);
+        const double speed_sq = v.head<2>().squaredNorm();
+        if (speed_sq < 0.03 * 0.03)
+          continue;
+        const auto a = acceleration.evaluateDeBoorT(t);
+        rate = std::max(rate, std::abs(v.x()*a.y() - v.y()*a.x()) / speed_sq);
+      }
+      return rate;
+    }
+
     double alongLimit(const Eigen::Vector3d &dir, double lim_xy, double lim_z)
     {
       double n = dir.norm(), lim = std::numeric_limits<double>::infinity();
@@ -82,7 +103,7 @@ namespace ego_planner
 
   bool EGOPlannerManager::reboundReplan(Eigen::Vector3d start_pt, Eigen::Vector3d start_vel,
                                         Eigen::Vector3d start_acc, Eigen::Vector3d local_target_pt,
-                                        Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj)
+                                        Eigen::Vector3d local_target_vel, bool flag_polyInit, bool flag_randomPolyTraj, double max_yaw_rate, const ros::Time &handoff)
   {
     static int count = 0;
     printf("\033[47;30m\n[drone %d replan %d]==============================================\033[0m\n", pp_.drone_id, count++);
@@ -108,7 +129,11 @@ namespace ego_planner
     // budgeted less speed than the drone already had, and the speed sagged mid-leg (11-07 test4 4 m: 0.58 -> 0.31 m/s).
     // manager/replan_ts_scale sets the factor; the time reallocation below takes what still ends up over the limits.
     const Eigen::Vector3d dir = local_target_pt - start_pt;
-    const double v_path = alongLimit(dir, pp_.max_vel_, pp_.max_vel_z_), a_path = alongLimit(dir, pp_.max_acc_, pp_.max_acc_z_);
+    // A slower initial profile leaves room to turn before an aggressive replan
+    // locks in a forward speed that cannot follow the next bend.
+    const double path_scale = max_yaw_rate > 0.0 ? 0.78 : 1.0;
+    const double v_path = path_scale * alongLimit(dir, pp_.max_vel_, pp_.max_vel_z_);
+    const double a_path = path_scale * alongLimit(dir, pp_.max_acc_, pp_.max_acc_z_);
     double ts = dir.norm() > 0.1 ? pp_.ctrl_pt_dist / v_path * pp_.replan_ts_scale : pp_.ctrl_pt_dist / v_path * 5;
     vector<Eigen::Vector3d> point_set, start_end_derivatives;
     static bool flag_first_call = true, flag_force_polynomial = false;
@@ -180,7 +205,7 @@ namespace ego_planner
       {
 
         double t;
-        double t_cur = (ros::Time::now() - local_data_.start_time_).toSec();
+        double t_cur = ((handoff.isZero() ? ros::Time::now() : handoff) - local_data_.start_time_).toSec();
 
         vector<double> pseudo_arc_length;
         vector<Eigen::Vector3d> segment_point;
@@ -388,8 +413,40 @@ namespace ego_planner
 
     t_refine = ros::Time::now() - t_start;
 
-    // save planned results
-    updateTrajInfo(pos, ros::Time::now());
+    if (max_yaw_rate > 0.0)
+    {
+      pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, 0.0, pp_.max_vel_z_, pp_.max_acc_z_);
+      // Retiming a moving replan must preserve its initial p/v/a. Reuse the
+      // existing constrained refit rather than stretching the executor clock.
+      for (int pass = 0; pass < 3; ++pass)
+      {
+        const double yaw_ratio = maxHeadingRate(pos) / (0.9 * max_yaw_rate);
+        double physical_ratio = 1.0;
+        const bool feasible = pos.checkFeasibility(physical_ratio, false);
+        if (feasible && yaw_ratio <= 1.0)
+          break;
+        Eigen::MatrixXd retimed_points;
+        if (!refineTrajAlgo(pos, start_end_derivatives, std::max({1.05, yaw_ratio, physical_ratio}),
+                            ts, retimed_points, stop_at_target))
+          return false;
+        pos = UniformBspline(retimed_points, 3, ts);
+        pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, 0.0, pp_.max_vel_z_, pp_.max_acc_z_);
+      }
+      double ratio;
+      const bool feasible = pos.checkFeasibility(ratio, false);
+      const double yaw_rate = maxHeadingRate(pos);
+      if (!feasible || yaw_rate > max_yaw_rate)
+      {
+        ROS_WARN_THROTTLE(0.5, "Path candidate infeasible: p/v/a ratio %.2f, yaw %.2f/%.2f rad/s",
+                          ratio, yaw_rate, max_yaw_rate);
+        return false;
+      }
+    }
+
+    // Leave enough time for the executor to check a future handoff.
+    if (!handoff.isZero() && (handoff - ros::Time::now()).toSec() < 0.18)
+      return false;
+    updateTrajInfo(pos, handoff.isZero() ? ros::Time::now() : handoff);
 
     static double sum_time = 0;
     static int count_success = 0;
@@ -446,7 +503,8 @@ namespace ego_planner
   }
 
   bool EGOPlannerManager::planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
-                                                  const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
+                                                  const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc,
+                                                  double time_scale)
   {
 
     // generate global reference trajectory
@@ -508,6 +566,7 @@ namespace ego_planner
       time(i) = (pos.col(i + 1) - pos.col(i)).norm() / alongLimit(pos.col(i + 1) - pos.col(i), pp_.max_vel_, pp_.max_vel_z_);
     }
 
+    time *= time_scale;
     time(0) *= 2.0;
     time(time.rows() - 1) *= 2.0;
 

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <iostream>
 #include <nav_msgs/Path.h>
+#include <traj_utils/PathTrajectory.h>
 #include <sensor_msgs/Imu.h>
 #include <ros/ros.h>
 #include <std_msgs/Empty.h>
@@ -88,6 +89,18 @@ namespace ego_planner
     Eigen::Vector3d requested_goal_;
     ros::WallTime arrived_wall_;
     void publishLocalTrajectory();
+    void pathCallback(const nav_msgs::PathConstPtr &path);
+    void pathStartCallback(const traj_utils::PathStartConstPtr &ack);
+    ros::Subscriber path_sub_, path_start_sub_;
+    ros::Publisher path_traj_pub_;
+    traj_utils::PathStart path_identity_;
+    bool path_mode_{false};
+    bool path_pending_{false};
+    double path_yaw_rate_{0.0};
+    ros::WallTime path_candidate_sent_;
+    ros::Time path_handoff_;
+    LocalTrajData path_next_;
+    bool path_next_ready_{false};
 
     /* ROS utils */
     ros::Subscriber cancel_sub_;
@@ -119,6 +132,7 @@ namespace ego_planner
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
     void getLocalTarget();
+    void getPathLocalTarget();
 
     /* ROS functions */
     void execFSMCallback(const ros::TimerEvent &e);

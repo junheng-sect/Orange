@@ -3,6 +3,7 @@
 import copy
 import json
 import math
+import threading
 import unittest
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -13,14 +14,14 @@ from geometry_msgs.msg import Point, PoseStamped, TransformStamped
 from nav_msgs.msg import Odometry
 from mavros_msgs.msg import PositionTarget, State, EstimatorStatus
 from std_msgs.msg import String
-from traj_utils.msg import Bspline
+from traj_utils.msg import Bspline, PathStart, PathTrajectory
 from drone_navigation.core import rz
 from drone_navigation.gateway import Gateway, STOPPED
 from drone_navigation.msg import NavigationCommand
 from drone_navigation.executor import Executor
 from drone_navigation.mission import Mission
 from drone_navigation.msg import ExecuteRouteGoal
-from drone_navigation.ros_common import put, xyz
+from drone_navigation.ros_common import PATH_GENERATION, path_of, put, xyz
 
 
 class RuntimeTests(unittest.TestCase):
@@ -210,6 +211,7 @@ class RuntimeTests(unittest.TestCase):
 
     def short_mission(self, anchor, speed=0.):
         m=Mission.__new__(Mission)
+        m.task_lock=threading.Lock()
         m.c=dict(map_id='synthetic',bounds_min=[-5,-5,.4],bounds_max=[5,5,2.5])
         m.ready=True;m.gw_at=self.now;m.map_ok=lambda:True
         m.odom=self.odom();m.odom.twist.twist.linear.x=speed;m.odom_at=self.now
@@ -313,6 +315,84 @@ class RuntimeTests(unittest.TestCase):
         e.check.side_effect = check; e.validate(); e.pub.publish.reset_mock(); e.tick()
         self.assertFalse(e.active); self.assertIsNone(e.spline)
         e.pub.publish.assert_not_called()
+
+    def test_cancel_before_path_motion_rejects_delayed_path_and_command(self):
+        g = self.running_gateway(np.eye(3), np.zeros(3))
+        self.now += .02
+        path = path_of([[.3, 0, 1], [.6, 0, 1]])
+        path.header.seq = 1
+        g.on_path(path)
+        self.assertEqual(g.expected_gen, PATH_GENERATION+1)
+        g.on_cancel(None)
+        g.on_path(path)
+        command = self.command((.02, 0, 1), (.1, 0, 0))
+        command.generation = PATH_GENERATION+1
+        g.on_cmd(command)
+        self.assertFalse(g.running)
+        self.assertIsNone(g.cmd)
+
+    def test_path_candidate_waits_for_alignment_and_validates_session(self):
+        e = self.build(Executor, 'drone_navigation.executor')
+        e.on_odom(self.odom())
+        e.on_plan(String('4'))
+        path = path_of([[.3, 0, 1], [.6, 0, 1]])
+        path.header.seq = 2
+        e.on_path(path)
+        spline = self.spline(8)
+        spline.pos_pts = [Point(x=x, z=1.) for x in (0., .1, .2, .3)]
+        ident = PathStart(path_seq=1, path_stamp=path.header.stamp, trajectory_id=8)
+        message = PathTrajectory(identity=ident, pending_start=True, spline=spline)
+        e.on_path_trajectory(message)
+        self.assertIsNone(e.path_candidate)
+        message.identity.path_seq = 2
+        e.on_path_trajectory(message)
+        e.check.return_value = SimpleNamespace(valid=False, reason='unknown footprint')
+        e.validate()
+        e.tick()
+        e.pub.publish.assert_not_called()
+        e.check.return_value = SimpleNamespace(valid=True, reason='clear')
+        for _ in range(12):
+            self.now += .1
+            self.refresh(e)
+            e.validate()
+            e.tick()
+        self.assertEqual(e.gen, PATH_GENERATION + 2)
+        self.assertIsNone(e.spline)
+        self.assertEqual(e.start_pub.publish.call_args[0][0].trajectory_id, 8)
+        self.assertFalse(e.pub.publish.call_args[0][0].terminal)
+        np.testing.assert_allclose(xyz(e.pub.publish.call_args[0][0].velocity), 0.)
+        e.on_cancel(None)
+        message.pending_start = False
+        e.on_path_trajectory(message)
+        e.on_path(path)
+        self.assertFalse(e.active)
+        self.assertIsNone(e.pending_spline)
+
+    def test_tangent_wrap_and_low_speed_heading_hold(self):
+        e = self.build(Executor, 'drone_navigation.executor')
+        e.on_odom(self.odom())
+        e.yaw = math.radians(179.92)
+        e.heading_at = self.now
+        target = math.radians(-179.92)
+        self.assertTrue(e.path_heading(.2*np.array([math.cos(target), math.sin(target), 0]), self.now+.02)[0])
+        self.assertAlmostEqual(e.yaw, target)
+        self.assertTrue(e.path_heading(np.array([0., 0., .2]), self.now+.04)[0])
+        self.assertAlmostEqual(e.yaw, target)
+
+    def test_sustained_measured_sideways_motion_cancels_path(self):
+        e = self.build(Executor, 'drone_navigation.executor')
+        o = self.odom(yaw=math.pi/2)
+        o.twist.twist.linear.y = .2
+        e.on_odom(o)
+        e.active = True
+        v = np.zeros(3)
+        ok, angle = e.path_heading(v, self.now)
+        self.assertTrue(ok)
+        self.assertAlmostEqual(angle, math.pi/2)
+        self.now += .51
+        self.assertFalse(e.path_heading(v, self.now)[0])
+        self.assertFalse(e.active)
+        e.cancel.publish.assert_called_once()
 
     def test_new_candidate_keeps_discontinuity_guard(self):
         e = self.executor(); e.on_spline(self.spline(2, 1.)); e.validate(); e.tick()

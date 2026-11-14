@@ -47,3 +47,16 @@ def path_of(points):
 def tf_matrix(buf,target,source,stamp):
     tr=buf.lookup_transform(target,source,stamp,rospy.Duration(.04)).transform
     return rotation(quat(tr.rotation)),xyz(tr.translation)
+
+
+# Path and legacy publishers have independent ROS Header.seq counters.
+PATH_GENERATION = 1 << 32
+
+
+def path_endpoint(path):
+    if not path.poses or path.header.frame_id != 'drone_odom' or not fresh(path, time.monotonic()):
+        return None
+    goal = copy.deepcopy(path.poses[-1])
+    goal.header = copy.deepcopy(path.header)
+    goal.header.seq += PATH_GENERATION  # internal only, never serialize this PoseStamped
+    return goal

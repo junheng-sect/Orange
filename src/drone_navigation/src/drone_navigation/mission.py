@@ -2,10 +2,11 @@ import copy,math,threading,time,json
 import numpy as np
 import rospy,actionlib,tf2_ros
 from std_msgs.msg import String,Empty
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
 from geometry_msgs.msg import PoseStamped
 from traj_utils.srv import CheckTrajectory
 from drone_navigation.msg import ExecuteRouteAction,ExecuteRouteResult,ExecuteRouteFeedback,ExecuteRouteGoal
+from drone_navigation.msg import ExecutePathAction, ExecutePathResult, ExecutePathFeedback, NavigationCommand
 from .core import finite,yaw,heading,wrap,check_goal_bounds
 from .ros_common import *
 
@@ -13,6 +14,12 @@ class Mission:
     def __init__(self):
         self.c=config();self.odom=None;self.odom_at=0.;self.ready=False;self.gw_at=0.;self.reloc={};self.reloc_at=0.;self.map_result={};self.cancelled=False
         self.last_completed_goal=None
+        self.task_lock = threading.Lock()
+        self.command = None
+        self.executor_state = {}
+        self.path_pub = rospy.Publisher('/drone_nav/planner_path', Path, queue_size=1)
+        rospy.Subscriber('/drone_nav/command', NavigationCommand, self.on_command, queue_size=1)
+        rospy.Subscriber('/drone_nav/executor_status', String, self.on_executor, queue_size=1)
         self.buf=tf2_ros.Buffer();self.listener=tf2_ros.TransformListener(self.buf)
         self.goal_pub=rospy.Publisher('/drone_nav/planner_goal',PoseStamped,queue_size=1)
         self.cancel_pub=rospy.Publisher('/drone_nav/cancel',Empty,queue_size=1)
@@ -24,6 +31,9 @@ class Mission:
         rospy.Subscriber('/drone_reloc/result',String,self.on_result,queue_size=1)
         rospy.Subscriber('/drone_reloc/status',String,self.on_reloc,queue_size=1)
         self.server=actionlib.SimpleActionServer('/drone_nav/execute_route',ExecuteRouteAction,execute_cb=self.execute,auto_start=False);self.server.start()
+        self.path_server = actionlib.SimpleActionServer(
+            '/drone_nav/execute_path', ExecutePathAction, execute_cb=self.execute_path, auto_start=False)
+        self.path_server.start()
         self.client=actionlib.SimpleActionClient('/drone_nav/execute_route',ExecuteRouteAction)
         rospy.Subscriber('/drone_nav/goal',PoseStamped,self.on_single,queue_size=1)
     def on_odom(self,m):self.odom=m;self.odom_at=time.monotonic()
@@ -40,7 +50,102 @@ class Mission:
     def abort(self,why,preempt=False):
         self.cancel_pub.publish(Empty());r=ExecuteRouteResult(success=False,reason=why)
         (self.server.set_preempted if preempt else self.server.set_aborted)(r)
-    def execute(self,g):
+    def on_command(self, message):
+        self.command = message
+
+    def on_executor(self, message):
+        self.executor_state = read_status(message)
+
+    def execute(self, goal):
+        if not self.task_lock.acquire(blocking=False):
+            self.server.set_aborted(ExecuteRouteResult(success=False, reason='another navigation task is active'))
+            return
+        try:
+            self.execute_route(goal)
+        finally:
+            self.task_lock.release()
+
+    def path_transform(self):
+        transform = self.buf.lookup_transform('drone_map', 'drone_odom', rospy.Time(0), rospy.Duration(.02))
+        if not fresh(transform, time.monotonic(), .5):
+            raise ValueError('stale map transform')
+        return rotation(quat(transform.transform.rotation)), xyz(transform.transform.translation)
+
+    def path_health(self):
+        if (self.cancelled or not self.ready or time.monotonic() - self.gw_at > .3 or
+                not self.map_ok() or not fresh(self.odom, self.odom_at, odom_timeout(self.c))):
+            raise ValueError('cancelled or navigation health lost')
+
+    def execute_path(self, goal):
+        server = self.path_server
+        if not self.task_lock.acquire(blocking=False):
+            server.set_aborted(ExecutePathResult(success=False, reason='another navigation task is active'))
+            return
+        started = False
+        self.cancelled = False
+        try:
+            if not goal.map_id or goal.map_id != self.c['map_id'] or not 2 <= len(goal.points) <= 50:
+                raise ValueError('invalid path map or point count')
+            self.path_health()
+            r, t = self.path_transform()
+            o = self.odom
+            p0 = xyz(o.pose.pose.position)
+            points = [r.T @ (finite(xyz(p)) - t) for p in goal.points]
+            check_goal_bounds(points, self.c)
+            if any(np.linalg.norm(b - a) < .2 for a, b in zip([p0] + points, points)):
+                raise ValueError('adjacent path points must be at least 0.2 m apart')
+            if np.linalg.norm(xyz(o.twist.twist.linear)) > .1:
+                raise ValueError('path must start from a settled pose')
+            if server.is_preempt_requested() or self.cancelled:
+                raise ValueError('path cancelled before start')
+            path = path_of(points)
+            self.path_pub.publish(path)
+            started = True
+            start = time.monotonic()
+            settled = None
+            index = 0
+            while not rospy.is_shutdown():
+                if server.is_preempt_requested():
+                    raise ValueError('path cancelled by client')
+                self.path_health()
+                current_r, current_t = self.path_transform()
+                if np.linalg.norm(current_r - r) > .01 or np.linalg.norm(current_t - t) > .01:
+                    raise ValueError('map transform reset')
+                o, cmd = self.odom, self.command
+                p = xyz(o.pose.pose.position)
+                if index < len(points)-1 and np.linalg.norm(p - points[index]) <= .5:
+                    index += 1
+                terminal = (cmd is not None and cmd.generation == path.header.seq + PATH_GENERATION and cmd.header.stamp >= path.header.stamp
+                            and fresh(cmd, time.monotonic(), .3) and cmd.terminal
+                            and np.linalg.norm(xyz(cmd.position) - points[-1]) < 1e-4)
+                if terminal and index != len(points)-1:
+                    raise ValueError('guide point %d was not reached within 0.5 m' % (index+1))
+                ok = (terminal and np.linalg.norm(p - points[-1]) <= .15 and
+                      np.linalg.norm(xyz(o.twist.twist.linear)) <= .1 and
+                      abs(wrap(yaw(quat(o.pose.pose.orientation)) - cmd.yaw)) <= math.radians(5))
+                now = time.monotonic()
+                settled = (settled if settled is not None else now) if ok else None
+                state = 'SETTLING' if ok else self.executor_state.get('state', 'PLANNING')
+                server.publish_feedback(ExecutePathFeedback(point_index=index, state=state))
+                if settled is not None and now - settled >= 1.:
+                    self.last_completed_goal = points[-1].copy()
+                    self.arrived_pub.publish(Empty())
+                    self.cancel_pub.publish(Empty())
+                    server.set_succeeded(ExecutePathResult(success=True, reason='path endpoint settled'))
+                    return
+                if now - start >= 90.:
+                    raise ValueError('path timeout (90 s)')
+                time.sleep(.02)
+            raise ValueError('ROS shutdown')
+        except Exception as error:
+            if started:
+                self.cancel_pub.publish(Empty())
+            result = ExecutePathResult(success=False, reason=str(error))
+            (server.set_preempted if server.is_preempt_requested() else server.set_aborted)(result)
+        finally:
+            self.task_lock.release()
+
+    def execute_route(self,g):
         self.cancelled=False
         if not self.c['map_id'] or g.map_id!=self.c['map_id'] or not g.waypoints or len(g.waypoints)>100:self.abort('map_id/route invalid');return
         if not self.map_ok() or not self.ready or time.monotonic()-self.gw_at>.3:self.abort('localization/gateway not ready');return

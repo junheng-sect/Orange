@@ -23,6 +23,8 @@ find_package(PCL 1.7 REQUIRED)
 add_message_files(
   FILES
   Bspline.msg
+  PathStart.msg
+  PathTrajectory.msg
   DataDisp.msg
   MultiBsplines.msg
   )
