@@ -98,17 +98,6 @@
     position: absolute; left: 50%; top: -40px; transform: translateX(-50%); padding: 4px 12px; border-radius: 14px;
     border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: inherit; cursor: pointer;
   }
-  /* 无人机状态（drone.js）：点顶栏的“无人机”展开，只读 */
-  #c-drone { cursor: pointer; }
-  #drone {
-    position: fixed; left: 8px; top: 48px; z-index: 2; display: none; width: min(380px, calc(100% - 16px));
-    max-height: 60vh; overflow: auto; padding: 8px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-  }
-  #drone.open { display: block; }
-  #drone .lamp { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
-  #drone .row { padding: 2px 0; }
-  #drone h4 { margin: 8px 0 2px; font-size: 13px; font-weight: normal; color: var(--muted); }
-  #drone small { color: var(--muted); }
 </style>
 </head>
 <body>
@@ -123,10 +112,7 @@
   <span class="chip" id="c-vel"><b>速度</b>—</span>
   <span class="chip" id="c-pose"><b>位姿</b>—</span>
   <span class="chip" id="c-cur"><b>光标</b>—</span>
-  <span class="chip" id="c-drone"><b>无人机</b>—</span>
-  <span class="chip" id="c-dbat"><b>机电量</b>—</span>
 </div>
-<div id="drone"></div>
 <div id="tools">
   <button id="b-follow">跟随</button>
   <button id="b-fit">全图</button>
@@ -167,6 +153,5 @@
 </div>
 <div id="joy"><div id="knob"></div><button id="joy-speed">慢速</button></div>
 <script src="app.js"></script>
-<script src="drone.js"></script>
 </body>
 </html>
