@@ -1,5 +1,9 @@
 #include "plan_env/grid_map.h"
 
+#include <boost/property_tree/json_parser.hpp>
+#include <sstream>
+#include <std_msgs/Bool.h>
+
 // #define current_img_ md_.depth_image_[image_cnt_ & 1]
 // #define last_img_ md_.depth_image_[!(image_cnt_ & 1)]
 
@@ -166,10 +170,161 @@ void GridMap::initMap(ros::NodeHandle &nh)
   md_.flag_depth_odom_timeout_ = false;
   md_.flag_use_depth_fusion = false;
 
+  md_.local_bound_min_.setZero();
+  md_.local_bound_max_.setZero();
+  initPrior();
+
   // rand_noise_ = uniform_real_distribution<double>(-0.2, 0.2);
   // rand_noise2_ = normal_distribution<double>(0, 0.2);
   // random_device rd;
   // eng_ = default_random_engine(rd());
+}
+
+void GridMap::initPrior()
+{
+  std::string path, map_sha;
+  node_.param<std::string>("grid_map/prior_grid_file", path, "");
+  if (path.empty()) return;
+  prior_required_ = true;
+  if (mp_.frame_id_ != "drone_odom" ||
+      !node_.getParam("/drone_nav/config/map_id", prior_map_id_) || prior_map_id_.empty() ||
+      !node_.getParam("grid_map/prior_map_sha256", map_sha) ||
+      !nav_min_.allFinite() || !nav_max_.allFinite() || (nav_min_.array() >= nav_max_.array()).any())
+    throw std::runtime_error("prior grid requires drone_odom, map_id, verified SHA-256 and navigation bounds");
+
+  prior_grid_.reset(new plan_env::PriorGrid(path, map_sha));
+  prior_flags_.assign(md_.occupancy_buffer_.size(), 0);
+  prior_tf_.reset(new tf2_ros::Buffer);
+  prior_tf_listener_.reset(new tf2_ros::TransformListener(*prior_tf_));
+  prior_result_sub_ = node_.subscribe("/drone_reloc/result", 1, &GridMap::onPriorRelocResult, this);
+  prior_status_sub_ = node_.subscribe("/drone_reloc/status", 1, &GridMap::onPriorRelocStatus, this);
+  prior_ready_pub_ = node_.advertise<std_msgs::Bool>("grid_map/prior_ready", 1, true);
+  prior_ready_pub_.publish(std_msgs::Bool());
+  prior_timer_ = node_.createWallTimer(ros::WallDuration(0.1), &GridMap::refreshPrior, this);
+  ROS_INFO_STREAM("[grid_map] verified prior grid " << path << ", waiting for confirmed localization");
+}
+
+void GridMap::onPriorRelocResult(const std_msgs::String::ConstPtr& message)
+{
+  prior_confirmed_ = false;
+  try {
+    std::istringstream input(message->data);
+    boost::property_tree::ptree result;
+    boost::property_tree::read_json(input, result);
+    prior_confirmed_ = result.get<bool>("confirmed", false) &&
+                       result.get<std::string>("map", "") == prior_map_id_;
+  } catch (const boost::property_tree::ptree_error&) {
+    ROS_WARN_THROTTLE(5, "[grid_map] invalid relocalization result");
+  }
+  if (!prior_confirmed_) prior_alignment_ok_ = false;
+}
+
+void GridMap::onPriorRelocStatus(const std_msgs::String::ConstPtr& message)
+{
+  prior_localized_ = false;
+  try {
+    std::istringstream input(message->data);
+    boost::property_tree::ptree status;
+    boost::property_tree::read_json(input, status);
+    prior_localized_ = status.get<bool>("valid", false) &&
+                       status.get<std::string>("state", "") == "LOCALIZED";
+    prior_status_at_ = ros::WallTime::now();
+  } catch (const boost::property_tree::ptree_error&) {
+    ROS_WARN_THROTTLE(5, "[grid_map] invalid relocalization status");
+  }
+  if (!prior_localized_) prior_alignment_ok_ = false;
+}
+
+void GridMap::refreshPrior(const ros::WallTimerEvent&)
+{
+  const bool was_aligned = prior_alignment_ok_;
+  prior_alignment_ok_ = false;
+  if (prior_confirmed_ && prior_localized_ && !prior_transform_changed_ &&
+      (ros::WallTime::now() - prior_status_at_).toSec() <= 1.5) {
+    try {
+      const auto tf = prior_tf_->lookupTransform("drone_map", mp_.frame_id_, ros::Time(0));
+      const double age = (ros::Time::now() - tf.header.stamp).toSec();
+      Eigen::Quaterniond q(tf.transform.rotation.w, tf.transform.rotation.x,
+                           tf.transform.rotation.y, tf.transform.rotation.z);
+      const Eigen::Vector3d p(tf.transform.translation.x, tf.transform.translation.y,
+                              tf.transform.translation.z);
+      if (!tf.header.stamp.isZero() && age >= -0.05 && age <= mp_.odom_depth_timeout_ &&
+          p.allFinite() && q.coeffs().allFinite() && std::abs(q.norm() - 1.0) < 1e-3) {
+        Eigen::Isometry3d map_from_odom = Eigen::Isometry3d::Identity();
+        map_from_odom.linear() = q.normalized().toRotationMatrix();
+        map_from_odom.translation() = p;
+        if (!prior_projected_ && prior_grid_) {
+          prior_projected_ = projectPrior(map_from_odom);
+          prior_map_from_odom_ = map_from_odom;
+          prior_grid_.reset();
+        }
+        if (prior_projected_) {
+          if ((prior_map_from_odom_.translation() - p).norm() > .01 ||
+              (prior_map_from_odom_.linear() - map_from_odom.linear()).norm() > .01) {
+            prior_transform_changed_ = true;
+            ROS_ERROR("[grid_map] prior alignment moved, restart navigation after relocalizing");
+          } else {
+            prior_alignment_ok_ = true;
+          }
+        }
+      }
+    } catch (const tf2::TransformException&) {
+      // Relocalization has not yet supplied a transform in this session.
+    }
+  }
+  if (was_aligned && !prior_alignment_ok_)
+    ROS_WARN("[grid_map] lost prior grid alignment");
+  const bool ready = !getOdomDepthTimeout();
+  if (ready != prior_reported_ready_) {
+    std_msgs::Bool status;
+    status.data = ready;
+    prior_ready_pub_.publish(status);
+    prior_reported_ready_ = ready;
+  }
+}
+
+bool GridMap::projectPrior(const Eigen::Isometry3d& map_from_odom)
+{
+  const int xy = std::ceil(nav_radius_ / mp_.resolution_);
+  const int z_pad = std::ceil(nav_half_height_ / mp_.resolution_);
+  const Eigen::Vector3d padding = mp_.resolution_ * Eigen::Vector3d(xy, xy, z_pad);
+  // Include obstacles whose inflated shell can touch the allowed navigation volume.
+  const Eigen::Vector3d lower = (nav_min_ - padding).cwiseMax(mp_.map_min_boundary_);
+  const Eigen::Vector3d upper = (nav_max_ + padding).cwiseMin(mp_.map_max_boundary_);
+  if ((lower.array() >= upper.array()).any()) return false;
+
+  Eigen::Vector3i lo, hi;
+  posToIndex(lower, lo);
+  posToIndex(upper, hi);
+  boundIndex(lo);
+  boundIndex(hi);
+  const plan_env::PriorGrid::Projection projection(*prior_grid_, map_from_odom.linear(), mp_.resolution_);
+  std::size_t free_count = 0, occupied_count = 0;
+  for (int x = lo.x(); x <= hi.x(); ++x)
+    for (int y = lo.y(); y <= hi.y(); ++y)
+      for (int z = lo.z(); z <= hi.z(); ++z) {
+        const Eigen::Vector3i id(x, y, z);
+        Eigen::Vector3d center;
+        indexToPos(id, center);
+        const auto state = projection.classify(map_from_odom * center);
+        if (state == plan_env::PriorCell::Unknown) continue;
+        const int adr = toAddress(id);
+        const bool occupied = state == plan_env::PriorCell::Occupied;
+        prior_flags_[adr] = Seeded;
+        md_.occupancy_buffer_[adr] = occupied ? mp_.clamp_max_log_ : mp_.clamp_min_log_;
+        if (occupied) ++occupied_count;
+        else ++free_count;
+      }
+  if (free_count == 0 && occupied_count == 0) {
+    ROS_ERROR("[grid_map] prior has no evidence inside the aligned navigation volume");
+    return false;
+  }
+  md_.local_bound_min_ = lo;
+  md_.local_bound_max_ = hi;
+  inflateNavigationMap();
+  ROS_INFO_STREAM("[grid_map] initialized prior in drone_odom: " << free_count
+                  << " free, " << occupied_count << " occupied");
+  return true;
 }
 
 void GridMap::resetBuffer()
@@ -492,7 +647,17 @@ void GridMap::raycastProcess()
     double log_odds_update =
         md_.count_hit_[idx_ctns] >= md_.count_hit_and_miss_[idx_ctns] - md_.count_hit_[idx_ctns] ? mp_.prob_hit_log_ : mp_.prob_miss_log_;
 
+    const bool live_hit = md_.count_hit_[idx_ctns] > 0;
     md_.count_hit_[idx_ctns] = md_.count_hit_and_miss_[idx_ctns] = 0;
+
+    if (!prior_flags_.empty()) {
+      const bool seeded = prior_flags_[idx_ctns] & Seeded;
+      prior_flags_[idx_ctns] |= SeenLive;
+      if (seeded && live_hit) {
+        md_.occupancy_buffer_[idx_ctns] = mp_.clamp_max_log_;
+        continue;
+      }
+    }
 
     if (log_odds_update >= 0 && md_.occupancy_buffer_[idx_ctns] >= mp_.clamp_max_log_)
     {
@@ -720,6 +885,7 @@ void GridMap::updateOccupancyCallback(const ros::TimerEvent & /*event*/)
 void GridMap::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
                                 const geometry_msgs::PoseStampedConstPtr &pose)
 {
+  if (prior_required_) return;
   /* get depth image */
   cv_bridge::CvImagePtr cv_ptr;
   cv_ptr = cv_bridge::toCvCopy(img, img->encoding);
@@ -764,8 +930,9 @@ void GridMap::odomCallback(const nav_msgs::OdometryConstPtr &odom)
 
 void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
 {
-  if(!md_.has_odom_ || img->header.frame_id!=mp_.frame_id_ || img->header.stamp<=last_cloud_stamp_ ||
+  if((prior_required_ && !prior_projected_) || !md_.has_odom_ || img->header.frame_id!=mp_.frame_id_ || img->header.stamp<=last_cloud_stamp_ ||
      img->header.stamp!=last_odom_stamp_ || (ros::Time::now()-img->header.stamp).toSec()>.3) return;
+  const auto start = mp_.show_occ_time_ ? ros::WallTime::now() : ros::WallTime();
   pcl::PointCloud<pcl::PointXYZ> cloud; pcl::fromROSMsg(*img,cloud);
   md_.proj_points_.clear();
   for(const auto &p:cloud) if(std::isfinite(p.x)&&std::isfinite(p.y)&&std::isfinite(p.z))
@@ -775,21 +942,35 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
   raycastProcess();
   // Upstream traversal excludes its terminal voxel: the physically occupied sensor cell is known free.
   Eigen::Vector3i origin_id;posToIndex(md_.camera_pos_,origin_id);
-  if(isUnknown(origin_id)) md_.occupancy_buffer_[toAddress(origin_id)]=mp_.clamp_min_log_;
-  // Rebuild inflation from persistent evidence; never erase an obstacle just because it was occluded.
-  std::fill(md_.occupancy_buffer_inflate_.begin(),md_.occupancy_buffer_inflate_.end(),0);
-  const int r=ceil(nav_radius_/mp_.resolution_), h=ceil(nav_half_height_/mp_.resolution_);
-  for(int x=0;x<mp_.map_voxel_num_.x();++x)
-   for(int y=0;y<mp_.map_voxel_num_.y();++y)
-    for(int z=0;z<mp_.map_voxel_num_.z();++z) {
-     Eigen::Vector3i id(x,y,z);
-     if(md_.occupancy_buffer_[toAddress(id)]<=mp_.min_occupancy_log_) continue;
-     for(int dx=-r;dx<=r;++dx) for(int dy=-r;dy<=r;++dy) for(int dz=-h;dz<=h;++dz) {
-      Eigen::Vector3i n=id+Eigen::Vector3i(dx,dy,dz);
-      if(isInMap(n)) md_.occupancy_buffer_inflate_[toAddress(n)]=1;
-     }
-    }
+  const int origin_address = toAddress(origin_id);
+  if(isUnknown(origin_id)) md_.occupancy_buffer_[origin_address]=mp_.clamp_min_log_;
+  if(!prior_flags_.empty()) prior_flags_[origin_address] |= SeenLive;
+  inflateNavigationMap();
   last_cloud_stamp_=img->header.stamp; last_cloud_wall_=ros::WallTime::now();md_.has_cloud_=true;
+  if (mp_.show_occ_time_)
+    ROS_INFO_STREAM("[grid_map] cloud_update_ms=" << (last_cloud_wall_ - start).toSec() * 1000);
+}
+
+void GridMap::inflateNavigationMap()
+{
+  auto& inflated = md_.occupancy_buffer_inflate_;
+  std::fill(inflated.begin(), inflated.end(), 0);
+  const int radius = std::ceil(nav_radius_ / mp_.resolution_);
+  const int half_height = std::ceil(nav_half_height_ / mp_.resolution_);
+  const auto& size = mp_.map_voxel_num_;
+  int address = 0;
+  for (int x = 0; x < size.x(); ++x)
+    for (int y = 0; y < size.y(); ++y)
+      for (int z = 0; z < size.z(); ++z, ++address) {
+        if (md_.occupancy_buffer_[address] <= mp_.min_occupancy_log_) continue;
+        const int z_lo = std::max(0, z - half_height);
+        const int z_hi = std::min(size.z() - 1, z + half_height);
+        for (int nx = std::max(0, x - radius); nx <= std::min(size.x() - 1, x + radius); ++nx)
+          for (int ny = std::max(0, y - radius); ny <= std::min(size.y() - 1, y + radius); ++ny) {
+            const auto start = inflated.begin() + toAddress(Eigen::Vector3i(nx, ny, z_lo));
+            std::fill_n(start, z_hi - z_lo + 1, 1);
+          }
+      }
 }
 
 std::string GridMap::unknownColumnReason(const Eigen::Vector3d &pos)
@@ -799,7 +980,7 @@ std::string GridMap::unknownColumnReason(const Eigen::Vector3d &pos)
  Eigen::Vector3i id;posToIndex(pos,id);
  for(int z=id.z()-1;z>=0;--z) {
   Eigen::Vector3i below(id.x(),id.y(),z);
-  if(isUnknown(below)) continue;
+  if(isUnknown(below) || onlyPriorFree(toAddress(below))) continue;
   Eigen::Vector3d p;indexToPos(below,p);
   return "first observed below at "+std::to_string(p.x())+","+std::to_string(p.y())+","+std::to_string(p.z())+
     " raw="+(getOccupancy(below)?"occupied":"free")+
@@ -983,6 +1164,7 @@ void GridMap::extrinsicCallback(const nav_msgs::OdometryConstPtr &odom)
 void GridMap::depthOdomCallback(const sensor_msgs::ImageConstPtr &img,
                                 const nav_msgs::OdometryConstPtr &odom)
 {
+  if (prior_required_) return;
   /* get pose */
   Eigen::Quaterniond body_q = Eigen::Quaterniond(odom->pose.pose.orientation.w,
                                                  odom->pose.pose.orientation.x,

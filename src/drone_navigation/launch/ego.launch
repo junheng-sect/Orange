@@ -1,4 +1,6 @@
 <launch>
+  <arg name="prior_grid_file" default=""/>
+  <arg name="prior_map_sha256" default=""/>
 <arg name="radius" default="0.4"/><arg name="half_height" default="0.3"/><!-- EGO inflates ceil(value/0.1 m) cells: 0.25 and 0.3 are both 3; 0.3 passes the gateway check for a 0.15 body + 0.13 clearance -->
   <arg name="map_size_x_" default="20"/>
   <arg name="map_size_y_" default="20"/>
@@ -23,6 +25,7 @@
   <arg name="replan_ts_scale" default="1.0"/>
   <!-- Odometry/cloud wall-clock age (s) before the map reports stale and the FSM drops its target -->
   <arg name="odom_timeout" default="0.5"/>
+  <arg name="show_occ_time" default="false"/>
   <arg name="planning_horizon" default="3.0"/>
 
   <arg name="point_num" default="0"/>
@@ -69,6 +72,9 @@
     <remap from="/move_base_simple/goal" to="/drone_nav/planner_goal"/>
     <remap from="~cancel" to="/drone_nav/cancel"/>
     <remap from="~nav_status" to="/drone_nav/planner_status"/>
+    <remap from="~grid_map/prior_ready" to="/drone_nav/prior_grid_ready"/>
+    <param name="grid_map/prior_grid_file" value="$(arg prior_grid_file)" type="str"/>
+    <param name="grid_map/prior_map_sha256" value="$(arg prior_map_sha256)" type="str"/>
     <remap from="~check_trajectory" to="/drone_nav/check_trajectory"/>
     <param name="grid_map/nav_radius" value="$(arg radius)"/>
     <param name="grid_map/nav_half_height" value="$(arg half_height)"/>

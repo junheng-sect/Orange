@@ -12,6 +12,8 @@
 #include <queue>
 #include <ros/ros.h>
 #include <tuple>
+#include <std_msgs/String.h>
+#include <tf2_ros/transform_listener.h>
 #include <visualization_msgs/Marker.h>
 
 #include <pcl/point_cloud.h>
@@ -24,6 +26,7 @@
 #include <message_filters/time_synchronizer.h>
 
 #include <plan_env/raycast.h>
+#include <plan_env/prior_grid.h>
 
 #define logit(x) (log((x) / (1 - (x))))
 
@@ -185,7 +188,7 @@ public:
   inline double getResolution();
   Eigen::Vector3d getOrigin();
   int getVoxelNum();
-  bool getOdomDepthTimeout() { return last_cloud_wall_.isZero() || last_odom_wall_.isZero() || (ros::WallTime::now()-last_cloud_wall_).toSec()>mp_.odom_depth_timeout_ || (ros::WallTime::now()-last_odom_wall_).toSec()>mp_.odom_depth_timeout_; }
+  bool getOdomDepthTimeout() { return (prior_required_ && !prior_alignment_ok_) || last_cloud_wall_.isZero() || last_odom_wall_.isZero() || (ros::WallTime::now()-last_cloud_wall_).toSec()>mp_.odom_depth_timeout_ || (ros::WallTime::now()-last_odom_wall_).toSec()>mp_.odom_depth_timeout_; }
   double getOdomDepthTimeoutSec() { return mp_.odom_depth_timeout_; }
 
   typedef std::shared_ptr<GridMap> Ptr;
@@ -205,6 +208,34 @@ private:
   double nav_radius_, nav_half_height_, nav_body_xy_, nav_body_z_;
   Eigen::Vector3d nav_min_, nav_max_;
   bool nav_unknown_above_free_;
+  enum PriorFlag : uint8_t { Seeded = 1, SeenLive = 2 };
+  std::vector<uint8_t> prior_flags_;
+  bool prior_required_ = false;
+  bool prior_alignment_ok_ = false;
+  bool prior_transform_changed_ = false;
+  bool prior_projected_ = false;
+  bool prior_reported_ready_ = false;
+  bool prior_confirmed_ = false;
+  bool prior_localized_ = false;
+  ros::WallTime prior_status_at_;
+  Eigen::Isometry3d prior_map_from_odom_ = Eigen::Isometry3d::Identity();
+  std::string prior_map_id_;
+  std::unique_ptr<plan_env::PriorGrid> prior_grid_;
+  std::unique_ptr<tf2_ros::Buffer> prior_tf_;
+  std::unique_ptr<tf2_ros::TransformListener> prior_tf_listener_;
+  ros::Subscriber prior_result_sub_, prior_status_sub_;
+  ros::Publisher prior_ready_pub_;
+  ros::WallTimer prior_timer_;
+  void initPrior();
+  void refreshPrior(const ros::WallTimerEvent&);
+  void onPriorRelocResult(const std_msgs::String::ConstPtr& message);
+  void onPriorRelocStatus(const std_msgs::String::ConstPtr& message);
+  bool projectPrior(const Eigen::Isometry3d& map_from_odom);
+  void inflateNavigationMap();
+  bool onlyPriorFree(int address) const {
+    return !prior_flags_.empty() && prior_flags_[address] == Seeded &&
+           md_.occupancy_buffer_[address] <= mp_.min_occupancy_log_;
+  }
   std::string unknownColumnReason(const Eigen::Vector3d& pos);
   bool checkPath(traj_utils::CheckTrajectory::Request&, traj_utils::CheckTrajectory::Response&);
   MappingParameters mp_;
@@ -304,7 +335,7 @@ inline bool GridMap::isUnknownBlocking(Eigen::Vector3i id) {
   if (!nav_unknown_above_free_) return true;
   for (int z = id(2) - 1; z >= 0; --z) {
     Eigen::Vector3i below(id(0), id(1), z);
-    if (!isUnknown(below)) return getOccupancy(below) != 0;
+    if (!isUnknown(below) && !onlyPriorFree(toAddress(below))) return getOccupancy(below) != 0;
   }
   return true;
 }

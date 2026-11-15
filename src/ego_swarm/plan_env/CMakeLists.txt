@@ -7,6 +7,7 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 set(CMAKE_CXX_STANDARD 14)
 find_package(OpenCV REQUIRED)
+find_package(OpenSSL REQUIRED)
 
 
 find_package(catkin REQUIRED COMPONENTS
@@ -18,6 +19,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_filters
   traj_utils
   nav_msgs
+  tf2_ros
 )
 
 find_package(Eigen3 REQUIRED)
@@ -26,7 +28,7 @@ find_package(PCL 1.7 REQUIRED)
 catkin_package(
  INCLUDE_DIRS include
  LIBRARIES plan_env
- CATKIN_DEPENDS roscpp std_msgs traj_utils nav_msgs
+ CATKIN_DEPENDS roscpp std_msgs traj_utils nav_msgs tf2_ros
  DEPENDS OpenCV
 #  DEPENDS system_lib
 )
@@ -43,7 +45,8 @@ include_directories(
 link_directories(${PCL_LIBRARY_DIRS})
 
 add_library( plan_env 
-    src/grid_map.cpp 
+    src/grid_map.cpp
+    src/prior_grid.cpp
     src/raycast.cpp
     src/obj_predictor.cpp 
     )
