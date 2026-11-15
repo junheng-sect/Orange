@@ -73,7 +73,7 @@ export function createInspection({ rig, viewport, currentPose, redraw, setView, 
       });
       group.removeFromParent();
     }
-    const show = tab === "inspection" && record;
+    const show = tab === "inspection" && byId("manual-preview").open && record;
     const result = activePreview();
     document.querySelector(".preview-key").hidden = !(show && result?.legs?.length);
     if (show) {
@@ -259,6 +259,10 @@ export function createInspection({ rig, viewport, currentPose, redraw, setView, 
   byId("new-point").addEventListener("click", () => edit());
   byId("cancel-point").addEventListener("click", cancelEdit);
   byId("delete-point").addEventListener("click", () => void persist(record.points.filter(p => p.id !== editId), cancelEdit));
+  byId("manual-preview").addEventListener("toggle", event => {
+    if (!event.target.open) stopPicking();
+    paintScene();
+  });
   byId("tab-live").addEventListener("click", () => showTab("live"));
   byId("tab-inspection").addEventListener("click", () => showTab("inspection"));
   function focus() {

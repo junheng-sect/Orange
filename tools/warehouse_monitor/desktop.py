@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve local map display data and proxy read-only Orange Pi telemetry."""
+"""Serve local maps, Orange Pi telemetry and preset task preparation."""
 import argparse
 from contextlib import contextmanager, nullcontext
 import hashlib
@@ -22,6 +22,7 @@ from urllib.request import ProxyHandler, build_opener
 
 from map_cloud import display_map
 from inspection import Conflict, Inspection
+from task_dispatch import Dispatch, TaskConflict, catalog
 
 
 ROOT = Path(__file__).resolve().parent
@@ -150,8 +151,9 @@ class Telemetry:
             self.worker.join()
 
 
-def serve(port, cache, upstream, telemetry=None, board_status=False):
+def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=None):
     inspection = Inspection(cache, RVIZ_MAPS, MAP_KEY, fingerprint, temporary_path)
+    tasks = dispatch.data if dispatch else catalog(ROOT)
 
     class Handler(BaseHTTPRequestHandler):
         def reply(self, payload, kind, code=200):
@@ -189,6 +191,10 @@ def serve(port, cache, upstream, telemetry=None, board_status=False):
                     self.reply(payload, "application/octet-stream")
                 elif request.path == "/maps":
                     self.json_reply(inspection.catalog())
+                elif request.path == "/tasks":
+                    self.json_reply(tasks)
+                elif request.path == "/task":
+                    self.json_reply(dispatch.snapshot() if dispatch else {"enabled": False})
                 elif request.path == "/inspection":
                     key = parse_qs(request.query).get("key", [""])[0]
                     self.json_reply(inspection.read(key))
@@ -230,7 +236,14 @@ def serve(port, cache, upstream, telemetry=None, board_status=False):
             if not self.allowed_host() or (origin and origin != "http://" + host):
                 self.send_error(403)
                 return
-            if self.path not in {"/inspection", "/preview"}:
+            is_task = self.path in {"/task/submit", "/task/cancel", "/task/stop"}
+            if is_task and origin != "http://" + host:
+                self.send_error(403)
+                return
+            if is_task and dispatch is None:
+                self.json_reply({"error": "离线模式仅供查看任务"}, 403)
+                return
+            if self.path not in {"/inspection", "/preview"} and not is_task:
                 self.send_error(404)
                 return
             try:
@@ -239,6 +252,14 @@ def serve(port, cache, upstream, telemetry=None, board_status=False):
                     self.send_error(400)
                     return
                 body = json.loads(self.rfile.read(size))
+                if is_task:
+                    verb = self.path.rsplit("/", 1)[1]
+                    if verb == "submit":
+                        dispatch.submit(body)
+                    else:
+                        dispatch.control(body, verb)
+                    self.json_reply(dispatch.snapshot(), 202)
+                    return
                 key, revision = body["key"], body["revision"]
                 if type(revision) is not int or revision < 0:
                     raise ValueError("版本号无效")
@@ -249,7 +270,7 @@ def serve(port, cache, upstream, telemetry=None, board_status=False):
                 self.json_reply(data)
             except FileNotFoundError:
                 self.json_reply({"error": "本机没有缓存该地图版本"}, 404)
-            except Conflict as error:
+            except (Conflict, TaskConflict) as error:
                 self.json_reply({"error": str(error)}, 409)
             except (ValueError, KeyError, TypeError) as error:
                 self.json_reply({"error": str(error)}, 400)
@@ -323,8 +344,9 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     upstream = None if args.offline else f"http://127.0.0.1:{args.tunnel_port}"
     telemetry = None if args.offline else Telemetry(args.host, args.tunnel_port, args.board_port, stopped, args.board_status)
-    with serve(args.port, args.cache, upstream, telemetry, args.board_status) as http:
-        with telemetry.running() if telemetry else nullcontext():
+    dispatch = None if args.offline else Dispatch(catalog(ROOT), args.cache, args.host, SSH, stopped)
+    with serve(args.port, args.cache, upstream, telemetry, args.board_status, dispatch) as http:
+        with (telemetry.running() if telemetry else nullcontext()), (dispatch.running() if dispatch else nullcontext()):
             http.timeout = .35
             print(f"仓库无人机监看 http://127.0.0.1:{args.port}/", flush=True)
             while not stopped.is_set():

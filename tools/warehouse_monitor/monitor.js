@@ -7,10 +7,12 @@ import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { droneModel, makeCloud, wideLine } from "./scene_parts.js";
 import { createInspection } from "./inspection.js";
+import { createTasks } from "./tasks.js";
 import { startDroneStatus } from "./drone-status.js";
 
 const indoorMap = "20261114_101654_indoor_fly_raw_000001";
 const previousIndoorMap = "20261021_110311_indoor";
+const outdoorMap = "20261105_114605_outdoor";
 const byId = id => document.getElementById(id);
 const viewport = byId("viewport");
 const detail = byId("detail");
@@ -26,6 +28,7 @@ const styles = {
   walls: [0x708b9e, 2.2, .67],
   near: [0x9babb6, 2.1, .65],
   roof: [0x8c9fae, 2.4, .59],
+  rear: [0x9baeba, 2.1, .66],
 };
 const colors = { trail: "#4fdfec", plan: "#ffd182", drone: "#f3f7fb" };
 
@@ -49,6 +52,7 @@ let online = false;
 let lastResponse = 0;
 let pending = false;
 let inspection;
+let tasks;
 let catalog = [];
 let manualMap = "";
 let offline = false;
@@ -56,7 +60,8 @@ let telemetryTimer;
 let telemetryRequest;
 
 function watching() {
-  return !offline && !document.hidden && byId("tab-live").getAttribute("aria-pressed") === "true";
+  return !offline && !document.hidden && (byId("tab-live").getAttribute("aria-pressed") === "true"
+    || tasks?.watchingFlight());
 }
 
 function pauseTelemetry() {
@@ -100,10 +105,14 @@ function updateLayers() {
     const name = input.dataset.layer;
     const geometry = loadedMap?.layers[name];
     input.disabled = !geometry?.length;
+    input.parentElement.hidden = input.disabled;
     if (input.checked) points += (geometry?.length ?? 0) / 3;
     const object = rig?.layers.getObjectByName(name);
     if (object) object.visible = input.checked;
   }
+  byId("map-layers").hidden = !loadedMap;
+  byId("structure-layer-name").textContent = loadedMap?.id === outdoorMap ? "室外结构"
+    : loadedMap?.layers.walls ? "室内陈设" : "环境结构";
   byId("point-count").textContent = loadedMap ? `地图 ${points.toLocaleString("en-US")} 点` : "";
   applyVisibility();
   dirty = true;
@@ -329,7 +338,31 @@ function asFloats(encoded) {
   return new Float32Array(buffer.buffer);
 }
 
-function decodeMap(buffer) {
+function splitOutdoorStructure(points) {
+  const isRear = index => points[index] < 0 && points[index + 2] > .30;
+  let rearLength = 0;
+  for (let i = 0; i < points.length; i += 3) {
+    if (isRear(i)) rearLength += 3;
+  }
+  const rear = new Float32Array(rearLength);
+  const structure = new Float32Array(points.length - rearLength);
+  let rearIndex = 0;
+  let structureIndex = 0;
+  for (let i = 0; i < points.length; i += 3) {
+    if (isRear(i)) {
+      rear[rearIndex++] = points[i];
+      rear[rearIndex++] = points[i + 1];
+      rear[rearIndex++] = points[i + 2];
+    } else {
+      structure[structureIndex++] = points[i];
+      structure[structureIndex++] = points[i + 1];
+      structure[structureIndex++] = points[i + 2];
+    }
+  }
+  return { structure, rear };
+}
+
+function decodeMap(buffer, id) {
   const len = new DataView(buffer).getUint32(0, true);
   const metadata = JSON.parse(new TextDecoder().decode(new Uint8Array(buffer, 4, len)));
   const coordinates = new Float32Array(buffer.slice(4 + len));
@@ -340,6 +373,9 @@ function decodeMap(buffer) {
     offset += count * 3;
   }
   if (offset !== coordinates.length) throw new Error("地图点数不符");
+  if (id === outdoorMap && layers.structure) {
+    Object.assign(layers, splitOutdoorStructure(layers.structure));
+  }
   return { ...metadata, layers };
 }
 
@@ -355,12 +391,13 @@ async function loadMap(key, id) {
         : `地图读取失败（HTTP ${response.status}）`;
       throw new Error(message);
     }
-    const decoded = decodeMap(await response.arrayBuffer());
+    const decoded = decodeMap(await response.arrayBuffer(), id);
     if (wantedMap !== key || loading !== controller) return;
     loadedMap = { key, id, ...decoded };
     mapError = "";
     addLayers(loadedMap);
     inspection?.load(loadedMap);
+    tasks?.setMap(loadedMap);
     setView("room");
   } catch (error) {
     if (wantedMap !== key || loading !== controller) return;
@@ -392,6 +429,7 @@ function syncMap() {
     mapError = "";
     retryMapAt = 0;
     inspection?.load(null);
+    tasks?.setMap(null);
     addLayers(null);
   }
   if (wantedMap && !loadedMap && !loading && performance.now() >= retryMapAt) {
@@ -553,6 +591,12 @@ try {
 inspection = createInspection({
   rig, viewport, focusRoute, redraw: () => { dirty = true; }, setView: mode => setView(mode, true),
   currentPose: () => visible() && pose ? { position: pos.toArray(), yaw: Math.atan2(forward.y, forward.x) * 180 / Math.PI } : null,
+});
+tasks = createTasks({ rig, focusRoute, redraw: () => { dirty = true; }, syncTelemetry,
+  pinMap: () => {
+    manualMap = loadedMap?.key ?? "";
+    byId("display-map").value = manualMap;
+  },
 });
 byId("display-map").addEventListener("change", event => {
   manualMap = event.target.value;

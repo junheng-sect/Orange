@@ -68,3 +68,14 @@ warehouse-monitor --sync 20261021_110311_indoor
 npm install --no-save --no-package-lock three@0.180.0 esbuild@0.25.12
 ./node_modules/.bin/esbuild monitor.js --bundle --format=iife --minify --target=es2020 --outfile=web/monitor.js
 ```
+
+## 预设任务下发
+
+打开本机巡检页，选显示地图，再到「预设任务」选择脚本和查看航线。
+
+- 室外图 `20261105_114605_outdoor` 提供 test1–11。室内飞扫图 `20261114_101654_indoor_fly_raw_000001` 提供室内 test1–3，采用 `--ev-mode odom`。旧室内图可在折叠的「手工预览」中加载原有点位。
+- 「确认任务，等待上电」将请求保存在电脑服务内，最多等待 15 分钟。板端连接后由 `warehouse-nav` tmux 会话等待飞控，确认地面上锁后启动测试。刷新页面或断开 Wi-Fi 不会结束已启动的任务。电脑服务重启会清除未送达请求，板端重启需要重新下发。
+- 室外 test6、test10、test11 选中后有独立确认。等「等待遥控解锁」再地面解锁，脚本会切 OFFBOARD 并起飞。其余任务按网页提示定点手飞起飞，等设定值预发送后切 OFFBOARD。
+- 飞行中以遥控器接管。着地上锁后，结束通道 6 录包，再从网页收尾。板端可用 `tmux attach -t warehouse-nav` 查看运行输出，`Ctrl+B D` 分离。日志在板端 `~/test_data/nav_test`，网页启动的目录名称带有请求 ID 前八位。
+- 室内 test3 从货架左下拍照点后方 0.40 m 入场，镜头离地约 0.70 m，机头朝货架。按左下、左上、右上、右下拍摄，每点保存一张全分辨率 PNG 和时间戳、位姿。任务只跑一圈，照片和目标记录在同一板端日志目录。现场确认机体及顶部结构后方可实飞。
+- `tasks.json` 由板端 `python3 build_task_catalog.py` 导出，包含真实纳秒时间戳和 PCD SHA-256。修改预设任务或重建任务绑定的地图后，重新导出目录并同步电脑地图缓存。任务的计划航点、EGO 实时轨迹分别绘制。
