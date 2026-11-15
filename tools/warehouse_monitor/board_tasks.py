@@ -327,6 +327,8 @@ class Progress:
             elif health["armed"] and health["mode"] in {"OFFBOARD", "AUTO.LAND"}:
                 return "running", note
             elif health["stream"] and self.runner_started and health["armed"] and health["landed"] == 2:
+                if task["id"] == "test_indoor3":
+                    return "wait_offboard", "设定值已预发送，切 OFFBOARD 后从当前位置规划到 1 号点"
                 return "wait_offboard", "设定值已预发送，可用遥控器切 OFFBOARD"
             elif (health["ready"] and health["estimate"] and self.runner_started
                   and (health["ground"] or health["armed"])):
