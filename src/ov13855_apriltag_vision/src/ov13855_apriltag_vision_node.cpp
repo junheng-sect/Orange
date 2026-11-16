@@ -10,6 +10,7 @@
 #include <ov13855_apriltag_vision/HomogeneousTransform.h>
 #include <ov13855_apriltag_vision/apriltag_detector.hpp>
 #include <ov13855_apriltag_vision/pose_solver.hpp>
+#include <ov13855_apriltag_vision/TagObservationArray.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <image_transport/image_transport.h>
@@ -124,6 +125,9 @@ class Ov13855AprilTagVisionNode {
     detector_.reset(new ov13855_apriltag_vision::AprilTagDetector(
         tag_family_, quad_decimate_, nthreads_, refine_edges_, detection_max_dimension_));
     pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>(pose_topic_, 1);
+    if (pnh_.param("publish_detections", false)) {
+      detections_pub_ = pnh_.advertise<ov13855_apriltag_vision::TagObservationArray>("detections", 2);
+    }
     transform_debug_pub_ = nh_.advertise<ov13855_apriltag_vision::HomogeneousTransform>(transform_debug_topic_, 1);
     status_pub_ = nh_.advertise<std_msgs::String>(status_topic_, 1, true);
     processing_time_pub_ = nh_.advertise<std_msgs::Float64>(processing_time_topic_, 10);
@@ -244,25 +248,29 @@ class Ov13855AprilTagVisionNode {
         status = "IMAGE_CAMERA_INFO_SIZE_MISMATCH: image and CameraInfo dimensions differ";
       } else if (message->header.frame_id.empty() || camera_info_frame_ != message->header.frame_id) {
         status = "FRAME_MISMATCH: image and CameraInfo require the same non-empty frame_id";
-      } else if (selected < 0) {
-        status = "WAIT_MARKER: no matching tag";
       } else {
-        std::string reason;
-        if (ov13855_apriltag_vision::solveTagPose(corners[selected], target_marker_size_m_,
-            camera_matrix_, dist_coeffs_, pose, reason)) {
-          published = publishPoseAndDebug(message, pose.rvec, pose.tvec);
-          if (!published) reason = "cannot construct finite pose transform";
-        }
-        if (published) {
-          ++detect_count_;
-          std::ostringstream text;
-          text << std::fixed << std::setprecision(4) << "DETECTED: ID" << target_marker_id_
-               << " xyz_camera=(" << pose.tvec[0] << "," << pose.tvec[1] << "," << pose.tvec[2]
-               << ")m pipeline=SOLVEPNP_ITERATIVE";
-          status = text.str();
+        if (detections_pub_ && detections_pub_.getNumSubscribers() > 0)
+          publishDetections(message->header, detections);
+        if (selected < 0) {
+          status = "WAIT_MARKER: no matching tag";
         } else {
-          ++pose_reject_count_;
-          status = "SOLVEPNP_FAILED: ID" + std::to_string(target_marker_id_) + " " + reason;
+          std::string reason;
+          if (ov13855_apriltag_vision::solveTagPose(corners[selected], target_marker_size_m_,
+              camera_matrix_, dist_coeffs_, pose, reason)) {
+            published = publishPoseAndDebug(message, pose.rvec, pose.tvec);
+            if (!published) reason = "cannot construct finite pose transform";
+          }
+          if (published) {
+            ++detect_count_;
+            std::ostringstream text;
+            text << std::fixed << std::setprecision(4) << "DETECTED: ID" << target_marker_id_
+                 << " xyz_camera=(" << pose.tvec[0] << "," << pose.tvec[1] << "," << pose.tvec[2]
+                 << ")m pipeline=SOLVEPNP_ITERATIVE";
+            status = text.str();
+          } else {
+            ++pose_reject_count_;
+            status = "SOLVEPNP_FAILED: ID" + std::to_string(target_marker_id_) + " " + reason;
+          }
         }
       }
     } catch (const std::exception& error) {
@@ -296,6 +304,37 @@ class Ov13855AprilTagVisionNode {
     const double elapsed_ms = (ros::WallTime::now() - start).toSec() * 1000.0;
     message.data = std::isfinite(elapsed_ms) && elapsed_ms >= 0.0 ? elapsed_ms : 0.0;
     processing_time_pub_.publish(message);
+  }
+
+  void publishDetections(
+      const std_msgs::Header& header,
+      const std::vector<ov13855_apriltag_vision::TagDetection>& detections)
+  {
+    ov13855_apriltag_vision::TagObservationArray message;
+    message.header = header;
+    message.family = tag_family_;
+    const float h = static_cast<float>(target_marker_size_m_ / 2.0);
+    const std::vector<cv::Point3f> object{{-h,-h,0}, {h,-h,0}, {h,h,0}, {-h,h,0}};
+    for (const auto& detection : detections) {
+      ov13855_apriltag_vision::PoseSolution pose;
+      std::string reason;
+      if (!ov13855_apriltag_vision::solveTagPose(detection.corners, target_marker_size_m_,
+                                               camera_matrix_, dist_coeffs_, pose, reason))
+        continue;
+      ov13855_apriltag_vision::TagObservation observation;
+      observation.id = detection.id;
+      cv::Mat rotation;
+      cv::Rodrigues(pose.rvec, rotation);
+      if (!rotationToQuaternion(rotation, observation.pose.orientation)) continue;
+      observation.pose.position.x = pose.tvec[0];
+      observation.pose.position.y = pose.tvec[1];
+      observation.pose.position.z = pose.tvec[2];
+      std::vector<cv::Point2f> projected;
+      cv::projectPoints(object, pose.rvec, pose.tvec, camera_matrix_, dist_coeffs_, projected);
+      observation.reprojection_rms_px = cv::norm(projected, detection.corners, cv::NORM_L2) / 2.0;
+      if (std::isfinite(observation.reprojection_rms_px)) message.tags.push_back(observation);
+    }
+    detections_pub_.publish(message);
   }
 
   bool publishPoseAndDebug(
@@ -498,7 +537,7 @@ class Ov13855AprilTagVisionNode {
   ros::NodeHandle nh_, pnh_;
   ros::Subscriber image_sub_, camera_info_sub_;
   image_transport::ImageTransport image_transport_;
-  ros::Publisher pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
+  ros::Publisher detections_pub_, pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
   image_transport::Publisher annotated_pub_, preview_pub_;
   tf2_ros::TransformBroadcaster marker_tf_broadcaster_;
   std::string image_topic_, camera_info_topic_, pose_topic_, transform_debug_topic_;

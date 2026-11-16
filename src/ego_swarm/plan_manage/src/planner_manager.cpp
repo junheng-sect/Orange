@@ -459,6 +459,23 @@ namespace ego_planner
     return true;
   }
 
+  void EGOPlannerManager::planShortGoal(const Eigen::Vector3d &start, const Eigen::Vector3d &goal)
+  {
+    // For this uniform cubic, derivative control points bound speed by d/dt
+    // and acceleration by d/dt^2. Three repeated points give zero endpoint
+    // velocity and acceleration without fitting or shifting either endpoint.
+    const double distance = (goal - start).norm();
+    const double speed = std::min({0.10, pp_.max_vel_, pp_.max_vel_z_});
+    const double accel = std::min({0.20, pp_.max_acc_, pp_.max_acc_z_});
+    const double dt = std::max({0.20, distance / speed, std::sqrt(distance / accel)});
+    Eigen::MatrixXd points(3, 6);
+    for (int i = 0; i < 3; ++i) {
+      points.col(i) = start;
+      points.col(i + 3) = goal;
+    }
+    updateTrajInfo(UniformBspline(points, 3, dt), ros::Time::now());
+  }
+
   void EGOPlannerManager::holdPosition(const Eigen::Vector3d &position)
   {
     Eigen::MatrixXd points(3, 6);

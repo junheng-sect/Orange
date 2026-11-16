@@ -1,6 +1,7 @@
 <launch>
   <!-- 只启动相机读码节点，不开相机。相机和 AprilTag 已经在跑（fusion / ov13855_marker_tracking.launch）时用它；
        地面单独测试用 bringup.launch。可选值见下面的 doc。 -->
+  <arg name="pose_topic" default="/front_marker/pose" />
   <arg name="layout" default="qr_top_tag_bottom"
        doc="标签版式（config/layouts/ 下的文件名）：qr_top_tag_bottom（QR 标签，默认）/ dm_top_tag_bottom（DataMatrix 标签）/ drone_vision_default（原版，tag 12 mm）" />
   <arg name="save_frames" default="off"
@@ -32,6 +33,6 @@
     <param name="save_retry_frames" value="$(arg save_retry_frames)" />
     <param name="image_topic" value="/ov13855_full/image_raw" />
     <param name="camera_info_topic" value="/ov13855_full/camera_info" />
-    <param name="pose_topic" value="/front_marker/pose" />
+    <param name="pose_topic" value="$(arg pose_topic)" />
   </node>
 </launch>

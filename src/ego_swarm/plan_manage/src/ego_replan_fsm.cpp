@@ -30,6 +30,7 @@ namespace ego_planner
     // Past that the map only changes with each cloud (10 Hz); retrying every tick on an unchanged map
     // repeats the same failure, burns about one core and floods /rosout.
     nh.param("fsm/fail_fast_retries", fail_fast_retries_, 10);
+    nh.param("/drone_nav/config/allow_short_goals", allow_short_goals_, false);
     nh.param("fsm/fail_retry_interval", fail_retry_interval_, 0.1);
 
     have_trigger_ = !flag_realworld_experiment_;
@@ -210,6 +211,7 @@ namespace ego_planner
         (arrived_wall_.isZero() || (ros::WallTime::now()-arrived_wall_).toSec()>0.3))
       have_completed_anchor_ = false;
     have_target_=false;have_trigger_=false;have_new_target_=false;
+    short_goal_ = false;
     if (path_mode_)
       path_identity_.path_stamp = ros::Time::now();
     path_mode_ = path_pending_ = path_next_ready_ = false;
@@ -253,6 +255,24 @@ namespace ego_planner
     requested_goal_ = end_wp; have_requested_goal_ = true;
     arrived_wall_ = ros::WallTime();
 
+    short_goal_ = allow_short_goals_ && (odom_pos_ - end_wp).norm() < 0.2;
+    if (short_goal_) {
+      if (exec_state_ != WAIT_TARGET || odom_vel_.norm() > 0.05 ||
+          (ros::WallTime::now() - odom_wall_).toSec() > 0.3)
+        return;
+      have_completed_anchor_ = false;
+      planner_manager_->planShortGoal(odom_pos_, end_wp);
+      end_pt_ = local_target_pt_ = end_wp;
+      end_vel_.setZero();
+      local_target_vel_.setZero();
+      have_target_ = true;
+      have_new_target_ = false;
+      flag_escape_emergency_ = true;
+      publishLocalTrajectory();
+      changeFSMExecState(EXEC_TRAJ, "SHORT_GOAL");
+      return;
+    }
+
     if (have_completed_anchor_ && exec_state_ == WAIT_TARGET &&
         (end_wp - completed_anchor_).norm() <= 1e-6 &&
         (odom_pos_ - end_wp).norm() <= 0.15 && odom_vel_.norm() <= 0.1 &&
@@ -295,6 +315,7 @@ namespace ego_planner
       prev = point;
     }
     const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+    short_goal_ = false;
     if (!planner_manager_->planGlobalTrajWaypoints(odom_pos_, zero, zero, points, zero, zero, 1.35))
       return;
 
@@ -718,7 +739,7 @@ namespace ego_planner
           goto force_return;
           // return;
         }
-        else if ((end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_)
+        else if (!short_goal_ && (end_pt_ - pos).norm() > no_replan_thresh_ && t_cur > replan_thresh_)
         {
           changeFSMExecState(REPLAN_TRAJ, "FSM");
         }
@@ -841,6 +862,10 @@ namespace ego_planner
     /* ---------- check lost of depth ---------- */
     if (map->getOdomDepthTimeout())
     {
+      if (short_goal_) {
+        cancelCallback(std_msgs::EmptyConstPtr());
+        return;
+      }
       ROS_ERROR("Depth Lost! EMERGENCY_STOP");
       enable_fail_safe_ = false;
       changeFSMExecState(EMERGENCY_STOP, "SAFETY");
@@ -882,6 +907,12 @@ namespace ego_planner
       if (occ)
       {
 
+        if (short_goal_) {
+          // The executor brakes on the invalidated trajectory. Do not use
+          // the normal optimizer to detour a short, speed-limited goal.
+          cancelCallback(std_msgs::EmptyConstPtr());
+          return;
+        }
         if (planFromCurrentTraj()) // Make a chance
         {
           changeFSMExecState(EXEC_TRAJ, "SAFETY");

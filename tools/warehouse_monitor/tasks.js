@@ -84,7 +84,9 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
   const selector = byId("task-choice");
   const dialog = byId("task-auto-dialog");
   const overlay = new Group();
-  rig?.world.add(overlay);
+  const scanOverlay = new Group();
+  rig?.world.add(overlay, scanOverlay);
+  let scanKey = "";
   let data = { maps: {}, tasks: [] };
   let map = null;
   let status = null;
@@ -183,10 +185,44 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
     paintDetails();
   }
 
+  function paintScan(active) {
+    const scan = active?.scan;
+    const route = panelVisible() && data.maps[map?.id]?.key === map?.key &&
+      active?.mapKey === map?.key ? scan?.route : null;
+    const key = JSON.stringify(route || null);
+    if (key === scanKey) return;
+    scanKey = key;
+    for (const item of [...scanOverlay.children]) {
+      item.geometry?.dispose();
+      item.material?.dispose();
+      if (item.isCSS2DObject) item.element.remove();
+      scanOverlay.remove(item);
+    }
+    if (route?.ids?.length && route.points.length === route.ids.length + 2) {
+      scanOverlay.add(wideLine(route.points.flat(), { color: "#6ee7d0", linewidth: 3 }));
+      for (const [i, id] of route.ids.entries()) {
+        const point = route.points[i + 1];
+        const marker = new Mesh(new SphereGeometry(.045, 10, 8),
+                                new MeshBasicMaterial({ color: "#6ee7d0" }));
+        marker.position.fromArray(point);
+        scanOverlay.add(marker);
+        const span = document.createElement("span");
+        span.className = "task-waypoint";
+        span.textContent = `${i + 1} · Tag ${id}`;
+        const label = new CSS2DObject(span);
+        label.center.set(.5, 1.5);
+        label.position.fromArray(point);
+        scanOverlay.add(label);
+      }
+    }
+    redraw();
+  }
+
   function paintStatus() {
     const request = status?.request;
     const active = status?.board?.active;
     const current = active ?? request;
+    paintScan(active);
     const outstanding = Boolean(active || (request && !terminal.has(request.state)));
     byId("task-confirm").disabled = busy || !status?.enabled || !selected()
       || data.maps[map?.id]?.key !== map?.key || outstanding;
@@ -202,6 +238,13 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
     const mode = status.online && active?.mode ? ` · 飞控 ${active.mode}` : "";
     byId("task-message").textContent = ((request?.state === "queued" && active?.id !== request.id)
       ? request.message : status?.board?.error ?? active?.message ?? request?.message ?? "") + mode;
+    const scan = active?.scan;
+    if (scan && current.state === "running") {
+      const tag = scan.tagId != null ? ` · Tag ${scan.tagId}` : "";
+      const order = scan.route?.ids?.length ? ` · 顺序 ${scan.route.ids.join(" → ")}` : "";
+      byId("task-message").textContent =
+        `${scan.observation} · ${scan.phase}${tag} · 发现 ${scan.discovered} 张 · 成功 ${scan.success} · 失败 ${scan.failed}${order}${mode}`;
+    }
     byId("task-cancel").hidden = !(active ? active.canCancel : request?.state === "queued");
     byId("task-stop").hidden = !active?.canStop || !status.online;
     byId("task-cancel").disabled = byId("task-stop").disabled = busy;

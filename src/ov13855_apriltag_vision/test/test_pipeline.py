@@ -10,7 +10,7 @@ from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float64, String
 from tf2_msgs.msg import TFMessage
-from ov13855_apriltag_vision.msg import HomogeneousTransform
+from ov13855_apriltag_vision.msg import HomogeneousTransform, TagObservationArray
 
 class PipelineTest(unittest.TestCase):
     def setUp(self):
@@ -72,6 +72,30 @@ class PipelineTest(unittest.TestCase):
         self.info();self.assert_first_frame_published(9)
         # Reacquisition publishes on its first valid frame, even after a long gap.
         time.sleep(2.1);self.assert_first_frame_published(9)
+    def test_tag_array_multiple_tags(self):
+        arrays = []
+        sub = rospy.Subscriber('/ov13855_test_vision/detections', TagObservationArray, arrays.append)
+        end = time.monotonic() + 5
+        while not sub.get_num_connections() and time.monotonic() < end:
+            time.sleep(.02)
+        self.assertTrue(sub.get_num_connections())
+        self.info()
+        image = self.scene(None)
+        dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
+        image[300:500, 100:300] = cv2.aruco.drawMarker(dictionary, 7, 200)
+        image[320:480, 520:680] = cv2.aruco.drawMarker(dictionary, 9, 160)
+        stamp = self.send(image)
+        frame, = [a for a in arrays if a.header.stamp == stamp]
+        self.assertEqual(frame.family, 'tag36h11')
+        self.assertEqual(frame.header.frame_id, 'ov13855_optical_frame')
+        self.assertEqual({t.id for t in frame.tags}, {7, 9})
+        self.assertTrue(all(t.pose.position.z > 0 and t.reprojection_rms_px < 2 for t in frame.tags))
+        self.assertEqual(self.matrices[-1].marker_id, 7)
+        stamp = self.send(self.scene(None))
+        frame, = [a for a in arrays if a.header.stamp == stamp]
+        self.assertFalse(frame.tags)
+        sub.unregister()
+
     def test_preview(self):
         previews=[]
         sub=rospy.Subscriber('/ov13855_test/preview',Image,previews.append)

@@ -2,6 +2,7 @@
   <!-- 视觉参数统一在 YAML 中维护；layout_file 非空时再叠加标签版式文件（覆盖 target_marker_size_m）。 -->
   <arg name="config_file" default="$(find ov13855_apriltag_vision)/config/ov13855_apriltag_vision.yaml" />
   <arg name="layout_file" default="" />
+  <arg name="publish_detections" default="false" />
   <!-- output：screen 打到终端；log 时 INFO 只进 ~/.ros/log，WARN/ERROR 仍打到终端（manual_read 用来让终端只留汇总） -->
   <arg name="output" default="screen" />
 
@@ -10,6 +11,8 @@
         name="ov13855_apriltag_vision_node"
         output="$(arg output)">
     <rosparam command="load" file="$(arg config_file)" />
+    <param name="publish_detections" value="$(arg publish_detections)" />
+    <remap from="~detections" to="/ov13855_apriltag_vision/detections" />
     <rosparam if="$(eval arg('layout_file') != '')"
               command="load" file="$(arg layout_file)" />
   </node>

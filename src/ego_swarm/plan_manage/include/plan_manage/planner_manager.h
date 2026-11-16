@@ -32,6 +32,7 @@ namespace ego_planner
                        Eigen::Vector3d end_pt, Eigen::Vector3d end_vel, bool flag_polyInit, bool flag_randomPolyTraj, double max_yaw_rate = 0.0, const ros::Time &handoff = ros::Time());
     bool EmergencyStop(Eigen::Vector3d stop_pos);
     void holdPosition(const Eigen::Vector3d &position);
+    void planShortGoal(const Eigen::Vector3d &start, const Eigen::Vector3d &goal);
     bool planGlobalTraj(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
                         const Eigen::Vector3d &end_pos, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc);
     bool planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,

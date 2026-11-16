@@ -99,6 +99,12 @@ def build(scripts, maps):
                       mapId=indoor_map, automatic=False, fixed=True,
                       route='左下 → 左上 → 右上 → 右下，每点停 3 s 并保存全图',
                       finish=HOLD, points=[point['xyz'] for point in indoor_photo['points']], stops=stops))
+    points = [point['xyz'] for point in indoor_photo['points']]
+    tasks.append(dict(id='test_indoor4', label='test4', title='货架标签分批扫码',
+                      mapId=indoor_map, automatic=False, fixed=True,
+                      route='左下 → 左上 → 右上 → 右下，各点识别后扫描新标签',
+                      finish='返回右下朝向货架悬停，飞手接管降落',
+                      points=points, stops=stops))
     return dict(maps=map_versions, tasks=tasks)
 
 

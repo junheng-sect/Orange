@@ -168,7 +168,11 @@ class Mission:
             # only exception is a stationary turn at an already settled anchor.
             if not fresh(self.odom,self.odom_at,odom_timeout(self.c)):self.abort('odometry stale before waypoint');return
             p=xyz(goal.pose.position);distance=np.linalg.norm(xyz(self.odom.pose.pose.position)-p)
-            if distance<.2 and (self.last_completed_goal is None or
+            guarded_arrival = self.c.get('allow_short_goals', False)
+            short_goal = guarded_arrival and distance < .2
+            if short_goal and np.linalg.norm(xyz(self.odom.twist.twist.linear)) > .05:
+                self.abort('short goal requires a settled start at <=0.05 m/s');return
+            if not guarded_arrival and distance<.2 and (self.last_completed_goal is None or
                     np.linalg.norm(p-self.last_completed_goal)>1e-6 or distance>.15 or
                     np.linalg.norm(xyz(self.odom.twist.twist.linear))>.1):
                 self.abort('translation below 0.2m requires an already settled identical waypoint');return
@@ -183,7 +187,16 @@ class Mission:
                     tr=self.buf.lookup_transform('drone_map','drone_odom',rospy.Time(0),rospy.Duration(.02))
                     if not fresh(tr,time.monotonic(),.5) or np.linalg.norm(xyz(tr.transform.translation)-t)>.01 or np.linalg.norm(rotation(quat(tr.transform.rotation))-r)>.01:raise ValueError('map transform reset')
                 except Exception as e:self.abort(str(e));return
-                o=self.odom;ok=np.linalg.norm(xyz(o.pose.pose.position)-xyz(goal.pose.position))<=.15 and np.linalg.norm(xyz(o.twist.twist.linear))<=.1 and abs(wrap(yaw(quat(o.pose.pose.orientation))-yaw(quat(goal.pose.orientation))))<=math.radians(5)
+                o = self.odom
+                ok = (np.linalg.norm(xyz(o.pose.pose.position) - p) <= (.04 if short_goal else .15)
+                      and np.linalg.norm(xyz(o.twist.twist.linear)) <= (.05 if short_goal else .1)
+                      and abs(wrap(yaw(quat(o.pose.pose.orientation)) - yaw(quat(goal.pose.orientation)))) <= math.radians(5))
+                if guarded_arrival:
+                    cmd = self.command
+                    ok = (ok and cmd is not None and cmd.generation == goal.header.seq
+                          and cmd.header.stamp >= goal.header.stamp and fresh(cmd, time.monotonic(), .3)
+                          and cmd.terminal and np.linalg.norm(xyz(cmd.position) - p) <= (.002 if short_goal else .05)
+                          and abs(wrap(cmd.yaw - yaw(quat(goal.pose.orientation)))) <= math.radians(5))
                 settled=(settled or time.monotonic()) if ok else None
                 self.server.publish_feedback(ExecuteRouteFeedback(waypoint_index=i,state='SETTLING' if ok else 'NAVIGATING'))
                 if settled and time.monotonic()-settled>=1.:break
