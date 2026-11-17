@@ -1,0 +1,22 @@
+match_hz: 2.0
+registration:
+  resolution: 0.10
+  grid_memory_mib: 512
+  distance_cap: 1.0
+  voxel: 0.20
+  range_min: 0.5
+  range_max: 30.0
+  max_points: 2000
+  min_points: 300
+  min_valid: 200
+  min_coverage: 0.60
+  inlier_distance: 0.20
+  min_inliers: 0.50
+  max_median: 0.10
+  max_rmse: 0.12
+  min_eigenvalue: 0.0001
+  min_eigenvalue_ratio: 0.0001
+  yaw_length: 5.0
+  solve_ms: 80.0
+  max_iterations: 50
+  cauchy_scale: 0.10

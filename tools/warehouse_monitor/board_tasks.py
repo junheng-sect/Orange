@@ -203,6 +203,7 @@ def check_map(data, task):
 
 class FlightStatus:
     def __init__(self, rospy):
+        from diagnostic_msgs.msg import DiagnosticArray
         from mavros_msgs.msg import EstimatorStatus, ExtendedState, State
         from nav_msgs.msg import Odometry
         from std_msgs.msg import String
@@ -217,6 +218,7 @@ class FlightStatus:
             rospy.Subscriber("/mavros/estimator_status", EstimatorStatus, self.set,
                              callback_args="estimator", queue_size=3),
             rospy.Subscriber("/fastlio/odom_world", Odometry, self.set, callback_args="fastlio", queue_size=1),
+            rospy.Subscriber("/dll_localization/status", DiagnosticArray, self.set, callback_args="dll", queue_size=1),
         ]
         for topic, name in (("/drone_nav/gateway_status", "gateway"), ("/drone_nav/input_status", "input"),
                             ("/drone_reloc/status", "reloc"), ("/drone_reloc/result", "result")):
@@ -275,11 +277,17 @@ class FlightStatus:
                 odom = fresh("fastlio", .6, stamped=True)
                 ready = (localized and odom is not None and odom.header.frame_id == "drone_odom"
                          and odom.child_frame_id == "drone_base")
+                diagnostics = fresh("dll", 1.5, stamped=True)
+                dll = next((s for s in diagnostics.status if s.name == "fastlio_dll"), None) if diagnostics else None
+                dll_tracking = bool(dll and dll.message == "TRACKING" and dll.level == 0)
+                dll_reason = next((item.value for item in dll.values if item.key == "reason"), "") if dll else ""
+                dll_note = f"DLL {dll.message} {dll_reason}".strip() if dll else "等待 DLL 状态"
             else:
                 ready = localized and nav.get("state") == "READY" and gateway.get("real_output") is True
+                dll_tracking, dll_note = False, ""
             stream = ready and self.prepared_at is not None and now - self.prepared_at >= 1.0
             return dict(connected=connected, mode=mode, armed=armed, landed=landed, ground=ground,
-                        ready=ready, stream=stream, estimate=estimate)
+                        ready=ready, stream=stream, estimate=estimate, dll_tracking=dll_tracking, dll_note=dll_note)
 
 
 class Progress:
@@ -359,12 +367,15 @@ class Progress:
                         return "action_done", "已封包，可结束任务并收尾"
                     return "action_done", record + "。关通道 6 并确认封包后收尾"
                 if health["armed"] and health["landed"] == 2:
-                    return "running", "遥控手飞 · " + (self.recording or record)
-                if self.manual_ready and health["ready"]:
+                    note = "遥控手飞 · " + (self.recording or record)
+                    if not health["dll_tracking"]:
+                        note += " · " + health["dll_note"] + "，显示原定位"
+                    return "running", note
+                if self.manual_ready and health["ready"] and health["dll_tracking"]:
                     if self.recording == "待录包":
                         record = "定位就绪。拨通道 6 开包，确认录包后静置 20 秒"
                     return "wait_pilot", record
-                return "preparing", note or "等待 FAST-LIO2 和室外重定位"
+                return "preparing", health["dll_note"] if self.manual_ready else note or "等待 FAST-LIO2、重定位和 DLL"
             if task["automatic"]:
                 if phase == "DONE" or finished:
                     return "action_done", finished or note

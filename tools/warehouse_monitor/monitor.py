@@ -17,6 +17,8 @@ import uuid
 
 import numpy as np
 import rospy
+from diagnostic_msgs.msg import DiagnosticArray
+from geometry_msgs.msg import PoseStamped, TransformStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import String
@@ -37,6 +39,7 @@ CLOUD_FRESH = 1.25
 PLAN_FRESH = .8
 TRAIL_LENGTH = 4800
 PATH_GENERATION = 1 << 32
+DLL_MAP = "20261105_114605_outdoor"
 
 
 def xyz(p):
@@ -101,6 +104,9 @@ class Monitor:
         self.source = None
         self.pose = None
         self.trail = deque(maxlen=TRAIL_LENGTH)
+        self.dll_samples = OrderedDict()
+        self.dll_status = None
+        self.viewing_dll = False
         self.cloud = None
         self.cloud_at = 0
         self.plans = OrderedDict()
@@ -114,6 +120,9 @@ class Monitor:
             ("/tf", TFMessage, self.on_tf, {}),
             ("/drone_nav/odom", Odometry, self.on_pose, {"callback_args": "navigation"}),
             ("/fastlio/odom_world", Odometry, self.on_pose, {"callback_args": "fastlio"}),
+            ("/dll_localization/pose", PoseStamped, self.on_dll_sample, {"callback_args": "pose"}),
+            ("/dll_localization/correction", TransformStamped, self.on_dll_sample, {"callback_args": "correction"}),
+            ("/dll_localization/status", DiagnosticArray, self.on_dll_status, {}),
             ("/drone_nav/cloud", PointCloud2, self.on_cloud, {"buff_size": 4 * 1024 * 1024}),
             ("/drone_nav/bspline", Bspline, self.on_legacy_plan, {}),
             ("/drone_nav/executor_status", String, self.on_executor, {}),
@@ -131,6 +140,8 @@ class Monitor:
         self.epoch = uuid.uuid4().hex
         self.pose = self.cloud = None
         self.trail.clear()
+        self.dll_samples.clear()
+        self.viewing_dll = False
         self.plans.clear()
         self.source = None
         self.aligned = False
@@ -200,6 +211,64 @@ class Monitor:
         return (valid and now - when <= 2.5 and now - tf_when <= MAP_FRESH
                 and abs(q @ tf_q) >= 1 - 1e-8 and float(np.max(np.abs(offset - tf_offset))) <= 1e-4)
 
+    def on_dll_sample(self, msg, kind):
+        stamp = msg.header.stamp.to_nsec()
+        if stamp <= 0 or msg.header.frame_id != "drone_map":
+            return
+        if kind == "correction" and msg.child_frame_id != "drone_odom":
+            return
+        point = msg.pose.position if kind == "pose" else msg.transform.translation
+        orientation = msg.pose.orientation if kind == "pose" else msg.transform.rotation
+        position = xyz(point)
+        if not np.isfinite(position).all():
+            return
+        try:
+            body = quaternion(xyzw(orientation)).tolist()
+        except ValueError:
+            return
+        sample = [msg.header.stamp.to_sec(), *position, *body] if kind == "pose" else True
+        with self.lock:
+            self.dll_samples.setdefault(stamp, {})[kind] = (time.monotonic(), sample)
+            while len(self.dll_samples) > 8:
+                self.dll_samples.popitem(last=False)
+
+    def on_dll_status(self, msg):
+        for status in msg.status:
+            if status.name != "fastlio_dll":
+                continue
+            fields = {item.key: item.value for item in status.values}
+            try:
+                accepted = int(fields.get("accepted_stamp_ns", "0"))
+            except ValueError:
+                accepted = 0
+            with self.lock:
+                self.dll_status = (time.monotonic(), msg.header.stamp.to_nsec(), status.message,
+                                   fields.get("reason", ""), accepted,
+                                   status.level == 0 and fields.get("local_input") == "fresh")
+                if status.message != "TRACKING" or status.level != 0:
+                    self.dll_samples.clear()
+            return
+
+    def dll_view(self, now):
+        if self.dll_status is None or self.map_path is None or self.map_path.parent.name != DLL_MAP:
+            return None, None
+        at, status_stamp, state, reason, accepted, valid = self.dll_status
+        if now - at > 1.5:
+            return None, "DLL 状态已过期"
+        if state != "TRACKING" or not valid:
+            return None, f"{state} · {reason}"
+        ros_now = rospy.Time.now().to_nsec()
+        if not 0 < status_stamp or not -50_000_000 <= ros_now - status_stamp <= 1_500_000_000:
+            return None, "DLL 状态时间戳过期"
+        for stamp in sorted(self.dll_samples, reverse=True):
+            sample = self.dll_samples[stamp]
+            if (set(sample) == {"pose", "correction"} and accepted > 0
+                    and 0 <= stamp - accepted < 1_500_000_000
+                    and -50_000_000 <= ros_now - stamp <= 500_000_000
+                    and all(now - received <= .5 for received, _ in sample.values())):
+                return sample["pose"][1], None
+        return None, "等待同刻 DLL 位姿与修正"
+
     def on_pose(self, msg, source):
         expected = "drone_nav_base" if source == "navigation" else "drone_base"
         if (msg.header.frame_id, msg.child_frame_id) != ("drone_odom", expected):
@@ -238,7 +307,7 @@ class Monitor:
             body = multiply(map_q, q)
             self.pose = [stamp, *world.tolist(), *body.tolist()]
             self.aligned = True
-            if not self.trail or now - self.trail[-1][1] >= .095:
+            if not self.viewing_dll and (not self.trail or now - self.trail[-1][1] >= .095):
                 self.trail.append((self.next_id(), now, world.tolist()))
 
     def on_cloud(self, msg):
@@ -309,6 +378,13 @@ class Monitor:
             aligned = self.valid_alignment(now)
             if not aligned and (self.aligned or self.cloud or self.plans):
                 self.clear_motion()
+            dll_pose, dll_reason = self.dll_view(now) if aligned and self.source == "fastlio" else (None, None)
+            if self.viewing_dll != bool(dll_pose):
+                self.viewing_dll = bool(dll_pose)
+                self.epoch = uuid.uuid4().hex
+                self.trail.clear()
+            if dll_pose and (not self.trail or self.trail[-1][1] != dll_pose[0]):
+                self.trail.append((self.next_id(), dll_pose[0], dll_pose[1:4]))
             same_epoch = epoch == self.epoch
             trail_id, cloud_id, plan_id = cursors if same_epoch else (0, 0, 0)
             fresh_pose = bool(self.pose and self.source in self.poses
@@ -328,8 +404,9 @@ class Monitor:
             result = dict(
                 epoch=self.epoch, localMap=local_map, mapKey=self.map_key, mapId=self.map_path.parent.name if self.map_path else None,
                 mapError=self.map_error, relocation=self.relocation[2] if now - self.relocation[0] <= 2.5 else "WAITING",
-                aligned=aligned, pose=self.pose if aligned and fresh_pose else None,
-                poseSource=self.source if aligned and fresh_pose else None,
+                aligned=aligned, pose=dll_pose or (self.pose if aligned and fresh_pose else None),
+                poseSource="dll" if dll_pose else self.source if aligned and fresh_pose else None,
+                dllReason=dll_reason,
                 executor=state, cloudId=cloud[0] if cloud else 0,
                 cloudCount=cloud[3] if cloud else 0,
                 planId=plan["id"] if plan else 0, pending=plan["pending"] if plan else False,

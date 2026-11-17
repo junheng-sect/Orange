@@ -1,0 +1,4 @@
+match_hz: 2.0
+registration:
+  resolution: 0.10
+  grid_memory_mib: 1280

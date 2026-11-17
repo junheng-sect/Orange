@@ -1,0 +1,12 @@
+<launch>
+  <arg name="map_dir"/>
+  <arg name="legacy_map_dir" default="$(arg map_dir)"/>
+  <arg name="config" default="$(find fastlio_dll)/config/indoor.yaml"/>
+
+  <node pkg="fastlio_dll" type="fastlio_dll_node" name="fastlio_dll"
+        output="screen" required="true">
+    <rosparam command="load" file="$(arg config)"/>
+    <param name="map_pcd" type="str" value="$(arg map_dir)/map_world.pcd"/>
+    <param name="legacy_map_dir" type="str" value="$(arg legacy_map_dir)"/>
+  </node>
+</launch>
