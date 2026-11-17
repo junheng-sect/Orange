@@ -500,6 +500,19 @@
       ]
     },
     {
+      "id": "test12",
+      "label": "test12",
+      "title": "手飞定位与录包",
+      "mapId": "20261105_114605_outdoor",
+      "automatic": false,
+      "fixed": false,
+      "manual": true,
+      "points": [],
+      "stops": [],
+      "route": "全程遥控手飞，实时显示已飞轨迹",
+      "finish": "落地上锁后关通道 6，待封包后从网页收尾"
+    },
+    {
       "id": "test_indoor1",
       "label": "test1",
       "title": "室内前进 1 m",

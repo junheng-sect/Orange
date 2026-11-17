@@ -105,6 +105,10 @@ def build(scripts, maps):
                       route='左下 → 左上 → 右上 → 右下，各点识别后扫描新标签',
                       finish='返回右下朝向货架悬停，飞手接管降落',
                       points=points, stops=stops))
+    tasks.insert(11, dict(id="test12", label="test12", title="手飞定位与录包",
+                          mapId=MAPS["outdoor"], automatic=False, fixed=False, manual=True,
+                          points=[], stops=[], route="全程遥控手飞，实时显示已飞轨迹",
+                          finish="落地上锁后关通道 6，待封包后从网页收尾"))
     return dict(maps=map_versions, tasks=tasks)
 
 

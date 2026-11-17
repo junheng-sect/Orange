@@ -204,9 +204,11 @@ def check_map(data, task):
 class FlightStatus:
     def __init__(self, rospy):
         from mavros_msgs.msg import EstimatorStatus, ExtendedState, State
+        from nav_msgs.msg import Odometry
         from std_msgs.msg import String
 
         self.lock = Lock()
+        self.ros_time = rospy.Time.now
         self.latest = {}
         self.prepared_at = None
         self.subscribers = [
@@ -214,6 +216,7 @@ class FlightStatus:
             rospy.Subscriber("/mavros/extended_state", ExtendedState, self.set, callback_args="ext", queue_size=3),
             rospy.Subscriber("/mavros/estimator_status", EstimatorStatus, self.set,
                              callback_args="estimator", queue_size=3),
+            rospy.Subscriber("/fastlio/odom_world", Odometry, self.set, callback_args="fastlio", queue_size=1),
         ]
         for topic, name in (("/drone_nav/gateway_status", "gateway"), ("/drone_nav/input_status", "input"),
                             ("/drone_reloc/status", "reloc"), ("/drone_reloc/result", "result")):
@@ -241,11 +244,18 @@ class FlightStatus:
         with self.lock:
             now = time.monotonic()
 
-            def fresh(name, max_age):
+            def fresh(name, max_age, stamped=False):
                 at, value = self.latest.get(name, (0, None))
-                return value if now - at < max_age else None
+                if value is None or now - at >= max_age:
+                    return None
+                if stamped:
+                    stamp = value.header.stamp
+                    if stamp.is_zero() or not -0.05 <= (self.ros_time() - stamp).to_sec() < max_age:
+                        return None
+                return value
 
-            fcu, ext = fresh("fcu", 2), fresh("ext", 1.5)
+            manual = task.get("manual", False)
+            fcu, ext = fresh("fcu", 2, manual), fresh("ext", 1.5, manual)
             est = fresh("estimator", 2)
             estimate = bool(est and est.attitude_status_flag and est.velocity_horiz_status_flag
                             and est.velocity_vert_status_flag
@@ -259,9 +269,14 @@ class FlightStatus:
             armed = fcu.armed if connected else None
             landed = ext.landed_state if ext else None
             ground = connected and not armed and landed == 1 and mode != "OFFBOARD"
-            ready = (connected and nav.get("state") == "READY" and gateway.get("real_output") is True
-                     and loc.get("state") == "LOCALIZED" and loc.get("valid") is True
-                     and result.get("confirmed") is True and result.get("map") == str(MAPS / task["mapId"]))
+            localized = (connected and loc.get("state") == "LOCALIZED" and loc.get("valid") is True
+                         and result.get("confirmed") is True and result.get("map") == str(MAPS / task["mapId"]))
+            if manual:
+                odom = fresh("fastlio", .6, stamped=True)
+                ready = (localized and odom is not None and odom.header.frame_id == "drone_odom"
+                         and odom.child_frame_id == "drone_base")
+            else:
+                ready = localized and nav.get("state") == "READY" and gateway.get("real_output") is True
             stream = ready and self.prepared_at is not None and now - self.prepared_at >= 1.0
             return dict(connected=connected, mode=mode, armed=armed, landed=landed, ground=ground,
                         ready=ready, stream=stream, estimate=estimate)
@@ -278,6 +293,8 @@ class Progress:
         self.finished = None
         self.stop_refused = False
         self.clean_exit = False
+        self.manual_ready = False
+        self.recording = ""
 
     def collect(self, stream):
         for line in stream:
@@ -296,6 +313,18 @@ class Progress:
                     except (ValueError, KeyError, TypeError):
                         pass
                 self.note = line[:430]
+                if "室外重定位已确认" in line:
+                    self.manual_ready = True
+                if "Channel 6 录包已待命" in line:
+                    self.recording = "待录包"
+                if "Channel 6 录包中：" in line or "Channel 6 恢复录包" in line:
+                    self.recording = "录包中"
+                if "Channel 6 已离开录制位" in line:
+                    self.recording = "正在封包"
+                if "已封包：" in line:
+                    self.recording = "已封包"
+                if "RECORD 进程已退出" in line:
+                    self.recording = "录包器已退出，请检查 record.log"
                 if "[ OK ] 导航就绪" in line:
                     self.runner_started = True
                 if "待命：定点模式在地面解锁" in line:
@@ -318,6 +347,24 @@ class Progress:
     def stage(self, task, health, has_flown):
         with self.lock:
             phase, note, finished = self.phase, self.note, self.finished
+            if task.get("manual"):
+                if self.recording == "录包中":
+                    record = "录包中。起飞前静置录够 20 秒"
+                elif self.recording == "已封包":
+                    record = "已封包"
+                else:
+                    record = self.recording or "等待录包器就绪"
+                if has_flown and health["ground"]:
+                    if self.recording == "已封包":
+                        return "action_done", "已封包，可结束任务并收尾"
+                    return "action_done", record + "。关通道 6 并确认封包后收尾"
+                if health["armed"] and health["landed"] == 2:
+                    return "running", "遥控手飞 · " + (self.recording or record)
+                if self.manual_ready and health["ready"]:
+                    if self.recording == "待录包":
+                        record = "定位就绪。拨通道 6 开包，确认录包后静置 20 秒"
+                    return "wait_pilot", record
+                return "preparing", note or "等待 FAST-LIO2 和室外重定位"
             if task["automatic"]:
                 if phase == "DONE" or finished:
                     return "action_done", finished or note
@@ -352,8 +399,9 @@ def verify_idle():
         raise ValueError("已有定位或导航节点，请结束旧链路后重新下发")
     if subprocess.run(["flock", "-n", "/tmp/mid360s_fusion.lock", "true"], timeout=2).returncode:
         raise ValueError("定位链路正在运行，请先收尾")
-    if tmux("has-session", "-t", "=nav", capture_output=True).returncode == 0:
-        raise ValueError("已有终端 nav 会话，请先收尾")
+    for name in ("nav", "nav12"):
+        if tmux("has-session", "-t", "=" + name, capture_output=True).returncode == 0:
+            raise ValueError(f"已有终端 {name} 会话，请先收尾")
 
 
 def supervise(request_id):
@@ -397,7 +445,7 @@ def supervise(request_id):
             return
         if not flight.snapshot(task)["ground"]:
             raise ValueError("启动时飞控地面上锁状态已变化")
-        value.update(state="preparing", message="开始定位与导航预检")
+        value.update(state="preparing", message="开始定位与录包预检" if task.get("manual") else "开始定位与导航预检")
         save(value)
         env = dict(os.environ, WAREHOUSE_TASK_ID=request_id, PYTHONUNBUFFERED="1")
         env.pop("NAV_TEST_IN_TMUX", None)
@@ -446,7 +494,7 @@ def supervise(request_id):
         cleaned = progress.clean_exit and child.returncode in (0, 130)
         value.update(state="done" if cleaned else "failed", safeGround=False,
                      message="已收尾，记录已写盘" if cleaned else (
-                         f"导航脚本退出（{child.returncode}）：" + (progress.note or value["message"])))
+                         f"任务脚本退出（{child.returncode}）：" + (progress.note or value["message"])))
         save(value)
 
 

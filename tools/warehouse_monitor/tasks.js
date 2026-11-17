@@ -147,15 +147,16 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
     const stops = task ? stopLabels(task, closes) : new Map();
     byId("task-details").hidden = !task;
     if (task) {
-      byId("task-trigger").textContent = task.automatic
+      byId("task-trigger").textContent = task.manual ? "全程遥控手飞"
+        : task.automatic
         ? "地面遥控解锁后自动切 OFFBOARD 并起飞"
         : "遥控定点起飞，悬停后手动切 OFFBOARD";
       byId("task-route").textContent = task.route;
       byId("task-finish").textContent = task.finish;
       byId("task-focus").hidden = !task.fixed || !rig || data.maps[map?.id]?.key !== map?.key;
       const diagram = byId("task-diagram");
-      diagram.hidden = task.fixed;
-      if (!task.fixed) drawRelative(diagram, task);
+      diagram.hidden = task.fixed || !task.points.length;
+      if (!diagram.hidden) drawRelative(diagram, task);
       const stopList = byId("task-stops");
       stopList.hidden = !stops.size;
       stopList.replaceChildren(...Array.from(stops.values(), stop => {
