@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
 project(fastlio_dll)
 
+# Match the measured on-board build when no build type was selected.
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release)
+endif()
+
 find_package(catkin REQUIRED COMPONENTS
   diagnostic_msgs geometry_msgs message_filters nav_msgs roscpp sensor_msgs std_msgs tf2_msgs tf2_ros)
 find_package(Ceres REQUIRED)
