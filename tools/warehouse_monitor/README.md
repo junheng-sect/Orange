@@ -80,6 +80,7 @@ npm install --no-save --no-package-lock three@0.180.0 esbuild@0.25.12
 - 室外 **test12 · YWL** 使用同一套手飞和录包流程，地图位姿来自 YWL。板端入口为 `~/mid360s_ws/scripts/nav_test12.sh --ywl`。YWL 失效时网页回到仍有效的 FAST-LIO2 地图位姿并显示原因。
 - 飞行中以遥控器接管。着地上锁后，结束通道 6 录包，再从网页收尾。板端可用 `tmux attach -t warehouse-nav` 查看运行输出，`Ctrl+B D` 分离。日志在板端 `~/test_data/nav_test`，网页启动的目录名称带有请求 ID 前八位。
 - 室内 test3 由飞手起飞悬停，设定值预发送后切 OFFBOARD，从当前位置规划到货架左下拍照点。到点后对准货架，按左下、左上、右上、右下拍摄，每点保存一张全分辨率 PNG 和时间戳、位姿。任务只跑一圈，照片和目标记录在同一板端日志目录。现场确认机体及顶部结构后方可实飞。
+- 室内 **test3_1 · 四点 AprilTag 识别** 沿用 test3 航线，每点稳住 1 s 后拍一张全图，并在 2 s 窗口统计 tag36h11。每点每个 ID 在 `apriltag_observations.csv` 占一行，保留图像时间戳、命中帧数及代表帧的机体位姿。终点显示 0–5 的覆盖数、缺失和额外 ID。板端入口 `~/mid360s_ws/scripts/nav_test_indoor3_1.sh`，支持 `--preview`。
 - 室内 test4 沿用四个拍照点。每个观察点识别标签后，按本批最短访问顺序到各标签前方 0.8 m（相机光心）读取 QR，最后返回右下悬停。任务栏显示当前标签和读取结果，图上青绿色编号为本批扫码顺序。板端也可运行 `~/mid360s_ws/scripts/nav_test_indoor4.sh`。
 - `tasks.json` 由板端 `python3 build_task_catalog.py` 导出，包含真实纳秒时间戳和 PCD SHA-256。修改预设任务或重建任务绑定的地图后，重新导出目录并同步电脑地图缓存。任务的计划航点、EGO 实时轨迹分别绘制。
 

@@ -100,6 +100,11 @@ def build(scripts, maps):
                       route='左下 → 左上 → 右上 → 右下，每点停 3 s 并保存全图',
                       finish=HOLD, points=[point['xyz'] for point in indoor_photo['points']], stops=stops))
     points = [point['xyz'] for point in indoor_photo['points']]
+    tasks.append(dict(id='test_indoor3_1', label='test3_1', title='四点 AprilTag 识别',
+                      mapId=indoor_map, automatic=False, fixed=True,
+                      route='左下 → 左上 → 右上 → 右下，每点拍照并观察 AprilTag 2 s',
+                      finish='右下悬停，汇总六个标签的覆盖情况，飞手接管降落',
+                      points=points, stops=stops))
     tasks.append(dict(id='test_indoor4', label='test4', title='货架标签分批扫码',
                       mapId=indoor_map, automatic=False, fixed=True,
                       route='左下 → 左上 → 右上 → 右下，各点识别后扫描新标签',

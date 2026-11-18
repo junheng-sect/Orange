@@ -11,6 +11,7 @@
 #include <ov13855_apriltag_vision/apriltag_detector.hpp>
 #include <ov13855_apriltag_vision/pose_solver.hpp>
 #include <ov13855_apriltag_vision/TagObservationArray.h>
+#include <ov13855_apriltag_vision/TagSurveyFrame.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <image_transport/image_transport.h>
@@ -128,6 +129,9 @@ class Ov13855AprilTagVisionNode {
     if (pnh_.param("publish_detections", false)) {
       detections_pub_ = pnh_.advertise<ov13855_apriltag_vision::TagObservationArray>("detections", 2);
     }
+    if (pnh_.param("publish_survey", false)) {
+      survey_pub_ = pnh_.advertise<ov13855_apriltag_vision::TagSurveyFrame>("survey", 4);
+    }
     transform_debug_pub_ = nh_.advertise<ov13855_apriltag_vision::HomogeneousTransform>(transform_debug_topic_, 1);
     status_pub_ = nh_.advertise<std_msgs::String>(status_topic_, 1, true);
     processing_time_pub_ = nh_.advertise<std_msgs::Float64>(processing_time_topic_, 10);
@@ -241,6 +245,26 @@ class Ov13855AprilTagVisionNode {
       }
       selected = ov13855_apriltag_vision::selectDetection(detections, selection_mode_, fixed_marker_id_);
       if (selected >= 0) { ++marker_count_; target_marker_id_ = ids[selected]; }
+      const bool calibrated = has_camera_info_ && message->width == camera_info_width_
+          && message->height == camera_info_height_ && !message->header.frame_id.empty()
+          && camera_info_frame_ == message->header.frame_id;
+      const bool surveying = survey_pub_ && survey_pub_.getNumSubscribers() > 0;
+      const bool publishing_poses = calibrated && detections_pub_ && detections_pub_.getNumSubscribers() > 0;
+      if (surveying || publishing_poses) {
+        ov13855_apriltag_vision::TagObservationArray poses;
+        poses.header = message->header;
+        poses.family = tag_family_;
+        if (calibrated) collectTagPoses(detections, poses);
+        if (publishing_poses) detections_pub_.publish(poses);
+        if (surveying) {
+          ov13855_apriltag_vision::TagSurveyFrame survey;
+          survey.header = message->header;
+          survey.family = tag_family_;
+          survey.ids.assign(ids.begin(), ids.end());
+          survey.tags.swap(poses.tags);
+          survey_pub_.publish(survey);
+        }
+      }
       if (!has_camera_info_) {
         status = selected >= 0 ? "DETECTED_2D: ID" + std::to_string(target_marker_id_) : "WAIT_MARKER_2D: no matching tag";
         status += " | POSE_DISABLED: " + (camera_info_error_.empty() ? "waiting for CameraInfo" : camera_info_error_);
@@ -249,8 +273,6 @@ class Ov13855AprilTagVisionNode {
       } else if (message->header.frame_id.empty() || camera_info_frame_ != message->header.frame_id) {
         status = "FRAME_MISMATCH: image and CameraInfo require the same non-empty frame_id";
       } else {
-        if (detections_pub_ && detections_pub_.getNumSubscribers() > 0)
-          publishDetections(message->header, detections);
         if (selected < 0) {
           status = "WAIT_MARKER: no matching tag";
         } else {
@@ -306,13 +328,10 @@ class Ov13855AprilTagVisionNode {
     processing_time_pub_.publish(message);
   }
 
-  void publishDetections(
-      const std_msgs::Header& header,
-      const std::vector<ov13855_apriltag_vision::TagDetection>& detections)
+  void collectTagPoses(
+      const std::vector<ov13855_apriltag_vision::TagDetection>& detections,
+      ov13855_apriltag_vision::TagObservationArray& message)
   {
-    ov13855_apriltag_vision::TagObservationArray message;
-    message.header = header;
-    message.family = tag_family_;
     const float h = static_cast<float>(target_marker_size_m_ / 2.0);
     const std::vector<cv::Point3f> object{{-h,-h,0}, {h,-h,0}, {h,h,0}, {-h,h,0}};
     for (const auto& detection : detections) {
@@ -334,7 +353,6 @@ class Ov13855AprilTagVisionNode {
       observation.reprojection_rms_px = cv::norm(projected, detection.corners, cv::NORM_L2) / 2.0;
       if (std::isfinite(observation.reprojection_rms_px)) message.tags.push_back(observation);
     }
-    detections_pub_.publish(message);
   }
 
   bool publishPoseAndDebug(
@@ -537,7 +555,7 @@ class Ov13855AprilTagVisionNode {
   ros::NodeHandle nh_, pnh_;
   ros::Subscriber image_sub_, camera_info_sub_;
   image_transport::ImageTransport image_transport_;
-  ros::Publisher detections_pub_, pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
+  ros::Publisher survey_pub_, detections_pub_, pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
   image_transport::Publisher annotated_pub_, preview_pub_;
   tf2_ros::TransformBroadcaster marker_tf_broadcaster_;
   std::string image_topic_, camera_info_topic_, pose_topic_, transform_debug_topic_;

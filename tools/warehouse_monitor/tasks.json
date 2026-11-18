@@ -642,6 +642,60 @@
       ]
     },
     {
+      "id": "test_indoor3_1",
+      "label": "test3_1",
+      "title": "四点 AprilTag 识别",
+      "mapId": "20261114_101654_indoor_fly_raw_000001",
+      "automatic": false,
+      "fixed": true,
+      "route": "左下 → 左上 → 右上 → 右下，每点拍照并观察 AprilTag 2 s",
+      "finish": "右下悬停，汇总六个标签的覆盖情况，飞手接管降落",
+      "points": [
+        [
+          0.623,
+          -0.039,
+          0.48
+        ],
+        [
+          0.624,
+          -0.035,
+          1.23
+        ],
+        [
+          -0.276,
+          -0.042,
+          1.23
+        ],
+        [
+          -0.277,
+          -0.046,
+          0.48
+        ]
+      ],
+      "stops": [
+        {
+          "index": 0,
+          "name": "左下",
+          "seconds": 3.0
+        },
+        {
+          "index": 1,
+          "name": "左上",
+          "seconds": 3.0
+        },
+        {
+          "index": 2,
+          "name": "右上",
+          "seconds": 3.0
+        },
+        {
+          "index": 3,
+          "name": "右下",
+          "seconds": 3.0
+        }
+      ]
+    },
+    {
       "id": "test_indoor4",
       "label": "test4",
       "title": "货架标签分批扫码",

@@ -10,7 +10,7 @@ from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float64, String
 from tf2_msgs.msg import TFMessage
-from ov13855_apriltag_vision.msg import HomogeneousTransform, TagObservationArray
+from ov13855_apriltag_vision.msg import HomogeneousTransform, TagObservationArray, TagSurveyFrame
 
 class PipelineTest(unittest.TestCase):
     def setUp(self):
@@ -72,6 +72,22 @@ class PipelineTest(unittest.TestCase):
         self.info();self.assert_first_frame_published(9)
         # Reacquisition publishes on its first valid frame, even after a long gap.
         time.sleep(2.1);self.assert_first_frame_published(9)
+    def test_survey_id_with_and_without_pose(self):
+        frames = []
+        sub = rospy.Subscriber('/ov13855_test_vision/survey', TagSurveyFrame, frames.append)
+        self.info(invalid=True)
+        for valid in (False, True):
+            if valid:
+                self.info()
+            stamp = self.send(self.scene(4))
+            end = time.monotonic() + 2
+            while not any(f.header.stamp == stamp for f in frames) and time.monotonic() < end:
+                time.sleep(.02)
+            frame, = [f for f in frames if f.header.stamp == stamp]
+            self.assertEqual(list(frame.ids), [4])
+            self.assertEqual([t.id for t in frame.tags], [4] if valid else [])
+        sub.unregister()
+
     def test_tag_array_multiple_tags(self):
         arrays = []
         sub = rospy.Subscriber('/ov13855_test_vision/detections', TagObservationArray, arrays.append)
