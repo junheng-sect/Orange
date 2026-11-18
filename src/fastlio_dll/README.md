@@ -2,6 +2,32 @@
 
 在 ROS Noetic 上为现有 FAST-LIO2 约 10 Hz 的里程计叠加地图纠偏。配准核心采用 [DLL 固定版本](https://github.com/robotics-upo/dll/tree/04623521a21e809f8b695d65a141387fb9b1a2f9) 的距离场与四自由度优化，使用原地图坐标建立 0.10 m 网格。
 
+## 手持 A → B → A 的单包三组对照
+
+1. 在 A 标记机体位置和朝向，飞控保持上锁，通道 6 先拨到关闭位。从电脑执行：
+   ```bash
+   ssh -t orange '~/mid360s_ws/scripts/nav_test12.sh --no-dll'
+   ```
+2. 室外重定位确认后拨通道 6 开包，看到「录包中」后在 A 静止至少 20 秒。手持到 B 放稳 10 秒；按标记放回 A，再静止 10 秒。关闭通道 6，看到「已封包」后按 Ctrl+C 收尾。B 和沿途应在共用子图内。选能看到两个朝向的固定墙面的 B 点。
+3. 在板端用实际 bag 路径运行，输出目录须是新目录：
+   ```bash
+   bag="$HOME/test_data/nav_test/<时间>_test12/<录制文件>.bag"
+   "$HOME/orange/src/fastlio_dll/scripts/replay_aba.sh" "$bag" "${bag%.bag}_aba"
+   ```
+   入口默认用 11 月 5 日室外原图计算 A 的双窗口初值，校验同源地图哈希后用截图裁图分别进行完整的 DLL 和 YWL 回放。DLL 回放中原始 FAST-LIO2 的局部轨迹乘以固定的 A 初值即为第三组。已有 CSV 的 `fixed_map_*` 字段使用首个 DLL 校正，三组评分使用 `odom_*` 重新计算。在线重定位时间与离线初值时间分别记录。
+
+`aba.json` 记录输入哈希、各传感器时段和断流、共同初值、静止窗口、ICP 五个初值及配准质量，以及三组在 B 刚放稳、B 末段、返回 A 的 XYZ 差、水平误差、有符号高度差和三维距离。B 的前后窗口各 1 秒，参考使用中间 4 秒原始扫描，先依 FAST-LIO 标定转到雷达 IMU 原点。原始观测仅在已测地图体积和室外量程内评分。回 A 用各自出发和返回静止段的中位位置相减。每个窗口都报告同一批预期扫描及有效帧数，DLL 仅采纳 TRACKING 状态。定位缺帧、B 静止段缺失或 ICP 共识/几何质量不足时，对应读数为空，保留其余可用项；完整报告退出码 0，部分报告退出码 2。
+
+时间标注相对包中第一帧原始雷达。记录的本地里程计仅用于识别静止段和传播粗略朝向。B 的默认 ICP 粗位置来自仅按 A 对齐的本地里程计，五种扰动检验局部收敛；独立地标粗值可用 `--b-hint X Y Z IMU_YAW_DEG` 指定（`drone_map` 中的雷达 IMU 原点和航向）。多个中途停顿时，用 `--b-at 秒数` 指认 B 停顿内的时刻。上述参数也可加在完整回放命令的末尾。已有回放可单独重算，例如：
+
+```bash
+source ~/mid360s_ws/devel/setup.bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 ~/orange/src/fastlio_dll/scripts/analyze_aba.py \
+  "${bag%.bag}_aba" --b-at 85 --output "${bag%.bag}_aba/aba_review.json"
+```
+
+B 参考衡量先验图内的一致性。初值、同一地图的系统误差和重复场景会影响结论。
+
 ## 室外同包回放 DLL 与 YWL
 
 早期室外对照子图为 `$HOME/test_data/mapping/20261105_114605_outdoor_shared`，范围包含现有 test11 航点。当前 test12 使用下文的截图裁图。

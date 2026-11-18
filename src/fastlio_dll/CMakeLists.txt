@@ -28,6 +28,7 @@ install(DIRECTORY config launch DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 install(PROGRAMS scripts/replay.sh scripts/record_observation.sh
   scripts/summarize_replay.py scripts/replay_legacy_seed.py
   scripts/prepare_outdoor_map.py scripts/replay_pair_outdoor.sh scripts/record_outdoor_dll_ywl
-  scripts/record_outdoor_rc.py
+  scripts/record_outdoor_rc.py scripts/replay_aba.sh scripts/analyze_aba.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 install(FILES LICENSE DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+install(FILES scripts/aba_reference.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

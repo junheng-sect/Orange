@@ -12,6 +12,7 @@ map=$(realpath -e "${3:-$HOME/test_data/mapping/20261105_114605_outdoor_shared}"
 ywl_ws=${YWL_REPLAY_WS:-$HOME/mid360s_ws-ywl}
 dll_ws=${DLL_REPLAY_WS:-$HOME/test_data/fastlio_dll/20261117/outdoor_ws}
 seed_seconds=${PAIR_SEED_SECONDS:-18}
+seed_map=$(realpath -e "${PAIR_SEED_MAP:-$map}")
 scripts=$(cd "$(dirname "$0")" && pwd)
 
 test -s "$ywl_ws/devel/setup.bash"
@@ -52,27 +53,43 @@ with rosbag.Bag(bag) as source:
         print(bag)
 PY
 )
-  rosrun ywl_localization ywl_replay seed --map "$map" --bag "$seed_bag" --out "$out/seed" \
+  rosrun ywl_localization ywl_replay seed --map "$seed_map" --bag "$seed_bag" --out "$out/seed" \
     --reloc-config "$map/outdoor_reloc.yaml" --port "${PAIR_SEED_PORT:-11590}" \
     --rate 0.5 --seconds "$seed_seconds"
 )
 
-python3 - "$out/seed/seed.json" "$map" "$bag" "$out/dll_seed.json" <<'PY'
+python3 - "$out/seed/seed.json" "$map" "$bag" "$out/dll_seed.json" "$seed_map" "$out/ywl_seed.json" <<'PY'
 import hashlib
 import json
 from pathlib import Path
 import sys
 
-seed_path, map_dir, bag_path, output = map(Path, sys.argv[1:])
+seed_path, map_dir, bag_path, output, seed_map, ywl_output = map(Path, sys.argv[1:])
 seed = json.loads(seed_path.read_text())
-for name in ("map_world.pcd", "meta.json"):
-    if hashlib.sha256((map_dir / name).read_bytes()).hexdigest() != seed["map_sha256"][name]:
-        raise SystemExit("YWL seed and replay map differ")
+
+def hashes(folder):
+    return {name: hashlib.sha256((folder / name).read_bytes()).hexdigest()
+            for name in ("map_world.pcd", "meta.json")}
+
+origin = hashes(seed_map)
+if seed["map_sha256"] != origin:
+    raise SystemExit("Seed map changed since initialization")
+target = origin
+if seed_map != map_dir:
+    target = hashes(map_dir)
+    crop = json.loads((map_dir / "meta.json").read_text())["shared_outdoor_crop"]
+    source = crop["source"]
+    if (crop["frame_id"] != "drone_map" or source["map_sha256"] != origin["map_world.pcd"]
+            or source["meta_sha256"] != origin["meta.json"]):
+        raise SystemExit("Tracking crop does not share the initialization map frame")
 result = seed["result"]
 if result.get("confirmed") is not True or result.get("ok") is not True:
-    raise SystemExit("relocalization seed is not confirmed")
-output.write_text(json.dumps(dict(bag=str(bag_path), map=str(map_dir),
-                                  anchor_ns=seed["anchor_ns"], results=[result]), indent=2) + "\n")
+    raise SystemExit("Relocalization seed is not confirmed")
+seed.update(map_sha256=target, initialization_map=str(seed_map), initialization_map_sha256=origin)
+ywl_output.write_text(json.dumps(seed, indent=2) + "\n")
+output.write_text(json.dumps(dict(bag=str(bag_path), map=str(map_dir), map_sha256=target,
+                                  initialization_map_sha256=origin, anchor_ns=seed["anchor_ns"],
+                                  results=[result]), indent=2) + "\n")
 PY
 
 (
@@ -83,9 +100,9 @@ PY
 (
   source "$ywl_ws/devel/setup.bash"
   rosrun ywl_localization ywl_replay ywl --map "$map" --bag "$bag" --out "$out/ywl" \
-    --seed "$out/seed/seed.json" --port "${PAIR_YWL_PORT:-11591}" "${ywl_play_options[@]}"
+    --seed "$out/ywl_seed.json" --port "${PAIR_YWL_PORT:-11591}" "${ywl_play_options[@]}"
 )
 if [[ ! -s "$out/ywl/pose.csv" ]] || [[ $(wc -l <"$out/ywl/pose.csv") -le 1 ]]; then
   echo "YWL did not publish map poses. See $out/ywl/diagnostics.jsonl" >&2
-  exit 1
+  [[ "${PAIR_ALLOW_EMPTY_YWL:-0}" == 1 ]] || exit 1
 fi
