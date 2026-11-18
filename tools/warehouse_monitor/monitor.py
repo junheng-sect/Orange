@@ -147,7 +147,8 @@ class Monitor:
                 argument = options.pop("callback_args", None)
                 options["callback_args"] = (topic, callback, argument)
                 callback = self.on_drift_input
-            self.subs.append(rospy.Subscriber(topic, kind, callback, queue_size=12, **options))
+            depth = 12 if topic in dll_drift.TOPICS else 1
+            self.subs.append(rospy.Subscriber(topic, kind, callback, queue_size=depth, **options))
 
     def on_drift_input(self, msg, routing):
         topic, callback, argument = routing
