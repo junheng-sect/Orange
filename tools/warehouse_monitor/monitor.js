@@ -498,7 +498,8 @@ function paintStatus() {
   byId("phase").textContent = !showPose ? "等待地图与定位对齐"
     : result.poseSource === "navigation" ? "/drone_nav/odom"
       : result.poseSource === "dll" ? "DLL 地图位姿"
-        : result.dllReason ? `FAST-LIO2 · ${result.dllReason}` : "/fastlio/odom_world";
+        : result.poseSource === "ywl" ? "YWL 地图位姿"
+          : (result.ywlReason || result.dllReason) ? `FAST-LIO2 · ${result.ywlReason || result.dllReason}` : "/fastlio/odom_world";
   const heading = Math.atan2(forward.y, forward.x) * 180 / Math.PI;
   [pos.x, pos.y, pos.z, heading].forEach((value, i) => {
     byId(["px", "py", "pz", "yaw"][i]).textContent = showPose ? value.toFixed(i === 3 ? 1 : 2) : "—";

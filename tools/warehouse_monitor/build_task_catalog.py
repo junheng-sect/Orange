@@ -109,6 +109,8 @@ def build(scripts, maps):
                           mapId=MAPS["outdoor"], automatic=False, fixed=False, manual=True,
                           points=[], stops=[], route="全程遥控手飞，实时显示已飞轨迹",
                           finish="落地上锁后关通道 6，待封包后从网页收尾"))
+    tasks.insert(12, dict(tasks[11], id="test12_ywl", label="test12 · YWL",
+                          title="YWL 手飞定位与录包", observer="ywl"))
     return dict(maps=map_versions, tasks=tasks)
 
 

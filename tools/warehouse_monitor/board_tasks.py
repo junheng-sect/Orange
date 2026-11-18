@@ -26,7 +26,8 @@ SESSION = "warehouse-nav"
 ENV = ("source /opt/ros/noetic/setup.bash && "
        "source /home/orangepi/mid360s_ws/scripts/ros_net.sh")
 CONFLICT_NODES = {"/drone_reloc", "/car_bridge", "/waypoint_manager", "/offboard_gateway",
-                  "/trajectory_executor", "/laserMapping", "/gravity_bridge"}
+                  "/trajectory_executor", "/laserMapping", "/gravity_bridge",
+                  "/ywl_localization", "/ywl_init_adapter", "/fastlio_dll"}
 
 
 def tmux(*args, **kwargs):
@@ -183,6 +184,8 @@ def fingerprint(path):
 
 
 def script_command(task):
+    if task["id"] == "test12_ywl":
+        return [str(SCRIPTS / "nav_test12.sh"), "--ywl"]
     command = [str(SCRIPTS / ("nav_" + task["id"] + ".sh"))]
     if task["id"].startswith("test_indoor"):
         command += ["--map", str(MAPS / task["mapId"]),
@@ -219,6 +222,8 @@ class FlightStatus:
                              callback_args="estimator", queue_size=3),
             rospy.Subscriber("/fastlio/odom_world", Odometry, self.set, callback_args="fastlio", queue_size=1),
             rospy.Subscriber("/dll_localization/status", DiagnosticArray, self.set, callback_args="dll", queue_size=1),
+            rospy.Subscriber("/ywl/status", DiagnosticArray, self.set, callback_args="ywl", queue_size=1),
+            rospy.Subscriber("/ywl/odom", Odometry, self.set, callback_args="ywl_pose", queue_size=1),
         ]
         for topic, name in (("/drone_nav/gateway_status", "gateway"), ("/drone_nav/input_status", "input"),
                             ("/drone_reloc/status", "reloc"), ("/drone_reloc/result", "result")):
@@ -277,17 +282,27 @@ class FlightStatus:
                 odom = fresh("fastlio", .6, stamped=True)
                 ready = (localized and odom is not None and odom.header.frame_id == "drone_odom"
                          and odom.child_frame_id == "drone_base")
-                diagnostics = fresh("dll", 1.5, stamped=True)
-                dll = next((s for s in diagnostics.status if s.name == "fastlio_dll"), None) if diagnostics else None
-                dll_tracking = bool(dll and dll.message == "TRACKING" and dll.level == 0)
-                dll_reason = next((item.value for item in dll.values if item.key == "reason"), "") if dll else ""
-                dll_note = f"DLL {dll.message} {dll_reason}".strip() if dll else "等待 DLL 状态"
+                ywl = task.get("observer") == "ywl"
+                name = "YWL" if ywl else "DLL"
+                diagnostics = fresh("ywl" if ywl else "dll", 1.5, stamped=not ywl)
+                diagnostic_name = "ywl_localization" if ywl else "fastlio_dll"
+                diag = next((s for s in diagnostics.status if s.name == diagnostic_name), None) if diagnostics else None
+                observer_tracking = bool(diag and diag.message == "TRACKING" and diag.level == 0)
+                reason = next((item.value for item in diag.values if item.key == "reason"), "") if diag else ""
+                observer_note = f"{name} {diag.message} {reason}".strip() if diag else f"等待 {name} 状态"
+                if observer_tracking and ywl:
+                    pose = fresh("ywl_pose", .5, stamped=True)
+                    observer_tracking = bool(pose and pose.header.frame_id == "drone_map"
+                                             and pose.child_frame_id == "ywl_imu"
+                                             and abs((pose.header.stamp - diagnostics.header.stamp).to_sec()) < .15)
+                    if not observer_tracking:
+                        observer_note = "等待新鲜 YWL 地图位姿"
             else:
                 ready = localized and nav.get("state") == "READY" and gateway.get("real_output") is True
-                dll_tracking, dll_note = False, ""
+                observer_tracking, observer_note = False, ""
             stream = ready and self.prepared_at is not None and now - self.prepared_at >= 1.0
             return dict(connected=connected, mode=mode, armed=armed, landed=landed, ground=ground,
-                        ready=ready, stream=stream, estimate=estimate, dll_tracking=dll_tracking, dll_note=dll_note)
+                        ready=ready, stream=stream, estimate=estimate, observer_tracking=observer_tracking, observer_note=observer_note)
 
 
 class Progress:
@@ -368,14 +383,15 @@ class Progress:
                     return "action_done", record + "。关通道 6 并确认封包后收尾"
                 if health["armed"] and health["landed"] == 2:
                     note = "遥控手飞 · " + (self.recording or record)
-                    if not health["dll_tracking"]:
-                        note += " · " + health["dll_note"] + "，显示原定位"
+                    if not health["observer_tracking"]:
+                        note += " · " + health["observer_note"] + "，显示原定位"
                     return "running", note
-                if self.manual_ready and health["ready"] and health["dll_tracking"]:
+                if self.manual_ready and health["ready"] and health["observer_tracking"]:
                     if self.recording == "待录包":
                         record = "定位就绪。拨通道 6 开包，确认录包后静置 20 秒"
                     return "wait_pilot", record
-                return "preparing", health["dll_note"] if self.manual_ready else note or "等待 FAST-LIO2、重定位和 DLL"
+                name = "YWL" if task.get("observer") == "ywl" else "DLL"
+                return "preparing", health["observer_note"] if self.manual_ready else note or f"等待 FAST-LIO2、重定位和 {name}"
             if task["automatic"]:
                 if phase == "DONE" or finished:
                     return "action_done", finished or note

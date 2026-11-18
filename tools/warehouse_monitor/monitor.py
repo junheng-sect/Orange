@@ -39,7 +39,7 @@ CLOUD_FRESH = 1.25
 PLAN_FRESH = .8
 TRAIL_LENGTH = 4800
 PATH_GENERATION = 1 << 32
-DLL_MAP = "20261105_114605_outdoor"
+OUTDOOR_OBSERVER_MAP = "20261105_114605_outdoor"
 
 
 def xyz(p):
@@ -106,7 +106,13 @@ class Monitor:
         self.trail = deque(maxlen=TRAIL_LENGTH)
         self.dll_samples = OrderedDict()
         self.dll_status = None
-        self.viewing_dll = False
+        self.ywl_samples = OrderedDict()
+        self.ywl_status = None
+        self.ywl_seed_stamp = 0
+        self.ywl_result_stamp = 0
+        self.ywl_prior_hashes = None
+        self.imu_to_body = None
+        self.viewing_observer = None
         self.cloud = None
         self.cloud_at = 0
         self.plans = OrderedDict()
@@ -118,11 +124,15 @@ class Monitor:
             ("/drone_reloc/result", String, self.on_result, {}),
             ("/drone_reloc/status", String, self.on_relocation, {}),
             ("/tf", TFMessage, self.on_tf, {}),
+            ("/tf_static", TFMessage, self.on_mount, {}),
             ("/drone_nav/odom", Odometry, self.on_pose, {"callback_args": "navigation"}),
             ("/fastlio/odom_world", Odometry, self.on_pose, {"callback_args": "fastlio"}),
             ("/dll_localization/pose", PoseStamped, self.on_dll_sample, {"callback_args": "pose"}),
             ("/dll_localization/correction", TransformStamped, self.on_dll_sample, {"callback_args": "correction"}),
             ("/dll_localization/status", DiagnosticArray, self.on_dll_status, {}),
+            ("/ywl/odom", Odometry, self.on_ywl_pose, {}),
+            ("/ywl/status", DiagnosticArray, self.on_ywl_status, {}),
+            ("/ywl/initial_transform", TransformStamped, self.on_ywl_init, {}),
             ("/drone_nav/cloud", PointCloud2, self.on_cloud, {"buff_size": 4 * 1024 * 1024}),
             ("/drone_nav/bspline", Bspline, self.on_legacy_plan, {}),
             ("/drone_nav/executor_status", String, self.on_executor, {}),
@@ -141,7 +151,8 @@ class Monitor:
         self.pose = self.cloud = None
         self.trail.clear()
         self.dll_samples.clear()
-        self.viewing_dll = False
+        self.ywl_samples.clear()
+        self.viewing_observer = None
         self.plans.clear()
         self.source = None
         self.aligned = False
@@ -153,6 +164,7 @@ class Monitor:
             if value.get("ok") is not True or value.get("confirmed") is not True:
                 with self.lock:
                     self.solution = None
+                    self.ywl_result_stamp = 0
                     self.clear_motion()
                 return
             folder = Path(value["map"])
@@ -168,7 +180,12 @@ class Monitor:
                 info = path.stat() if allowed and path.is_file() else None
             except OSError:
                 info = None
+            stamp = value.get("stamp")
+            result_stamp = round(stamp * 1e9) if type(stamp) in (int, float) and math.isfinite(stamp) else 0
+            hashes = self.ywl_crop_hashes(path.parent) if info and path.parent.name == OUTDOOR_OBSERVER_MAP else None
             with self.lock:
+                self.ywl_result_stamp = result_stamp
+                self.ywl_prior_hashes = hashes
                 self.map_error = None if info else "定位地图不在地图目录内，或缺少 map_world.pcd"
                 self.map_path = path if info else None
                 self.map_key = ("%s-%d-%d" % (path.parent.name, info.st_mtime_ns, info.st_size)) if info else None
@@ -250,7 +267,7 @@ class Monitor:
             return
 
     def dll_view(self, now):
-        if self.dll_status is None or self.map_path is None or self.map_path.parent.name != DLL_MAP:
+        if self.dll_status is None or self.map_path is None or self.map_path.parent.name != OUTDOOR_OBSERVER_MAP:
             return None, None
         at, status_stamp, state, reason, accepted, valid = self.dll_status
         if now - at > 1.5:
@@ -268,6 +285,91 @@ class Monitor:
                     and all(now - received <= .5 for received, _ in sample.values())):
                 return sample["pose"][1], None
         return None, "等待同刻 DLL 位姿与修正"
+
+    @staticmethod
+    def ywl_crop_hashes(source):
+        crop = source.with_name(source.name + "_screenshot_roi")
+        try:
+            manifest = json.loads((crop / "manifest.json").read_text())
+            if (manifest["map_frame"] != "drone_map" or Path(manifest["source"]["map_dir"]).resolve() != source
+                    or Path(manifest["map_dir"]).resolve() != crop):
+                return None
+            return manifest["sha256"]["map_world.pcd"], manifest["sha256"]["meta.json"]
+        except (KeyError, ValueError, TypeError, OSError):
+            return None
+
+    def on_mount(self, msg):
+        for tf in msg.transforms:
+            if (tf.header.frame_id, tf.child_frame_id) == ("body", "drone_base"):
+                try:
+                    mount = quaternion(xyzw(tf.transform.rotation))
+                except ValueError:
+                    return
+                with self.lock:
+                    self.imu_to_body = (tf.header.stamp.to_nsec(), mount)
+                return
+
+    def on_ywl_init(self, msg):
+        if (msg.header.frame_id, msg.child_frame_id) == ("drone_map", "ywl_odom"):
+            with self.lock:
+                self.ywl_seed_stamp = msg.header.stamp.to_nsec()
+
+    def cache_ywl(self, stamp, kind, value):
+        self.ywl_samples.setdefault(stamp, {})[kind] = (time.monotonic(), value)
+        while len(self.ywl_samples) > 8:
+            self.ywl_samples.popitem(last=False)
+
+    def on_ywl_pose(self, msg):
+        if (msg.header.frame_id, msg.child_frame_id) != ("drone_map", "ywl_imu"):
+            return
+        point = xyz(msg.pose.pose.position)
+        if not np.isfinite(point).all():
+            return
+        try:
+            quat = quaternion(xyzw(msg.pose.pose.orientation))
+        except ValueError:
+            return
+        with self.lock:
+            self.cache_ywl(msg.header.stamp.to_nsec(), "pose", (point, quat))
+
+    def on_ywl_status(self, msg):
+        for status in msg.status:
+            if status.name != "ywl_localization":
+                continue
+            values = {item.key: item.value for item in status.values}
+            stamp = msg.header.stamp.to_nsec()
+            with self.lock:
+                valid = status.message == "TRACKING" and status.level == 0
+                self.ywl_status = (time.monotonic(), status.message, values.get("reason", ""), valid)
+                if valid:
+                    self.cache_ywl(stamp, "status", (values.get("map_pcd_sha256"), values.get("map_meta_sha256")))
+                else:
+                    self.ywl_samples.clear()
+            return
+
+    def ywl_view(self, now):
+        if self.ywl_status is None or self.map_path is None or self.map_path.parent.name != OUTDOOR_OBSERVER_MAP:
+            return None, None
+        received, state, reason, valid = self.ywl_status
+        if not valid:
+            return None, f"YWL {state} · {reason}"
+        if now - received > .5:
+            return None, "YWL 状态已过期"
+        if (not self.ywl_result_stamp or not self.ywl_seed_stamp or not self.imu_to_body
+                or self.ywl_seed_stamp < max(self.ywl_result_stamp - 500_000_000, self.imu_to_body[0])):
+            return None, "等待本轮 YWL 初值与机体朝向"
+        ros_now = rospy.Time.now().to_nsec()
+        for stamp in sorted(self.ywl_samples, reverse=True):
+            sample = self.ywl_samples[stamp]
+            if (set(sample) == {"pose", "status"} and stamp >= self.ywl_seed_stamp
+                    and -50_000_000 <= ros_now - stamp <= 500_000_000
+                    and all(now - at <= .5 for at, _ in sample.values())):
+                if sample["status"][1] != self.ywl_prior_hashes:
+                    return None, "YWL 地图校验不一致"
+                point, quat = sample["pose"][1]
+                body = multiply(quat, self.imu_to_body[1])
+                return [stamp / 1e9, *point, *body.tolist()], None
+        return None, "等待同刻 YWL 位姿与状态"
 
     def on_pose(self, msg, source):
         expected = "drone_nav_base" if source == "navigation" else "drone_base"
@@ -307,7 +409,7 @@ class Monitor:
             body = multiply(map_q, q)
             self.pose = [stamp, *world.tolist(), *body.tolist()]
             self.aligned = True
-            if not self.viewing_dll and (not self.trail or now - self.trail[-1][1] >= .095):
+            if not self.viewing_observer and (not self.trail or now - self.trail[-1][1] >= .095):
                 self.trail.append((self.next_id(), now, world.tolist()))
 
     def on_cloud(self, msg):
@@ -378,13 +480,19 @@ class Monitor:
             aligned = self.valid_alignment(now)
             if not aligned and (self.aligned or self.cloud or self.plans):
                 self.clear_motion()
-            dll_pose, dll_reason = self.dll_view(now) if aligned and self.source == "fastlio" else (None, None)
-            if self.viewing_dll != bool(dll_pose):
-                self.viewing_dll = bool(dll_pose)
+            dll_pose = dll_reason = ywl_pose = ywl_reason = None
+            if aligned and self.source == "fastlio":
+                dll_pose, dll_reason = self.dll_view(now)
+                if not dll_pose:
+                    ywl_pose, ywl_reason = self.ywl_view(now)
+            observer = "dll" if dll_pose else "ywl" if ywl_pose else None
+            observed = dll_pose or ywl_pose
+            if self.viewing_observer != observer:
+                self.viewing_observer = observer
                 self.epoch = uuid.uuid4().hex
                 self.trail.clear()
-            if dll_pose and (not self.trail or self.trail[-1][1] != dll_pose[0]):
-                self.trail.append((self.next_id(), dll_pose[0], dll_pose[1:4]))
+            if observed and (not self.trail or self.trail[-1][1] != observed[0]):
+                self.trail.append((self.next_id(), observed[0], observed[1:4]))
             same_epoch = epoch == self.epoch
             trail_id, cloud_id, plan_id = cursors if same_epoch else (0, 0, 0)
             fresh_pose = bool(self.pose and self.source in self.poses
@@ -404,9 +512,9 @@ class Monitor:
             result = dict(
                 epoch=self.epoch, localMap=local_map, mapKey=self.map_key, mapId=self.map_path.parent.name if self.map_path else None,
                 mapError=self.map_error, relocation=self.relocation[2] if now - self.relocation[0] <= 2.5 else "WAITING",
-                aligned=aligned, pose=dll_pose or (self.pose if aligned and fresh_pose else None),
-                poseSource="dll" if dll_pose else self.source if aligned and fresh_pose else None,
-                dllReason=dll_reason,
+                aligned=aligned, pose=observed or (self.pose if aligned and fresh_pose else None),
+                poseSource=observer or (self.source if aligned and fresh_pose else None),
+                dllReason=dll_reason, ywlReason=ywl_reason,
                 executor=state, cloudId=cloud[0] if cloud else 0,
                 cloudCount=cloud[3] if cloud else 0,
                 planId=plan["id"] if plan else 0, pending=plan["pending"] if plan else False,
