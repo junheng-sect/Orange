@@ -12,7 +12,7 @@ import tempfile
 import numpy as np
 import rosbag
 
-from dll_drift import BASE, DLL, HEALTH, MODE, ODOM, RELOC, RESULT, NS, TOPICS, Comparison
+from dll_drift import BASE, DLL, HEALTH, MODE_TOPICS, ODOM, RELOC, RESULT, NS, TOPICS, Comparison
 
 METRICS = ("dx_m", "dy_m", "dz_m", "horizontal_m", "yaw_deg")
 POSITION = ("base_x", "base_y", "base_z", "dll_x", "dll_y", "dll_z")
@@ -28,7 +28,7 @@ def bag_events(bag):
                 return received.to_nsec(), 0
         if topic == "/tf":
             return max((t.header.stamp.to_nsec() for t in msg.transforms), default=0), 1
-        if topic == MODE:
+        if topic in MODE_TOPICS:
             return received.to_nsec(), 0
         # A wall watchdog may publish STALE at the last scan's stamp after /clock
         # freezes. Keep the prior measured scan before that receipt-time tie.
@@ -80,7 +80,7 @@ def read_rows(bag):
                 previous = signature
                 if value.get("confirmed") and value.get("ok"):
                     seeds[segment] = value
-        if topic in (RELOC, MODE):
+        if topic == RELOC or topic in MODE_TOPICS:
             try:
                 info = json.loads(msg.data)
             except ValueError:
@@ -89,7 +89,7 @@ def read_rows(bag):
                 until = round(float(info.get('stamp', 0))*NS)
                 while pending and pending[0][0] < until:
                     finish()
-            if topic == MODE and comparison.run and info.get('run') != comparison.run:
+            if topic in MODE_TOPICS and comparison.run and info.get('run') != comparison.run:
                 while pending:
                     finish()
                 segment += 1
@@ -132,7 +132,7 @@ def summary(rows):
                 meaning='相对先验地图的漂移指标')
 
 
-def checkpoints(bag, folder, rows, seeds):
+def checkpoints(bag, folder, rows, seeds, capture_map=None):
     # Use the same multi-start local reference and motion checks as the A-B-A analysis.
     import rospkg
     import hashlib
@@ -154,9 +154,18 @@ def checkpoints(bag, folder, rows, seeds):
         meta = json.loads((folder/'meta.json').read_text())
         crop = meta.get('shared_outdoor_crop',{})
         source = crop.get('source',{})
-        manifest = json.loads((folder/'manifest.json').read_text())
-        if manifest['sha256']['map_world.pcd'] != pcd_hash or manifest['sha256']['meta.json'] != hashlib.sha256((folder/'meta.json').read_bytes()).hexdigest():
-            raise ValueError('ICP 地图哈希不符')
+        actual_hashes = {'map_world.pcd': pcd_hash, 'meta.json': hashlib.sha256((folder/'meta.json').read_bytes()).hexdigest()}
+        reloc_config = None
+        if capture_map is not None:
+            if actual_hashes != capture_map['map_sha256']:
+                raise ValueError('ICP 地图与采集时哈希不符')
+            reloc_config = Path(bag.filename).parent/'dll_reloc.yaml'
+            if hashlib.sha256(reloc_config.read_bytes()).hexdigest() != capture_map['reloc_config_sha256']:
+                raise ValueError('重定位配置与采集时哈希不符')
+        else:
+            manifest = json.loads((folder/'manifest.json').read_text())
+            if any(manifest['sha256'][key] != value for key,value in actual_hashes.items()):
+                raise ValueError('ICP 地图哈希不符')
         # Bind the evaluation crop to the source map used for the recorded initialization.
         verified = set()
         calib = Path(rospkg.RosPack().get_path('fast_lio'))/'config/mid360s.yaml'
@@ -171,7 +180,12 @@ def checkpoints(bag, folder, rows, seeds):
                     raise ValueError('检查点跨会话或缺少初值')
                 seed=seeds[next(iter(sessions))]
                 original=Path(seed['map'])
-                if original not in verified:
+                direct = capture_map is not None and capture_map['source_map_dir'] == capture_map['map_dir']
+                if capture_map and str(original) != capture_map['source_map_dir']:
+                    raise ValueError('采集地图与该重定位会话不符')
+                if direct and capture_map['source_sha256'] != actual_hashes:
+                    raise ValueError('原图哈希不一致')
+                if not direct and original not in verified:
                     if crop.get('frame_id')!='drone_map' or any(hashlib.sha256((original/n).read_bytes()).hexdigest()!=source[k]
                             for n,k in [('map_world.pcd','map_sha256'),('meta.json','meta_sha256')]):
                         raise ValueError('ICP 子图与主定位地图坐标来源不一致')
@@ -188,7 +202,7 @@ def checkpoints(bag, folder, rows, seeds):
                 ori=R@capture.Rwc@quat_R(pose[4:])
                 hint=[*pos,np.rad2deg(yaw(ori))]
                 pos,ori=initial_guess(bag,recorded,(mid-2,mid+2),None,None,hint)
-                ref=register(cloud,folder,pos,ori)
+                ref=register(cloud,folder,pos,ori,reloc_config)
                 obj['reference']=ref
                 if not ref['valid']:
                     raise ValueError(', '.join(ref['reasons']))
@@ -215,7 +229,7 @@ def main():
     ap=argparse.ArgumentParser(description=__doc__)
     ap.add_argument('bag',type=Path)
     ap.add_argument('output',type=Path,help='new output directory')
-    ap.add_argument('--icp-map',type=Path,help='same-source outdoor crop; defaults to the recording manifest map')
+    ap.add_argument('--icp-map',type=Path,help='tracking map; defaults to the map recorded for the task')
     args=ap.parse_args()
     bagpath=args.bag.resolve()
     if args.output.exists():
@@ -229,10 +243,16 @@ def main():
         crop=args.icp_map
         manifest=bagpath.parent/'dll_map_manifest.json'
         try:
+            observer_file = bagpath.parent/'dll_observer.json'
+            capture_map = json.loads(observer_file.read_text()) if observer_file.is_file() else None
+            if crop is None and capture_map is not None:
+                crop = Path(capture_map['map_dir'])
             if crop is None and manifest.is_file():
                 crop=Path(json.loads(manifest.read_text())['map_dir'])
-            if crop:
-                report['icp_checkpoints']=checkpoints(bag,crop,rows,seeds)
+            if '/livox/lidar' not in bag.get_type_and_topic_info().topics:
+                report['icp_checkpoints'] = dict(valid=False, reason='轻量录包缺少原始雷达，已仅统计同帧 DLL 对照差')
+            elif crop:
+                report['icp_checkpoints']=checkpoints(bag,crop,rows,seeds,capture_map)
         except (ValueError, KeyError, OSError) as exc:
             report['icp_checkpoints']=dict(valid=False,reason=str(exc))
     t0=rows[0]['stamp_ns']

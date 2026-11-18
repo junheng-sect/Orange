@@ -74,14 +74,14 @@ class LocalPlanes:
 
 
 class CheckpointICP(MapModel):
-    def __init__(self, map_dir, center):
+    def __init__(self, map_dir, center, reloc_config=None):
         points, _ = mapio.read_pcd(map_dir / 'map_world.pcd')
         nearby = points[np.linalg.norm(points - center, axis=1) < 25]
         if len(nearby) < 250:
             raise ValueError('Too few map points around B')
         cv2.setRNGSeed(0)
         self.nn = LocalPlanes(voxel(nearby, .12))
-        self.cfg = load(str(map_dir / 'outdoor_reloc.yaml'))
+        self.cfg = load(str(reloc_config or map_dir / 'outdoor_reloc.yaml'))
         # Allow coarse starting offsets, then use the same fine point-to-plane solver.
         self.fine_reach = self.cfg['nn_reach']
 
@@ -102,8 +102,8 @@ def in_survey(points, crop):
     return mask
 
 
-def register(cloud, map_dir, translation, rotation):
-    model = CheckpointICP(map_dir, translation)
+def register(cloud, map_dir, translation, rotation, reloc_config=None):
+    model = CheckpointICP(map_dir, translation, reloc_config)
     raw_count = len(cloud)
     meta = json.loads((map_dir / 'meta.json').read_text())
     crop = meta.get('shared_outdoor_crop')
@@ -138,14 +138,17 @@ def register(cloud, map_dir, translation, rotation):
     failures = []
     if spread > cfg['consensus_m'] or angular > cfg['consensus_deg']:
         failures.append('multistart_disagreement')
-    for key, threshold in [('inlier', cfg['inlier_ok']), ('fitness_v', cfg['fit_v_ok']),
-                           ('degen_xy', cfg['degen_ok']), ('rank_ratio', 1e-6)]:
+    # Keep the historical outdoor evaluator's gates for its existing callers.
+    indoor = reloc_config is not None and not cfg['split_ground']
+    fit = ('fitness', cfg['fit_ok']) if indoor else ('fitness_v', cfg['fit_v_ok'])
+    geometry = ('degen' if indoor else 'degen_xy', cfg['degen_ok'])
+    for key, threshold in [('inlier', cfg['inlier_ok']), fit, geometry, ('rank_ratio', 1e-6)]:
         if min(row[key] for row in trials) < threshold:
             failures.append(key)
     if max(row['rmse'] for row in trials) > cfg['rmse_ok']:
         failures.append('rmse')
     if crop and not all(in_survey(np.array(x['pose']['translation'])[None, :], crop)[0] for x in trials):
         failures.append('solution_outside_map_crop')
-    best = max(trials, key=lambda row: (row['support_v'], -row['rmse']))
+    best = max(trials, key=lambda row: (row['support' if indoor else 'support_v'], -row['rmse']))
     return dict(valid=not failures, reasons=failures, pose=best['pose'] if not failures else None,
                 raw_voxels=raw_count, cloud_points=len(cloud), spread_m=spread, spread_deg=angular, trials=trials)

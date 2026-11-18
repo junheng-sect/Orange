@@ -15,7 +15,7 @@ from std_msgs.msg import String
 from tf2_msgs.msg import TFMessage
 
 from board_tasks import Progress
-from dll_drift import BASE, DLL, EDGE, HEALTH, MODE, ODOM, RELOC, RESULT, NS, Comparison
+from dll_drift import BASE, DLL, EDGE, HEALTH, MODE, NAV_MODE, ODOM, RELOC, RESULT, NS, Comparison
 from monitor import Monitor
 
 
@@ -86,6 +86,30 @@ class DriftTests(unittest.TestCase):
         self.send(MODE,String(data=json.dumps(dict(run='a', mode='dll'))))
         self.send(MODE,String(data=json.dumps(dict(run='b', mode='dll'))))
         self.assertIsNone(self.s.solution)
+
+    def test_generic_marker_keeps_navigation_primary(self):
+        import time
+        import numpy as np
+        mon = Monitor(Path('/tmp'))
+        mon.drift = self.s
+        self.s.feed(NAV_MODE, String(data=json.dumps(dict(mode='dll', run='indoor'))), time.monotonic_ns())
+        self.assertTrue(mon.dll_mode())
+        mon.solution = (np.array([0.,0.,0.,1.]), np.zeros(3))
+        msg = Odometry()
+        msg.header.frame_id = 'drone_odom'
+        msg.header.stamp = rospy.Time(100)
+        msg.pose.pose.orientation.w = 1.
+        with patch.object(mon, 'valid_alignment', return_value=True):
+            msg.child_frame_id = 'drone_nav_base'
+            mon.on_pose(msg, 'navigation')
+            msg.child_frame_id = 'drone_base'
+            mon.on_pose(msg, 'fastlio')
+        self.assertEqual(mon.source, 'navigation')
+        self.assertEqual(self.s.mode_topic, NAV_MODE)
+        self.assertTrue(self.s.measure(self.t)['valid'])
+        self.s.feed(NAV_MODE, String(data=json.dumps(dict(mode='dll', run='indoor', note='已有其他 DLL'))),
+                    time.monotonic_ns())
+        self.assertFalse(self.s.measure(self.t)['valid'])
 
     def test_frozen_bag_clock(self):
         from export_dll_drift import bag_events

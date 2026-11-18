@@ -11,8 +11,10 @@ HEALTH = "/dll_localization/status"
 RESULT = "/drone_reloc/result"
 RELOC = "/drone_reloc/status"
 MODE = "/test12/observer"
+NAV_MODE = "/nav_test/observer"
+MODE_TOPICS = (MODE, NAV_MODE)
 ODOM = "/fastlio/odom_world"
-TOPICS = (BASE, DLL, EDGE, HEALTH, RESULT, RELOC, "/tf", MODE, ODOM)
+TOPICS = (BASE, DLL, EDGE, HEALTH, RESULT, RELOC, "/tf", *MODE_TOPICS, ODOM)
 
 
 def pose_values(pos, rot):
@@ -38,6 +40,7 @@ def difference(base, observed):
 
 class Comparison:
     def __init__(self):
+        self.mode_topic = None
         self.mode = ""
         self.run = ""
         self.note = ""
@@ -53,10 +56,11 @@ class Comparison:
         self.latest_odom = self.odom_at = self.health_at = 0
 
     def feed(self, topic, msg, received_ns):
-        if topic == MODE:
+        if topic in MODE_TOPICS:
             value = json.loads(msg.data)
             if self.run and self.run != value["run"]:
                 self.reset()
+            self.mode_topic = topic
             self.run, self.mode = value["run"], value["mode"]
             self.note, self.mode_at = value.get("note", ""), received_ns
             return
@@ -147,7 +151,9 @@ class Comparison:
         if reason:
             result["reason"] = reason
             return result
-        if not dll or stamp-dll[0] > 1.5*NS:
+        if self.mode_topic == NAV_MODE and self.note:
+            reason = self.note
+        elif not dll or stamp-dll[0] > 1.5*NS:
             reason = self.note or "DLL 状态缺失或过期"
         elif not dll[2] or dll[1] != "TRACKING":
             reason = dll[5] or dll[1]

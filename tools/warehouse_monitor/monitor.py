@@ -132,6 +132,7 @@ class Monitor:
             (dll_drift.EDGE, TransformStamped, None, {}),
             (dll_drift.HEALTH, DiagnosticArray, None, {}),
             (dll_drift.MODE, String, None, {}),
+            (dll_drift.NAV_MODE, String, None, {}),
             ("/ywl/odom", Odometry, self.on_ywl_pose, {}),
             ("/ywl/status", DiagnosticArray, self.on_ywl_status, {}),
             ("/ywl/initial_transform", TransformStamped, self.on_ywl_init, {}),
@@ -362,9 +363,10 @@ class Monitor:
                 self.clear_motion()
             self.poses[source] = (now, stamp, point, q)
             nav = self.poses.get("navigation")
-            if self.dll_mode() and source != "fastlio":
+            prefer_fastlio = self.drift.mode_topic == dll_drift.MODE and self.dll_mode()
+            if prefer_fastlio and source != "fastlio":
                 return
-            if source == "fastlio" and nav and now - nav[0] <= POSE_FRESH and not self.dll_mode():
+            if source == "fastlio" and nav and now - nav[0] <= POSE_FRESH and not prefer_fastlio:
                 return
             if not self.valid_alignment(now):
                 return
