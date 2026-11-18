@@ -31,6 +31,7 @@ except ImportError:
 from drone_navigation.core import Spline, rotation
 
 from map_cloud import display_map, sample
+import dll_drift
 
 
 MAP_FRESH = 1.25
@@ -104,8 +105,7 @@ class Monitor:
         self.source = None
         self.pose = None
         self.trail = deque(maxlen=TRAIL_LENGTH)
-        self.dll_samples = OrderedDict()
-        self.dll_status = None
+        self.drift = dll_drift.Comparison()
         self.ywl_samples = OrderedDict()
         self.ywl_status = None
         self.ywl_seed_stamp = 0
@@ -127,9 +127,11 @@ class Monitor:
             ("/tf_static", TFMessage, self.on_mount, {}),
             ("/drone_nav/odom", Odometry, self.on_pose, {"callback_args": "navigation"}),
             ("/fastlio/odom_world", Odometry, self.on_pose, {"callback_args": "fastlio"}),
-            ("/dll_localization/pose", PoseStamped, self.on_dll_sample, {"callback_args": "pose"}),
-            ("/dll_localization/correction", TransformStamped, self.on_dll_sample, {"callback_args": "correction"}),
-            ("/dll_localization/status", DiagnosticArray, self.on_dll_status, {}),
+            (dll_drift.BASE, PoseStamped, None, {}),
+            (dll_drift.DLL, PoseStamped, None, {}),
+            (dll_drift.EDGE, TransformStamped, None, {}),
+            (dll_drift.HEALTH, DiagnosticArray, None, {}),
+            (dll_drift.MODE, String, None, {}),
             ("/ywl/odom", Odometry, self.on_ywl_pose, {}),
             ("/ywl/status", DiagnosticArray, self.on_ywl_status, {}),
             ("/ywl/initial_transform", TransformStamped, self.on_ywl_init, {}),
@@ -139,8 +141,33 @@ class Monitor:
         ]
         if PathTrajectory is not None:
             topics.append(("/drone_nav/path_trajectory", PathTrajectory, self.on_path_plan, {}))
-        self.subs = [rospy.Subscriber(topic, kind, callback, queue_size=1, **options)
-                     for topic, kind, callback, options in topics]
+        for topic, kind, callback, options in topics:
+            options = dict(options)
+            if topic in dll_drift.TOPICS:
+                argument = options.pop("callback_args", None)
+                options["callback_args"] = (topic, callback, argument)
+                callback = self.on_drift_input
+            self.subs.append(rospy.Subscriber(topic, kind, callback, queue_size=12, **options))
+
+    def on_drift_input(self, msg, routing):
+        topic, callback, argument = routing
+        with self.lock:
+            try:
+                old_run = self.drift.run
+                self.drift.feed(topic, msg, time.monotonic_ns())
+                if topic == dll_drift.MODE and old_run != self.drift.run and self.dll_mode():
+                    self.clear_motion()
+            except (AttributeError, ValueError, KeyError, TypeError, OverflowError) as exc:
+                self.drift.reset()
+                rospy.logwarn_throttle(5, "DLL comparison input: %s", exc)
+            if callback is not None:
+                if argument is None:
+                    callback(msg)
+                else:
+                    callback(msg, argument)
+
+    def dll_mode(self):
+        return self.drift.mode == "dll" and time.monotonic_ns()-self.drift.mode_at < 2500000000
 
     def next_id(self):
         self.sequence += 1
@@ -150,7 +177,6 @@ class Monitor:
         self.epoch = uuid.uuid4().hex
         self.pose = self.cloud = None
         self.trail.clear()
-        self.dll_samples.clear()
         self.ywl_samples.clear()
         self.viewing_observer = None
         self.plans.clear()
@@ -227,64 +253,6 @@ class Monitor:
         q, offset = self.solution
         return (valid and now - when <= 2.5 and now - tf_when <= MAP_FRESH
                 and abs(q @ tf_q) >= 1 - 1e-8 and float(np.max(np.abs(offset - tf_offset))) <= 1e-4)
-
-    def on_dll_sample(self, msg, kind):
-        stamp = msg.header.stamp.to_nsec()
-        if stamp <= 0 or msg.header.frame_id != "drone_map":
-            return
-        if kind == "correction" and msg.child_frame_id != "drone_odom":
-            return
-        point = msg.pose.position if kind == "pose" else msg.transform.translation
-        orientation = msg.pose.orientation if kind == "pose" else msg.transform.rotation
-        position = xyz(point)
-        if not np.isfinite(position).all():
-            return
-        try:
-            body = quaternion(xyzw(orientation)).tolist()
-        except ValueError:
-            return
-        sample = [msg.header.stamp.to_sec(), *position, *body] if kind == "pose" else True
-        with self.lock:
-            self.dll_samples.setdefault(stamp, {})[kind] = (time.monotonic(), sample)
-            while len(self.dll_samples) > 8:
-                self.dll_samples.popitem(last=False)
-
-    def on_dll_status(self, msg):
-        for status in msg.status:
-            if status.name != "fastlio_dll":
-                continue
-            fields = {item.key: item.value for item in status.values}
-            try:
-                accepted = int(fields.get("accepted_stamp_ns", "0"))
-            except ValueError:
-                accepted = 0
-            with self.lock:
-                self.dll_status = (time.monotonic(), msg.header.stamp.to_nsec(), status.message,
-                                   fields.get("reason", ""), accepted,
-                                   status.level == 0 and fields.get("local_input") == "fresh")
-                if status.message != "TRACKING" or status.level != 0:
-                    self.dll_samples.clear()
-            return
-
-    def dll_view(self, now):
-        if self.dll_status is None or self.map_path is None or self.map_path.parent.name != OUTDOOR_OBSERVER_MAP:
-            return None, None
-        at, status_stamp, state, reason, accepted, valid = self.dll_status
-        if now - at > 1.5:
-            return None, "DLL 状态已过期"
-        if state != "TRACKING" or not valid:
-            return None, f"{state} · {reason}"
-        ros_now = rospy.Time.now().to_nsec()
-        if not 0 < status_stamp or not -50_000_000 <= ros_now - status_stamp <= 1_500_000_000:
-            return None, "DLL 状态时间戳过期"
-        for stamp in sorted(self.dll_samples, reverse=True):
-            sample = self.dll_samples[stamp]
-            if (set(sample) == {"pose", "correction"} and accepted > 0
-                    and 0 <= stamp - accepted < 1_500_000_000
-                    and -50_000_000 <= ros_now - stamp <= 500_000_000
-                    and all(now - received <= .5 for received, _ in sample.values())):
-                return sample["pose"][1], None
-        return None, "等待同刻 DLL 位姿与修正"
 
     @staticmethod
     def ywl_crop_hashes(source):
@@ -393,7 +361,9 @@ class Monitor:
                 self.clear_motion()
             self.poses[source] = (now, stamp, point, q)
             nav = self.poses.get("navigation")
-            if source == "fastlio" and nav and now - nav[0] <= POSE_FRESH:
+            if self.dll_mode() and source != "fastlio":
+                return
+            if source == "fastlio" and nav and now - nav[0] <= POSE_FRESH and not self.dll_mode():
                 return
             if not self.valid_alignment(now):
                 return
@@ -480,13 +450,13 @@ class Monitor:
             aligned = self.valid_alignment(now)
             if not aligned and (self.aligned or self.cloud or self.plans):
                 self.clear_motion()
-            dll_pose = dll_reason = ywl_pose = ywl_reason = None
-            if aligned and self.source == "fastlio":
-                dll_pose, dll_reason = self.dll_view(now)
-                if not dll_pose:
-                    ywl_pose, ywl_reason = self.ywl_view(now)
-            observer = "dll" if dll_pose else "ywl" if ywl_pose else None
-            observed = dll_pose or ywl_pose
+            comparison = None
+            observed = ywl_reason = None
+            if self.dll_mode():
+                comparison = self.drift.live(rospy.Time.now().to_nsec(), aligned, time.monotonic_ns())
+            elif aligned and self.source == "fastlio":
+                observed, ywl_reason = self.ywl_view(now)
+            observer = "ywl" if observed else None
             if self.viewing_observer != observer:
                 self.viewing_observer = observer
                 self.epoch = uuid.uuid4().hex
@@ -514,7 +484,7 @@ class Monitor:
                 mapError=self.map_error, relocation=self.relocation[2] if now - self.relocation[0] <= 2.5 else "WAITING",
                 aligned=aligned, pose=observed or (self.pose if aligned and fresh_pose else None),
                 poseSource=observer or (self.source if aligned and fresh_pose else None),
-                dllReason=dll_reason, ywlReason=ywl_reason,
+                dllComparison=comparison, ywlReason=ywl_reason,
                 executor=state, cloudId=cloud[0] if cloud else 0,
                 cloudCount=cloud[3] if cloud else 0,
                 planId=plan["id"] if plan else 0, pending=plan["pending"] if plan else False,
@@ -627,7 +597,7 @@ def main():
     args = parser.parse_args(rospy.myargv()[1:])
     monitor = Monitor(args.maps)
     with server(args.port, monitor, Path(__file__).resolve().parent / "web", args.telemetry_only) as http:
-        rospy.init_node("warehouse_monitor", anonymous=True, disable_rosout=True, disable_rostime=True)
+        rospy.init_node("warehouse_monitor", anonymous=True, disable_rosout=True)
         monitor.subscribe()
         if args.board_status:
             http.drone_status = start_status_bridge()

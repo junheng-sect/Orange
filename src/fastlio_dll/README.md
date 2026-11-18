@@ -38,7 +38,7 @@ B 参考衡量先验图内的一致性。初值、同一地图的系统误差和
 ssh -t orange '~/.local/bin/record_outdoor_dll_ywl'
 ```
 
-板端也可直接运行 `~/mid360s_ws/scripts/nav_test12.sh`。先让 Channel 6 处于关闭位，等原重定位确认且 DLL 进入 TRACKING，再拨到录制位并留够 20 秒静止数据。落地静止几秒后拨回关闭位，约 1 秒后封包。着地并上锁后按 Ctrl+C 收尾，SSH 断开可用 `tmux attach -t nav12` 接回。bag、DLL 日志、地图哈希和运行配置保存在 `~/test_data/nav_test/<时间>_test12/`。原手飞录包入口使用 `--no-dll`。
+板端也可直接运行 `~/mid360s_ws/scripts/nav_test12.sh`。先让 Channel 6 处于关闭位，等终端确认 FAST-LIO2 和原室外重定位就绪，再拨到录制位并留够 20 秒静止数据。DLL 作为旁路运行，进入 TRACKING 后网页单列其与主位姿的水平差、高度差和航向差；缺测期间通道 6 继续录包。默认 test12 的实测 bag 可通过 [漂移指标导出说明](../../tools/warehouse_monitor/README.md#test12-的-dll-对照差) 复盘。落地静止几秒后拨回关闭位，约 1 秒后封包。着地并上锁后按 Ctrl+C 收尾，SSH 断开可用 `tmux attach -t nav12` 接回。bag、DLL 日志、地图哈希和运行配置保存在 `~/test_data/nav_test/<时间>_test12/`。原手飞录包入口使用 `--no-dll`。
 
 封包后用 `rosbag info` 确认原始雷达为 `livox_ros_driver2/CustomMsg`，IMU 为 `sensor_msgs/Imu`。PX4 ULog 按原方式下载。
 

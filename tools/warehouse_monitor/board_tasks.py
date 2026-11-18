@@ -384,14 +384,18 @@ class Progress:
                 if health["armed"] and health["landed"] == 2:
                     note = "遥控手飞 · " + (self.recording or record)
                     if not health["observer_tracking"]:
-                        note += " · " + health["observer_note"] + "，显示原定位"
+                        note += " · " + health["observer_note"] + ("，显示原定位" if task.get("observer") == "ywl" else "，旁路对照不可用")
                     return "running", note
-                if self.manual_ready and health["ready"] and health["observer_tracking"]:
+                needs_ywl = task.get("observer") == "ywl"
+                recorder_ok = self.recording in {"待录包", "录包中", "正在封包", "已封包"}
+                if (self.manual_ready and recorder_ok and health["ready"]
+                        and (not needs_ywl or health["observer_tracking"])):
                     if self.recording == "待录包":
                         record = "定位就绪。拨通道 6 开包，确认录包后静置 20 秒"
                     return "wait_pilot", record
-                name = "YWL" if task.get("observer") == "ywl" else "DLL"
-                return "preparing", health["observer_note"] if self.manual_ready else note or f"等待 FAST-LIO2、重定位和 {name}"
+                if needs_ywl and self.manual_ready and not health["observer_tracking"]:
+                    return "preparing", health["observer_note"]
+                return "preparing", note or "等待录包器、FAST-LIO2 和室外重定位"
             if task["automatic"]:
                 if phase == "DONE" or finished:
                     return "action_done", finished or note

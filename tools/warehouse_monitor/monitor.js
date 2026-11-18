@@ -497,9 +497,17 @@ function paintStatus() {
   const showPose = visible() && pose;
   byId("phase").textContent = !showPose ? "等待地图与定位对齐"
     : result.poseSource === "navigation" ? "/drone_nav/odom"
-      : result.poseSource === "dll" ? "DLL 地图位姿"
         : result.poseSource === "ywl" ? "YWL 地图位姿"
-          : (result.ywlReason || result.dllReason) ? `FAST-LIO2 · ${result.ywlReason || result.dllReason}` : "/fastlio/odom_world";
+          : result.ywlReason ? `FAST-LIO2 · ${result.ywlReason}` : "/fastlio/odom_world";
+  const drift = online && watching() && !offline && result?.dllComparison;
+  byId("dll-comparison").hidden = !drift;
+  if (drift) {
+    byId("dll-state").textContent = drift.valid ? "TRACKING" : `不可用 · ${drift.state} · ${drift.reason}`;
+    const signed = x => (x > 0 ? "+" : "") + x.toFixed(2);
+    byId("dll-xy").textContent = drift.valid ? (100 * drift.horizontal_m).toFixed(2) : "—";
+    byId("dll-z").textContent = drift.valid ? signed(100 * drift.dz_m) : "—";
+    byId("dll-yaw").textContent = drift.valid ? signed(drift.yaw_deg) : "—";
+  }
   const heading = Math.atan2(forward.y, forward.x) * 180 / Math.PI;
   [pos.x, pos.y, pos.z, heading].forEach((value, i) => {
     byId(["px", "py", "pz", "yaw"][i]).textContent = showPose ? value.toFixed(i === 3 ? 1 : 2) : "—";
