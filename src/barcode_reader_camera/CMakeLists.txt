@@ -38,7 +38,7 @@ target_link_libraries(barcode_reader_camera_decoder PRIVATE ZXing::ZXing
 find_package(Python3 REQUIRED COMPONENTS Development)
 add_library(orange_qr MODULE src/qr_mono_module.cpp)
 target_include_directories(orange_qr PRIVATE ${Python3_INCLUDE_DIRS})
-target_link_libraries(orange_qr PRIVATE ZXing::ZXing)
+target_link_libraries(orange_qr PRIVATE ZXing::ZXing barcode_reader_camera_decoder)
 set_target_properties(orange_qr PROPERTIES PREFIX "" LIBRARY_OUTPUT_DIRECTORY
   "${CATKIN_DEVEL_PREFIX}/${CATKIN_GLOBAL_PYTHON_DESTINATION}")
 install(TARGETS orange_qr LIBRARY DESTINATION ${CATKIN_GLOBAL_PYTHON_DESTINATION})

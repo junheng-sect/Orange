@@ -112,7 +112,7 @@ def build(scripts, maps):
                       points=points, stops=stops))
     tasks.append(dict(id='test_indoor3_3', label='test3_3', title='Tag 1 双相机读 QR',
                       mapId=indoor_map, automatic=False, fixed=False, points=[], stops=[],
-                      route='OV9281 锁定 Tag 1，前往正前方 0.8 m，地图航向 −89.5°，两路各读 2 s',
+                      route='OV9281 锁定 Tag 1，OV13855 光心距 Tag 中心 0.62 m，地图航向 −89.5°，双路按各自同帧 Tag 位姿读 QR 2 s',
                       finish='到点悬停，切出再切入 OFFBOARD 开始下一轮'))
     tasks.append(dict(id='test_indoor4', label='test4', title='货架标签分批扫码',
                       mapId=indoor_map, automatic=False, fixed=True,

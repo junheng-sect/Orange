@@ -758,7 +758,7 @@
       "fixed": false,
       "points": [],
       "stops": [],
-      "route": "OV9281 锁定 Tag 1，前往正前方 0.8 m，地图航向 −89.5°，两路各读 2 s",
+      "route": "OV9281 锁定 Tag 1，OV13855 光心距 Tag 中心 0.62 m，地图航向 −89.5°，双路按各自同帧 Tag 位姿读 QR 2 s",
       "finish": "到点悬停，切出再切入 OFFBOARD 开始下一轮"
     },
     {
