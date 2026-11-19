@@ -696,6 +696,60 @@
       ]
     },
     {
+      "id": "test_indoor3_2",
+      "label": "test3_2",
+      "title": "双相机 AprilTag 对比",
+      "mapId": "20261114_101654_indoor_fly_raw_000001",
+      "automatic": false,
+      "fixed": true,
+      "route": "左下 → 左上 → 右上 → 右下，每点同时用 OV13855 和 OV9281 识别 2 s",
+      "finish": "右下悬停，分别汇总两路标签覆盖，飞手接管降落",
+      "points": [
+        [
+          0.623,
+          -0.039,
+          0.48
+        ],
+        [
+          0.624,
+          -0.035,
+          1.23
+        ],
+        [
+          -0.276,
+          -0.042,
+          1.23
+        ],
+        [
+          -0.277,
+          -0.046,
+          0.48
+        ]
+      ],
+      "stops": [
+        {
+          "index": 0,
+          "name": "左下",
+          "seconds": 3.0
+        },
+        {
+          "index": 1,
+          "name": "左上",
+          "seconds": 3.0
+        },
+        {
+          "index": 2,
+          "name": "右上",
+          "seconds": 3.0
+        },
+        {
+          "index": 3,
+          "name": "右下",
+          "seconds": 3.0
+        }
+      ]
+    },
+    {
       "id": "test_indoor4",
       "label": "test4",
       "title": "货架标签分批扫码",

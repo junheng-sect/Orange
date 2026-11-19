@@ -105,6 +105,11 @@ def build(scripts, maps):
                       route='左下 → 左上 → 右上 → 右下，每点拍照并观察 AprilTag 2 s',
                       finish='右下悬停，汇总六个标签的覆盖情况，飞手接管降落',
                       points=points, stops=stops))
+    tasks.append(dict(id='test_indoor3_2', label='test3_2', title='双相机 AprilTag 对比',
+                      mapId=indoor_map, automatic=False, fixed=True,
+                      route='左下 → 左上 → 右上 → 右下，每点同时用 OV13855 和 OV9281 识别 2 s',
+                      finish='右下悬停，分别汇总两路标签覆盖，飞手接管降落',
+                      points=points, stops=stops))
     tasks.append(dict(id='test_indoor4', label='test4', title='货架标签分批扫码',
                       mapId=indoor_map, automatic=False, fixed=True,
                       route='左下 → 左上 → 右上 → 右下，各点识别后扫描新标签',
