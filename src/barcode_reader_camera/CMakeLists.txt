@@ -34,6 +34,15 @@ add_library(barcode_reader_camera_decoder src/multi_decoder.cpp src/config_yaml.
 target_link_libraries(barcode_reader_camera_decoder PRIVATE ZXing::ZXing
   PUBLIC ${OpenCV_LIBRARIES} ${YAML_CPP_LIBRARIES} Threads::Threads)
 
+# Lightweight Python interface to the same native ZXing reader used on board.
+find_package(Python3 REQUIRED COMPONENTS Development)
+add_library(orange_qr MODULE src/qr_mono_module.cpp)
+target_include_directories(orange_qr PRIVATE ${Python3_INCLUDE_DIRS})
+target_link_libraries(orange_qr PRIVATE ZXing::ZXing)
+set_target_properties(orange_qr PROPERTIES PREFIX "" LIBRARY_OUTPUT_DIRECTORY
+  "${CATKIN_DEVEL_PREFIX}/${CATKIN_GLOBAL_PYTHON_DESTINATION}")
+install(TARGETS orange_qr LIBRARY DESTINATION ${CATKIN_GLOBAL_PYTHON_DESTINATION})
+
 add_executable(decode_image src/decode_image_main.cpp)
 target_link_libraries(decode_image barcode_reader_camera_decoder ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
 

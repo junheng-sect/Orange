@@ -418,6 +418,8 @@ class Progress:
             elif health["armed"] and health["mode"] in {"OFFBOARD", "AUTO.LAND"}:
                 return "running", note
             elif health["stream"] and self.runner_started and health["armed"] and health["landed"] == 2:
+                if task["id"] == "test_indoor3_3":
+                    return "wait_offboard", "将 Tag 1 放入 OV9281 视野，切入 OFFBOARD 开始一轮双相机扫码"
                 if task["id"] in {"test_indoor3", "test_indoor3_1", "test_indoor3_2", "test_indoor4"}:
                     return "wait_offboard", "设定值已预发送，切 OFFBOARD 后从当前位置规划到 1 号点"
                 return "wait_offboard", "设定值已预发送，可用遥控器切 OFFBOARD"

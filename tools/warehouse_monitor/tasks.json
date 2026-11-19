@@ -750,6 +750,18 @@
       ]
     },
     {
+      "id": "test_indoor3_3",
+      "label": "test3_3",
+      "title": "Tag 1 双相机读 QR",
+      "mapId": "20261114_101654_indoor_fly_raw_000001",
+      "automatic": false,
+      "fixed": false,
+      "points": [],
+      "stops": [],
+      "route": "OV9281 锁定 Tag 1，前往正前方 0.8 m，地图航向 −89.5°，两路各读 2 s",
+      "finish": "到点悬停，切出再切入 OFFBOARD 开始下一轮"
+    },
+    {
       "id": "test_indoor4",
       "label": "test4",
       "title": "货架标签分批扫码",
