@@ -110,9 +110,9 @@ def build(scripts, maps):
                       route='左下 → 左上 → 右上 → 右下，每点同时用 OV13855 和 OV9281 识别 2 s',
                       finish='右下悬停，分别汇总两路标签覆盖，飞手接管降落',
                       points=points, stops=stops))
-    tasks.append(dict(id='test_indoor3_3', label='test3_3', title='Tag 1 双相机读 QR',
+    tasks.append(dict(id='test_indoor3_3', label='test3_3', title='OV13855 锁定 Tag 1 读 QR',
                       mapId=indoor_map, automatic=False, fixed=False, points=[], stops=[],
-                      route='OV9281 锁定 Tag 1，OV13855 光心距 Tag 中心 0.62 m，地图航向 −89.5°，双路按各自同帧 Tag 位姿读 QR 2 s',
+                      route='OV13855 光心沿 Tag 1 法线相距 0.80 m，地图航向 −89.5°；到位后最多读 2 s，首次读出 BOX-01 即结束本轮',
                       finish='到点悬停，切出再切入 OFFBOARD 开始下一轮'))
     tasks.append(dict(id='test_indoor3_4', label='test3_4', title='手飞 OV13855 录像',
                       mapId=indoor_map, automatic=False, fixed=False, manual=True, points=[], stops=[],
