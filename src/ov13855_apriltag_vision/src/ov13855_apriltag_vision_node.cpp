@@ -130,6 +130,8 @@ class Ov13855AprilTagVisionNode {
       corners_pub_ = pnh_.advertise<ov13855_apriltag_vision::TagCornerArray>("corners", 4);
     }
     pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>(pose_topic_, 1);
+    if (image_topic_ == "/ov13855/image_raw")
+      monitor_corners_ = nh_.advertise<ov13855_apriltag_vision::TagCornerArray>("/ov13855/monitor/corners", 2);
     if (pnh_.param("publish_detections", false)) {
       detections_pub_ = pnh_.advertise<ov13855_apriltag_vision::TagObservationArray>("detections", 2);
     }
@@ -169,9 +171,9 @@ class Ov13855AprilTagVisionNode {
     pnh_.param("detection_max_dimension", detection_max_dimension_, 1280);
     pnh_.param("publish_marker_tf", publish_marker_tf_, true);
     pnh_.param<std::string>("marker_frame", marker_frame_, "front_marker");
-    pnh_.param("publish_annotated", publish_annotated_, true);
+    pnh_.param("publish_annotated", publish_annotated_, false);
     pnh_.param("annotated_rate_hz", annotated_rate_hz_, 5.0);
-    pnh_.param("publish_preview", publish_preview_, true);
+    pnh_.param("publish_preview", publish_preview_, false);
     pnh_.param<std::string>("preview_image_topic", preview_image_topic_, "/ov13855_apriltag_vision/image_preview");
     pnh_.param("preview_max_dimension", preview_max_dimension_, 960);
     pnh_.param("preview_rate_hz", preview_rate_hz_, 0.0);
@@ -247,7 +249,7 @@ class Ov13855AprilTagVisionNode {
         ids.push_back(detection.id);
         corners.push_back(detection.corners);
       }
-      if (corners_pub_) {
+      if (corners_pub_ || (monitor_corners_ && monitor_corners_.getNumSubscribers())) {
         ov13855_apriltag_vision::TagCornerArray frame;
         frame.header = message->header;
         frame.family = tag_family_;
@@ -262,7 +264,10 @@ class Ov13855AprilTagVisionNode {
           }
           frame.tags.push_back(tag);
         }
-        corners_pub_.publish(frame);
+        if (corners_pub_) corners_pub_.publish(frame);
+        if (monitor_corners_ && monitor_corners_.getNumSubscribers()) monitor_corners_.publish(frame);
+      }
+      if (corners_pub_) {
         publishDebugImages(message, gray, corners, ids, -1, nullptr, nullptr, "CORNERS_ONLY");
         publishStatus("CORNERS_ONLY");
         publishProcessingTime(start);
@@ -580,7 +585,7 @@ class Ov13855AprilTagVisionNode {
   ros::NodeHandle nh_, pnh_;
   ros::Subscriber image_sub_, camera_info_sub_;
   image_transport::ImageTransport image_transport_;
-  ros::Publisher corners_pub_, survey_pub_, detections_pub_, pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
+  ros::Publisher monitor_corners_, corners_pub_, survey_pub_, detections_pub_, pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
   image_transport::Publisher annotated_pub_, preview_pub_;
   tf2_ros::TransformBroadcaster marker_tf_broadcaster_;
   std::string image_topic_, camera_info_topic_, pose_topic_, transform_debug_topic_;
@@ -589,7 +594,7 @@ class Ov13855AprilTagVisionNode {
   int fixed_marker_id_ = 0, target_marker_id_ = -1, nthreads_ = 4, detection_max_dimension_ = 1280;
   int preview_max_dimension_ = 960;
   double target_marker_size_m_ = 0.012, quad_decimate_ = 1.5, annotated_rate_hz_ = 5.0, preview_rate_hz_ = 0.0;
-  bool refine_edges_ = true, publish_marker_tf_ = true, publish_annotated_ = true, publish_preview_ = true;
+  bool refine_edges_ = true, publish_marker_tf_ = true, publish_annotated_ = false, publish_preview_ = false;
   bool has_camera_info_ = false;
   uint32_t camera_info_width_ = 0, camera_info_height_ = 0;
   uint64_t frame_count_ = 0, marker_count_ = 0, detect_count_ = 0, pose_reject_count_ = 0;

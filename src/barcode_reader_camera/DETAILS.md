@@ -25,7 +25,7 @@
   角点是该帧的像素坐标。`session_dir` 是本次运行的记录文件夹（没开记录时为空），`barcode_rc_trigger` 据此把
   `rc_read.csv` 写进同一个文件夹。
 - `~cancel`（`std_srvs/Trigger`）：中止正在进行的解码，`~decode` 返回 `cancelled`；空闲时 `success=false`。
-- `~result`（`BarcodeArray.msg`）：每次 `~decode` 结束都发布；`~image_annotated` 有订阅者时发布标注图。
+- `~result`（`BarcodeArray.msg`）：每次 `~decode` 结束都发布；监看时额外发送各帧的结构化结果。
 - 日志级别：成功以及 `decode_fail`、`partial` 打 INFO（定位到了但没读出，是正常结果）；`no_image`、`no_tag` 等链路问题打 WARN。
 - 私有参数（launch 已设置大部分）：
 
@@ -85,7 +85,7 @@
 - 读码目录名 `<会话文件夹>/<YYYYmmdd_HHMMSS_mmm>_<ok|partial|错误名>/`。
 - `meta.yaml`：结果（含 `frames`、`result_frame`）、码（含所在帧 `frame`）、第一帧的 tag 位姿（rvec/tvec，T_camera_tag）、
   距离和倾角、ROI 四角、定位到但没解出的框、亮度/清晰度、每个重试帧的序号/时间戳/位姿/文件名（没存图为空）、所用版式和参数文件。
-- `decode.log` 与 `decode_image --verbose` 相同；`preview.jpg` 同 `~image_annotated`，重试帧读出时画在那一帧上。
+- `decode.log` 与 `decode_image --verbose` 相同；电脑归档时按 meta.yaml 的 result_frame 在对应原图或重试帧上生成预览。
 - `no_tag` / `no_camera_info`（没进入解码）每 2 s 最多存一个目录，避免 `trigger_decode` 每 0.5 s 重试刷屏；CSV 照常每次一行。
 
 ## 参数文件

@@ -327,7 +327,7 @@ TEST(BarcodeReaderCameraNode, RecordsEachAttempt) {
   const std::string& d = added;
   EXPECT_TRUE(readable(d + "/frame.png"));
   EXPECT_TRUE(readable(d + "/camera.yaml"));
-  EXPECT_TRUE(readable(d + "/preview.jpg"));
+  EXPECT_FALSE(readable(d + "/preview.jpg"));
   std::ifstream meta(d + "/meta.yaml");
   const std::string text((std::istreambuf_iterator<char>(meta)), std::istreambuf_iterator<char>());
   EXPECT_NE(text.find("rvec:"), std::string::npos);

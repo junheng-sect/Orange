@@ -10,6 +10,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include "monitor_encoder.hpp"
 namespace {
 struct Pipeline {
   GstElement* pipeline = nullptr;
@@ -98,6 +99,10 @@ void run() {
   camera_info_manager::CameraInfoManager manager(pnh, name);
   if (!manager.loadCameraInfo(url) || !manager.isCalibrated()) throw std::runtime_error("cannot load calibration");
   validateInfo(manager.getCameraInfo(), width, height);
+  bool standalone = pnh.param("monitor_standalone", false);
+  const bool selfpath = device == "/dev/video12" && width == 1280 && height == 960 && fps == 15;
+  std::unique_ptr<CaptureLease> lease(selfpath ? new CaptureLease(standalone) : nullptr);
+  std::unique_ptr<MonitorEncoder> encoder(selfpath ? new MonitorEncoder(nh, standalone) : nullptr);
   // image_transport adds <image_topic>/compressed etc.; plugins encode only while subscribed.
   image_transport::ImageTransport transport(nh);
   auto image_pub = transport.advertise(image_topic, 1);
@@ -127,6 +132,7 @@ void run() {
   }
   auto last_frame = ros::WallTime::now(); bool first = true;
   while (ros::ok()) {
+    if (lease && lease->yieldToTask()) return;
     ros::spinOnce(); checkBus(stream.pipeline);
     std::unique_ptr<GstSample, decltype(&gst_sample_unref)> sample(
       gst_app_sink_try_pull_sample(GST_APP_SINK(stream.sink), 200 * GST_MSECOND), gst_sample_unref);
@@ -146,6 +152,7 @@ void run() {
     if (range != GST_VIDEO_COLOR_RANGE_0_255) ROS_WARN_ONCE("NV12 colour range unknown; assuming full-range Y plane");
     auto info = manager.getCameraInfo(); validateInfo(info, width, height);
     info.header.stamp = captureStamp(stream.pipeline, sample.get()); info.header.frame_id = frame;
+    if (encoder) encoder->offer(sample.get(), info.header);
     info_pub.publish(info);
     // Without image subscribers (the full-resolution path between barcode reads) the frame is still pulled so
     // the ISP keeps streaming, but the Y plane is neither copied nor published.

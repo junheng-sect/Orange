@@ -1,6 +1,7 @@
 // FrameRecorder: session directory, per-attempt directories by mode, attempts.csv, and files that
 // decode_image can replay.
 #include <dirent.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 
@@ -124,7 +125,7 @@ TEST(FrameRecorder, AllModeWritesReplayableAttempt) {
   ASSERT_FALSE(frame.empty());
   EXPECT_EQ(cv::norm(frame, rec.frame, cv::NORM_INF), 0.0);
   EXPECT_FALSE(cv::imread(d + "/retry_1.png", cv::IMREAD_UNCHANGED).empty());
-  EXPECT_FALSE(cv::imread(d + "/preview.jpg").empty());
+  EXPECT_NE(access((d + "/preview.jpg").c_str(), F_OK), 0);
   EXPECT_EQ(lines(d + "/decode.log"), rec.log);
 
   int w = 0, h = 0;
@@ -166,7 +167,7 @@ TEST(FrameRecorder, AllModeWritesReplayableAttempt) {
   EXPECT_TRUE(endsWith(csv[1], ",3,0,\"" + dirs[0] + "\""));  // frames, result_frame, dir
 }
 
-TEST(FrameRecorder, ResultFromRetryFrameIsPreviewed) {
+TEST(FrameRecorder, KeepsResultFrameForDesktopPreview) {
   const std::string dir = makeTempDir();
   DecodeRecord rec = makeRecord(true, "");
   rec.retries[1].gray = cv::Mat(144, 256, CV_8UC1, cv::Scalar(200));
@@ -181,9 +182,7 @@ TEST(FrameRecorder, ResultFromRetryFrameIsPreviewed) {
   ASSERT_EQ(dirs.size(), 1u);
   const std::string d = dir + "/" + dirs[0];
   EXPECT_FALSE(cv::imread(d + "/retry_2.png", cv::IMREAD_UNCHANGED).empty());
-  const cv::Mat preview = cv::imread(d + "/preview.jpg", cv::IMREAD_GRAYSCALE);
-  ASSERT_FALSE(preview.empty());
-  EXPECT_NEAR(preview.at<uchar>(130, 10), 200, 3);  // retry 2 (200), not the random input frame
+  EXPECT_NE(access((d + "/preview.jpg").c_str(), F_OK), 0);
   const YAML::Node meta = YAML::LoadFile(d + "/meta.yaml");
   EXPECT_EQ(meta["result"]["result_frame"].as<int>(), 2);
   EXPECT_EQ(meta["codes"][0]["frame"].as<int>(), 2);

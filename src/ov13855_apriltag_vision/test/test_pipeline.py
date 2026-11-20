@@ -10,7 +10,7 @@ from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import Float64, String
 from tf2_msgs.msg import TFMessage
-from ov13855_apriltag_vision.msg import HomogeneousTransform, TagObservationArray, TagSurveyFrame
+from ov13855_apriltag_vision.msg import HomogeneousTransform, TagObservationArray, TagSurveyFrame, TagCornerArray
 
 class PipelineTest(unittest.TestCase):
     def setUp(self):
@@ -90,6 +90,12 @@ class PipelineTest(unittest.TestCase):
 
     def test_tag_array_multiple_tags(self):
         arrays = []
+        corners = []
+        geometry = rospy.Subscriber('/ov13855/monitor/corners', TagCornerArray, corners.append)
+        self.addCleanup(geometry.unregister)
+        deadline = time.monotonic() + 3
+        while not geometry.get_num_connections() and time.monotonic() < deadline:
+            time.sleep(.02)
         sub = rospy.Subscriber('/ov13855_test_vision/detections', TagObservationArray, arrays.append)
         end = time.monotonic() + 5
         while not sub.get_num_connections() and time.monotonic() < end:
@@ -105,6 +111,11 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(frame.family, 'tag36h11')
         self.assertEqual(frame.header.frame_id, 'ov13855_optical_frame')
         self.assertEqual({t.id for t in frame.tags}, {7, 9})
+        monitor, = [m for m in corners if m.header.stamp == stamp]
+        self.assertEqual((monitor.width, monitor.height), (800, 800))
+        self.assertEqual({t.id for t in monitor.tags}, {7, 9})
+        self.assertTrue(all(len(t.corners) == 4 for t in monitor.tags))
+        self.assertEqual(self.poses[-1].header.stamp, stamp)
         self.assertTrue(all(t.pose.position.z > 0 and t.reprojection_rms_px < 2 for t in frame.tags))
         self.assertEqual(self.matrices[-1].marker_id, 7)
         stamp = self.send(self.scene(None))

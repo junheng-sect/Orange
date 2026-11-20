@@ -17,7 +17,7 @@ pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
 find_path(APRILTAG_INCLUDE_DIR apriltag.h PATH_SUFFIXES apriltag)
 find_library(APRILTAG_LIBRARY apriltag)
 
-add_message_files(FILES Barcode.msg BarcodeArray.msg)
+add_message_files(FILES Barcode.msg BarcodeArray.msg BarcodeFrame.msg)
 add_service_files(FILES DecodeBarcodes.srv)
 generate_messages(DEPENDENCIES std_msgs)
 

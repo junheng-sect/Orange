@@ -6,6 +6,7 @@
 <title>仓库无人机 · 巡检</title>
 <link rel="stylesheet" href="/monitor.css">
 <script defer src="/monitor.js"></script>
+<script defer src="/camera.js"></script>
 </head>
 <body>
 <main>
@@ -65,6 +66,18 @@
         <button id="tab-inspection" type="button" hidden aria-pressed="false">预设任务</button>
       </div>
       <div id="live-panel">
+      <section>
+        <details id="camera-panel">
+          <summary>OV13855 相机</summary>
+          <label>画面 <select id="camera-mode">
+            <option value="auto">自动 · 任务优先</option><option value="raw">原始画面</option>
+            <option value="task">任务标注</option><option value="local">本地识别</option>
+          </select></label>
+          <p id="camera-status" role="status"></p>
+          <img id="camera-image" hidden alt="OV13855 实时画面">
+          <div id="camera-events" aria-label="任务识别记录"></div>
+        </details>
+      </section>
       <section class="flight-section">
         <details id="flight-status">
           <summary>

@@ -5,7 +5,7 @@
 
 ## 快速开始
 
-日常配合 fusion 使用（fusion 已起 MAVROS、OV13855 相机和 AprilTag）：
+日常配合 fusion 使用（MAVROS 常驻，由 manual_read 启动 OV13855 和 AprilTag）：
 
 ```bash
 # 终端 1
@@ -13,7 +13,7 @@ cd /home/orangepi/mid360s_ws/scripts && ./fusion.sh
 # 终端 2
 source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash
 source /home/orangepi/mid360s_ws/scripts/ros_net.sh
-roslaunch barcode_rc_trigger manual_read.launch
+roslaunch barcode_rc_trigger manual_read.launch camera:=true
 ```
 
 不跑 fusion 的地面测试：MAVROS 单独起，`manual_read` 加 `camera:=true` 自己起相机和 AprilTag：
@@ -27,7 +27,7 @@ roslaunch barcode_rc_trigger manual_read.launch camera:=true   # 终端 2
 再开一个终端（同样先 source、export ROS_IP），起相机 TF 和控制：
 
 ```bash
-roslaunch front_marker_control ov13855_marker_tracking.launch camera:=false   # 用 fusion 起的相机和 AprilTag
+roslaunch front_marker_control ov13855_marker_tracking.launch camera:=false   # 复用 manual_read camera:=true 启动的相机和 AprilTag
 ```
 
 飞机切 OFFBOARD 后自动移到 tag 正前方（相机到 tag 约 0.62 m），到位后拨 CH9。汇总标题会带上当时的控制模式
@@ -46,7 +46,7 @@ roslaunch --ros-args barcode_rc_trigger manual_read.launch     # 列出每个参
 | --- | --- | --- |
 | `mode` | `camera` | `camera` 只相机 / `serial` 只串口读码器 / `both` 先相机后读码器，两个都读 |
 | `layout` | `qr_top_tag_bottom` | `qr_top_tag_bottom` QR 标签 / `dm_top_tag_bottom` DataMatrix 标签 / `drone_vision_default` 原版（需 `camera:=true`） |
-| `camera` | `false` | `false` fusion 已起相机 / `true` 本 launch 起相机和 AprilTag |
+| `camera` | `false` | `false` 复用已有相机 / `true` 本 launch 起相机和 AprilTag |
 | `save_frames` | `off` | `off` 不存图 / `failed` 只存失败 / `all` 都存 |
 | `save_dir` | `~/test_data/barcode` | 记录根目录，每次启动建一个子文件夹 |
 | `quiet` | `true` | `true` 终端只留拨杆汇总和告警 / `false` 所有节点日志都打印 |
@@ -55,7 +55,7 @@ roslaunch --ros-args barcode_rc_trigger manual_read.launch     # 列出每个参
 例：DataMatrix 标签，只存读失败的图：
 
 ```bash
-roslaunch barcode_rc_trigger manual_read.launch layout:=dm_top_tag_bottom save_frames:=failed
+roslaunch barcode_rc_trigger manual_read.launch camera:=true layout:=dm_top_tag_bottom save_frames:=failed
 ```
 
 ## 结果在哪看
@@ -104,9 +104,8 @@ camera:
 - 拨杆判定：CH9 先低于 1600 才布防，再高于 1700 并保持 0.05 s 触发一次；按住不放不会重复触发，回到低位才能再触发。
   第一次用先 `rostopic echo -n1 /mavros/rc/in`，看 `channels[8]` 的高低位是否在 1600 和 1700 两侧。
 - 上一次读码还没结束（相机读不出时约 2 s）再拨杆会被忽略，日志提示 `pulse#N ignored`。
-- `camera:=false` 时 AprilTag 用 fusion 的 tag 43.7 mm，`layout` 只能是 `qr_top_tag_bottom` 或 `dm_top_tag_bottom`；
-  其他版式要用 `camera:=true`，并让 fusion 带 `--no-camera` 启动。
-- `camera:=true` 时不能再跑 `ov13855_marker_tracking.launch`、`bringup.launch` 或带相机的 fusion，节点重名会互相踢掉。
+- `camera:=false` 复用已启动的任务相机和 AprilTag，两个入口使用相同的 layout。
+- `camera:=true` 由 manual_read 管理相机；其他相机任务需要先结束或显式复用已有相机。
 - `mode` 含 `serial` 时不要同时运行 DroneVision（共用 `/dev/ttyS1`）。
 - 板端 `mavros/launch/px4.launch` 默认值已改成 `fcu_url` `/dev/ttyS3:921600`、`fcu_protocol` v1.0（原文件备份为 `px4.launch.orig`）；
   apt 升级 mavros 会覆盖这个改动，届时显式传 `fcu_url:=/dev/ttyS3:921600 fcu_protocol:=v1.0`。

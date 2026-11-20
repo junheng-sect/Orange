@@ -24,7 +24,7 @@ roslaunch ov13855_cam ov13855.launch full:=false  # 只起 1280×960（只跟踪
 图像只在有订阅者时才拷贝和发布；没有订阅者时仍从 ISP 取帧（保持出流），`camera_info` 每帧都发。
 主通路平时没有订阅者，节点约占 4% CPU；读码节点订阅后约 0.1~0.3 s 收到第一帧（订阅握手 + 最多一帧间隔）。
 图像经 image_transport 发布，另有 `/compressed` 等插件话题，只在有订阅者时编码；
-远程查看优先用视觉包的缩小预览 `/ov13855_apriltag_vision/image_preview/compressed`。
+电脑通过 `http://localhost:8765/` 的 OV13855 面板按需观看硬编码图传。
 GStreamer appsink 和 ROS 发布队列均为 1；逐帧校验协商后的尺寸/格式/FPS，按实际行步长复制。
 
 Y 平面当作 mono8 的前提是 ISP 输出全范围：colorimetry 第一位为 `1`（0~255）。颜色矩阵随分辨率而变

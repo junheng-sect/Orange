@@ -35,11 +35,11 @@ publish_marker_tf: true
 # Marker TF 坐标系名称
 marker_frame: front_marker
 # 是否发布标注图像
-publish_annotated: true
+publish_annotated: false
 # 标注图像发布频率（Hz）
 annotated_rate_hz: 5.0
 # 缩小预览图（同样带标注），供本机 RViz 经 /compressed 远程查看；有订阅者时才生成和编码
-publish_preview: true
+publish_preview: false
 # 预览图最长边（px），原图更小时不放大
 preview_max_dimension: 960
 # 预览图发布频率（Hz），<=0 表示每个处理帧都发（跟随相机，约 15Hz）。

@@ -20,6 +20,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, build_opener
 
+from camera_view import Camera, MODES
 from map_cloud import display_map
 from inspection import Conflict, Inspection
 from task_dispatch import Dispatch, TaskConflict, catalog
@@ -36,6 +37,7 @@ SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
 HTTP = build_opener(ProxyHandler({}))
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
+    "/camera.js": ("camera.js", "text/javascript; charset=utf-8"),
     "/monitor.js": ("monitor.js", "text/javascript; charset=utf-8"),
     "/monitor.css": ("monitor.css", "text/css; charset=utf-8"),
 }
@@ -151,7 +153,7 @@ class Telemetry:
             self.worker.join()
 
 
-def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=None):
+def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=None, camera=None):
     inspection = Inspection(cache, RVIZ_MAPS, MAP_KEY, fingerprint, temporary_path)
     tasks = dispatch.data if dispatch else catalog(ROOT)
 
@@ -182,6 +184,29 @@ def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=No
                 if request.path in STATIC:
                     name, kind = STATIC[request.path]
                     self.reply((ROOT / "web" / name).read_bytes(), kind)
+                elif request.path == "/camera/stream":
+                    client = parse_qs(request.query).get("client", [""])[0]
+                    if not camera or self.headers.get("Sec-Fetch-Site") not in (None, "same-origin") or not re.fullmatch(r"[a-f0-9-]{36}", client):
+                        self.send_error(403)
+                        return
+                    self.send_response(200)
+                    self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=ovframe")
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+                    self.end_headers()
+                    self.connection.settimeout(2)
+                    stamp = 0
+                    while True:
+                        item = camera.jpeg(client, stamp)
+                        if item is None:
+                            break
+                        new, jpeg = item
+                        if jpeg and new != stamp:
+                            self.wfile.write(("--ovframe\r\nContent-Type: image/jpeg\r\nContent-Length: %d\r\nX-Stamp-Ns: %d\r\n\r\n" % (len(jpeg), new)).encode())
+                            self.wfile.write(jpeg)
+                            self.wfile.write(b"\r\n")
+                            stamp = new
+                    return
                 elif request.path == "/map":
                     key = parse_qs(request.query).get("key", [""])[0]
                     if not MAP_KEY.fullmatch(key):
@@ -235,6 +260,26 @@ def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=No
             origin = self.headers.get("Origin")
             if not self.allowed_host() or (origin and origin != "http://" + host):
                 self.send_error(403)
+                return
+            if self.path == "/camera/watch":
+                if not camera:
+                    self.json_reply({"error": "离线模式"}, 503)
+                    return
+                if origin != "http://" + host:
+                    self.send_error(403)
+                    return
+                try:
+                    size = int(self.headers.get("Content-Length", 0))
+                    if not 0 < size <= 512 or self.headers.get_content_type() != "application/json":
+                        raise ValueError()
+                    data = json.loads(self.rfile.read(size))
+                    client, mode = data["client"], data["mode"]
+                    if not re.fullmatch(r"[a-f0-9-]{36}", client) or mode not in MODES | {"close"}:
+                        raise ValueError()
+                except (KeyError, TypeError, ValueError):
+                    self.send_error(400)
+                    return
+                self.json_reply(camera.watch(client, mode))
                 return
             is_task = self.path in {"/task/submit", "/task/cancel", "/task/stop"}
             if is_task and origin != "http://" + host:
@@ -345,7 +390,8 @@ def main():
     upstream = None if args.offline else f"http://127.0.0.1:{args.tunnel_port}"
     telemetry = None if args.offline else Telemetry(args.host, args.tunnel_port, args.board_port, stopped, args.board_status)
     dispatch = None if args.offline else Dispatch(catalog(ROOT), args.cache, args.host, SSH, stopped)
-    with serve(args.port, args.cache, upstream, telemetry, args.board_status, dispatch) as http:
+    camera = None if args.offline else Camera(SSH, args.host, stopped)
+    with serve(args.port, args.cache, upstream, telemetry, args.board_status, dispatch, camera) as http:
         with (telemetry.running() if telemetry else nullcontext()), (dispatch.running() if dispatch else nullcontext()):
             http.timeout = .35
             print(f"仓库无人机监看 http://127.0.0.1:{args.port}/", flush=True)

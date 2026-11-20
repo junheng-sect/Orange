@@ -1,6 +1,6 @@
 <launch>
   <!-- 读码全链路：相机 + AprilTag 位姿 + 读码节点，一条命令启动；之后用 trigger_decode 触发读码。
-       会打开相机，与 ov13855_marker_tracking.launch、带相机的 fusion 二选一；相机和 AprilTag 已在跑时只启动 barcode_reader_camera.launch。
+       会打开相机，与其他相机任务分开启动；相机和 AprilTag 已在跑时只启动 barcode_reader_camera.launch。
        可选值见下面的 doc。 -->
   <arg name="layout" default="qr_top_tag_bottom"
        doc="标签版式（视觉和读码共用）：qr_top_tag_bottom（QR 标签，默认）/ dm_top_tag_bottom（DataMatrix 标签）/ drone_vision_default（原版，tag 12 mm）" />

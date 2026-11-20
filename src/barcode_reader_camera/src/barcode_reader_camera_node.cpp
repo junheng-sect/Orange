@@ -27,6 +27,7 @@
 #include <std_srvs/Trigger.h>
 
 #include "barcode_reader_camera/BarcodeArray.h"
+#include "barcode_reader_camera/BarcodeFrame.h"
 #include "barcode_reader_camera/DecodeBarcodes.h"
 #include "barcode_reader_camera/config_yaml.hpp"
 #include "barcode_reader_camera/frame_recorder.hpp"
@@ -75,7 +76,8 @@ class BarcodeReaderCameraNode {
     const auto pose_topic = pnh.param<std::string>("pose_topic", "/front_marker/pose");
 
     result_pub_ = pnh.advertise<BarcodeArray>("result", 10);
-    annotated_pub_ = pnh.advertise<sensor_msgs::Image>("image_annotated", 1);
+    if (image_topic_ == "/ov13855_full/image_raw" || image_topic_ == "/ov13855/image_raw")
+      monitor_result_ = nh_.advertise<BarcodeFrame>("/ov13855/monitor/barcodes", 1);
     info_sub_ = nh.subscribe(info_topic, 1, &BarcodeReaderCameraNode::onInfo, this);
     pose_sub_ = nh.subscribe(pose_topic, 10, &BarcodeReaderCameraNode::onPose, this);
     decode_srv_ = pnh.advertiseService("decode", &BarcodeReaderCameraNode::onDecode, this);
@@ -328,17 +330,26 @@ class BarcodeReaderCameraNode {
     // Its stamp lets callers look up the pose of that frame (barcode_rc_trigger tag.source=img).
     const int result_index = out.result_frame;
     const bool from_retry = result_index > 0 && result_index <= (int)retries.size();
-    const cv::Mat& result_gray = from_retry ? retries[result_index - 1].gray : frame.gray;
     result.header.stamp = from_retry ? retry_stamps[result_index - 1] : frame.stamp;
     result.header.frame_id = frame.frame_id;
     result.elapsed_s = (float)(ros::WallTime::now() - started).toSec();
     result_pub_.publish(result);
-    if (!result_gray.empty() && annotated_pub_.getNumSubscribers() > 0) {
-      cv_bridge::CvImage annotated(result.header, "bgr8");
-      cv::cvtColor(result_gray, annotated.image, cv::COLOR_GRAY2BGR);
-      drawDecodeOutput(annotated.image, out, from_retry ? result_index : 0);
-      annotated_pub_.publish(annotated.toImageMsg());
+    if (monitor_result_ && monitor_result_.getNumSubscribers()) {
+      for (size_t i = 0; i <= retries.size(); ++i) {
+        BarcodeFrame observation;
+        observation.header = result.header;
+        observation.header.stamp = i ? retry_stamps[i - 1] : frame.stamp;
+        const cv::Mat& image = i ? retries[i - 1].gray : frame.gray;
+        observation.width = image.cols;
+        observation.height = image.rows;
+        observation.selfpath = image_topic_ == "/ov13855/image_raw";
+        observation.status = result.error.empty() ? result.report : result.error;
+        for (size_t j = 0; j < out.codes.size(); ++j)
+          if (out.codes[j].frame == static_cast<int>(i)) observation.codes.push_back(result.codes.at(j));
+        if (!observation.codes.empty() || (result.codes.empty() && i == 0)) monitor_result_.publish(observation);
+      }
     }
+
     if (result.success) {
       ROS_INFO("barcode_reader_camera: %zu codes (%s) in %.0f ms, frames=%d result_frame=%d tag_roi=%d",
                result.codes.size(), result.report.c_str(), result.elapsed_s * 1000.0, out.frames,
@@ -446,7 +457,7 @@ class BarcodeReaderCameraNode {
   std::mutex decode_mutex_;
   std::atomic<bool> cancel_{false};
 
-  ros::Publisher result_pub_, annotated_pub_;
+  ros::Publisher result_pub_, monitor_result_;
   ros::Subscriber image_sub_, info_sub_, pose_sub_;
   ros::ServiceServer decode_srv_, cancel_srv_;
 };

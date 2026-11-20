@@ -163,3 +163,8 @@ footer { margin-top: 10px; color: var(--muted); font-size: 11px; }
 #task-auto-dialog { width: min(26rem, 90vw); color: #eff5fa; background: #17232e; border: 1px solid #416779; border-radius: 12px; padding: 1rem; }
 #task-auto-dialog::backdrop { background: #030911b8; }
 #task-auto-dialog p { line-height: 1.6; }
+
+#camera-panel summary {cursor:pointer;font-weight:600}
+#camera-panel label {display:block;margin-top:.6rem}
+#camera-image {width:100%;aspect-ratio:4/3;object-fit:contain}
+#camera-events {white-space:pre-line;overflow-wrap:anywhere}

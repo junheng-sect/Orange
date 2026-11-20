@@ -11,13 +11,13 @@ ROS 接口全集、读码流程、与 Drone-Vision 原实现的差异见 [DETAIL
 
 | 场景 | 命令 |
 | --- | --- |
-| 拨 CH9 手动读码（最常用） | `roslaunch barcode_rc_trigger manual_read.launch`，见 `barcode_rc_trigger` README |
+| 拨 CH9 手动读码（最常用） | `roslaunch barcode_rc_trigger manual_read.launch camera:=true`，见 `barcode_rc_trigger` README |
 | 地面单独测：相机 + AprilTag + 读码一起起 | `roslaunch barcode_reader_camera bringup.launch` |
 | 相机和 AprilTag 已在跑，只加读码节点 | `roslaunch barcode_reader_camera barcode_reader_camera.launch` |
 | 命令行触发一次读码 | `rosrun barcode_reader_camera trigger_decode` |
 | 离线看一张图 | `rosrun barcode_reader_camera decode_image 图片.jpg --annotate /tmp/out.jpg` |
 
-`bringup.launch` 会打开相机，和 `ov13855_marker_tracking.launch`、带相机的 fusion 二选一。
+`bringup.launch` 会打开相机，与已占用相机的任务分开启动。
 
 忘了参数怎么填：
 
@@ -95,7 +95,7 @@ roslaunch --ros-args barcode_reader_camera barcode_reader_camera.launch
 
 - `frame.png`：第一帧原图（无损 PNG）。
 - `retry_N.png`：第 N 个重试帧，只存前 `save_retry_frames` 张、读出码的那一帧和最后一帧。
-- `preview.jpg`：缩小的标注图（JPEG）。
+- 运行电脑端 `import-flight-experiment --run` 后，标注图写入该实验的 `analysis/扫码预览/`。
 - `meta.yaml`：结果、码、tag 位姿、标签区域四角、每个重试帧的时间戳和位姿；`camera.yaml`：相机内参；`decode.log`：每个解码策略的日志。
 
 图片格式（PNG / JPEG）写死在 `src/frame_recorder.cpp`，不能用参数改。
@@ -131,7 +131,7 @@ rosrun barcode_reader_camera decode_image 图片.jpg --annotate /tmp/out.jpg
 ## 注意
 
 - 标签上没有的码制要在版式的 `formats` 里关掉：启用但要求 0 个的码制永远不算读齐，每次都会重试满 2 s 并返回 `partial`。
-- 分开启动（fusion + `manual_read.launch`，或 `ov13855_marker_tracking.launch` + `auto_read.launch`）时两边的 `layout` 要一致；
+- 分开启动（`ov13855_marker_tracking.launch` + `auto_read.launch`）时两边的 `layout` 要一致；
   tag 边长不一致时读码节点每 10 s 警告一次，位置也不准。
 - `trigger_decode` 在链路没就绪（`no_image` / `no_camera_info` / `no_tag`）时每 0.5 s 重试，直到 `--timeout`（默认 5 s）。
 

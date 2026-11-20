@@ -324,21 +324,7 @@ void FrameRecorder::write(const DecodeRecord& r) {
     std::string log;
     for (const auto& line : r.log) log += line + "\n";
     writeText(d + "/decode.log", log);
-    // Preview the frame the result came from (a retry frame when retries read the code).
-    const cv::Mat* shown = &r.frame;
-    int shown_index = 0;
-    for (const auto& f : r.retries) {
-      if (f.index == r.out.result_frame && !f.gray.empty()) {
-        shown = &f.gray;
-        shown_index = f.index;
-      }
-    }
-    cv::Mat preview;
-    cv::cvtColor(*shown, preview, cv::COLOR_GRAY2BGR);
-    drawDecodeOutput(preview, r.out, shown_index);
-    if (preview.cols > 1280)
-      cv::resize(preview, preview, cv::Size(), 1280.0 / preview.cols, 1280.0 / preview.cols, cv::INTER_AREA);
-    writeImage(d + "/preview.jpg", preview, {cv::IMWRITE_JPEG_QUALITY, 85});
+
   }
 
   if (!log_attempts_) return;
