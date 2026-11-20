@@ -11,7 +11,7 @@ find_library(APRILTAG_LIBRARY apriltag)
 if(NOT APRILTAG_INCLUDE_DIR OR NOT APRILTAG_LIBRARY)
   message(FATAL_ERROR "AprilTag development headers/library required")
 endif()
-add_message_files(FILES HomogeneousTransform.msg TagObservation.msg TagObservationArray.msg TagSurveyFrame.msg)
+add_message_files(FILES HomogeneousTransform.msg TagObservation.msg TagObservationArray.msg TagSurveyFrame.msg TagCorners.msg TagCornerArray.msg)
 generate_messages(DEPENDENCIES std_msgs geometry_msgs)
 catkin_package(INCLUDE_DIRS include LIBRARIES ov13855_pose_solver ov13855_apriltag_detector
  CATKIN_DEPENDS cv_bridge geometry_msgs image_transport message_runtime roscpp sensor_msgs std_msgs tf2_ros)

@@ -328,9 +328,9 @@ class Progress:
             if not line or line.startswith("----"):
                 continue
             with self.lock:
-                if " INDOOR4 " in line:
+                if " INDOOR4 " in line or " INDOOR5 " in line:
                     try:
-                        scan = json.loads(line.split(" INDOOR4 ", 1)[1])
+                        scan = json.loads(line.split(" INDOOR", 1)[1].split(" ", 1)[1])
                         if scan["phase"] != "识别标签" and self.scan and "route" not in scan:
                             scan["route"] = self.scan.get("route")
                         self.scan = scan
@@ -433,7 +433,7 @@ class Progress:
             elif health["stream"] and self.runner_started and health["armed"] and health["landed"] == 2:
                 if task["id"] == "test_indoor3_3":
                     return "wait_offboard", "将 Tag 1 放入 OV13855 视野，切入 OFFBOARD 开始一轮扫码"
-                if task["id"] in {"test_indoor3", "test_indoor3_1", "test_indoor3_2", "test_indoor4"}:
+                if task["id"] in {"test_indoor3", "test_indoor3_1", "test_indoor3_2", "test_indoor4", "test_indoor5"}:
                     return "wait_offboard", "设定值已预发送，切 OFFBOARD 后从当前位置规划到 1 号点"
                 return "wait_offboard", "设定值已预发送，可用遥控器切 OFFBOARD"
             elif (health["ready"] and health["estimate"] and self.runner_started
@@ -535,7 +535,7 @@ def supervise(request_id):
                          message="正在收尾与写盘" if stopping else message,
                          mode=health["mode"], armed=health["armed"], landed=health["landed"],
                          safeGround=health["ground"], healthAt=time.monotonic())
-            if task["id"] == "test_indoor4" and scan is not None:
+            if task["id"] in {"test_indoor4", "test_indoor5"} and scan is not None:
                 value["scan"] = scan
             save(value)
         time.sleep(.5)

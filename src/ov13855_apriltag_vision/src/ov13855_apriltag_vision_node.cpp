@@ -12,6 +12,7 @@
 #include <ov13855_apriltag_vision/pose_solver.hpp>
 #include <ov13855_apriltag_vision/TagObservationArray.h>
 #include <ov13855_apriltag_vision/TagSurveyFrame.h>
+#include <ov13855_apriltag_vision/TagCornerArray.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <image_transport/image_transport.h>
@@ -125,6 +126,9 @@ class Ov13855AprilTagVisionNode {
     loadParameters();
     detector_.reset(new ov13855_apriltag_vision::AprilTagDetector(
         tag_family_, quad_decimate_, nthreads_, refine_edges_, detection_max_dimension_));
+    if (pnh_.param("corners_only", false)) {
+      corners_pub_ = pnh_.advertise<ov13855_apriltag_vision::TagCornerArray>("corners", 4);
+    }
     pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>(pose_topic_, 1);
     if (pnh_.param("publish_detections", false)) {
       detections_pub_ = pnh_.advertise<ov13855_apriltag_vision::TagObservationArray>("detections", 2);
@@ -144,7 +148,7 @@ class Ov13855AprilTagVisionNode {
     publishStatus("WAIT_CAMERA_INFO: waiting for " + camera_info_topic_, true);
     ROS_INFO_STREAM("ov13855_apriltag_vision | image=" << image_topic_ << " | family=" << tag_family_
         << " | selection=" << selection_mode_ << " | tag_size=" << target_marker_size_m_
-        << "m | solver=SOLVEPNP_ITERATIVE (Drone-Vision) | pose=" << pose_topic_);
+        << "m | mode=" << (corners_pub_ ? "corners only" : "SOLVEPNP_ITERATIVE") << " | pose=" << pose_topic_);
   }
  private:
   void loadParameters() {
@@ -242,6 +246,27 @@ class Ov13855AprilTagVisionNode {
       for (const auto& detection : detections) {
         ids.push_back(detection.id);
         corners.push_back(detection.corners);
+      }
+      if (corners_pub_) {
+        ov13855_apriltag_vision::TagCornerArray frame;
+        frame.header = message->header;
+        frame.family = tag_family_;
+        frame.width = message->width;
+        frame.height = message->height;
+        for (const auto& detection : detections) {
+          ov13855_apriltag_vision::TagCorners tag;
+          tag.id = detection.id;
+          for (size_t k = 0; k < tag.corners.size(); ++k) {
+            tag.corners[k].x = detection.corners[k].x;
+            tag.corners[k].y = detection.corners[k].y;
+          }
+          frame.tags.push_back(tag);
+        }
+        corners_pub_.publish(frame);
+        publishDebugImages(message, gray, corners, ids, -1, nullptr, nullptr, "CORNERS_ONLY");
+        publishStatus("CORNERS_ONLY");
+        publishProcessingTime(start);
+        return;
       }
       selected = ov13855_apriltag_vision::selectDetection(detections, selection_mode_, fixed_marker_id_);
       if (selected >= 0) { ++marker_count_; target_marker_id_ = ids[selected]; }
@@ -555,7 +580,7 @@ class Ov13855AprilTagVisionNode {
   ros::NodeHandle nh_, pnh_;
   ros::Subscriber image_sub_, camera_info_sub_;
   image_transport::ImageTransport image_transport_;
-  ros::Publisher survey_pub_, detections_pub_, pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
+  ros::Publisher corners_pub_, survey_pub_, detections_pub_, pose_pub_, transform_debug_pub_, status_pub_, processing_time_pub_;
   image_transport::Publisher annotated_pub_, preview_pub_;
   tf2_ros::TransformBroadcaster marker_tf_broadcaster_;
   std::string image_topic_, camera_info_topic_, pose_topic_, transform_debug_topic_;
