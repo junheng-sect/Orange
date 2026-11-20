@@ -318,6 +318,7 @@ class Progress:
         self.stop_refused = False
         self.clean_exit = False
         self.manual_ready = False
+        self.video_state = ""
         self.recording = ""
 
     def collect(self, stream):
@@ -339,7 +340,9 @@ class Progress:
                 if "AprilTag 观察 " in line:
                     self.tag_coverage = line[line.index("AprilTag 观察 "):][:250]
                 self.note = line[:430]
-                if "室外重定位已确认" in line:
+                if "VIDEO34 " in line:
+                    self.video_state = line.split("VIDEO34 ", 1)[1]
+                if "室外重定位已确认" in line or "室内重定位已确认" in line:
                     self.manual_ready = True
                 if "Channel 6 录包已待命" in line:
                     self.recording = "待录包"
@@ -373,6 +376,16 @@ class Progress:
     def stage(self, task, health, has_flown):
         with self.lock:
             phase, note, finished = self.phase, self.note, self.finished
+            if task["id"] == "test_indoor3_4":
+                display = self.video_state or self.note or "等待 OV13855 和室内定位"
+                if has_flown and health["ground"]:
+                    return "action_done", display + " · 关通道 6，视频封存后收尾"
+                if health["armed"]:
+                    return "running", "手飞 · " + display
+                camera_ready = self.video_state.startswith("ov13855 就绪 ")
+                if self.manual_ready and health["ready"] and camera_ready:
+                    return "wait_pilot", "定位就绪 · " + display
+                return "preparing", display
             if task.get("manual"):
                 if self.recording == "录包中":
                     record = "录包中。起飞前静置录够 20 秒"

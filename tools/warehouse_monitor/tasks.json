@@ -762,6 +762,19 @@
       "finish": "到点悬停，切出再切入 OFFBOARD 开始下一轮"
     },
     {
+      "id": "test_indoor3_4",
+      "label": "test3_4",
+      "title": "手飞 OV13855 录像",
+      "mapId": "20261114_101654_indoor_fly_raw_000001",
+      "automatic": false,
+      "fixed": false,
+      "manual": true,
+      "points": [],
+      "stops": [],
+      "route": "室内定位后遥控手飞，通道 6 同步录 bag 和 OV13855 无损灰度视频",
+      "finish": "落地上锁，关通道 6，OV13855 录像封存后收尾"
+    },
+    {
       "id": "test_indoor4",
       "label": "test4",
       "title": "货架标签分批扫码",
