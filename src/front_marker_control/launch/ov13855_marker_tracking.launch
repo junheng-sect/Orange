@@ -1,10 +1,9 @@
 <launch>
  <!-- OV13855 + AprilTag 视觉控制：相机、AprilTag、相机静态 TF、front_marker_control。与旧 front_marker_tracking.launch 二选一。
-      和 mid360s_ws/scripts/fusion.sh 一起用时（fusion 默认已起相机和 AprilTag），加 camera:=false 只起 TF 和控制，
-      否则相机/AprilTag 节点重名，会和 fusion 那一套（带 respawn）互相踢掉。
+      普通 fusion 提供定位，本入口默认启动相机和 AprilTag。已有相机任务时可用 camera:=false 复用。
       可选值见下面的 doc。 -->
  <arg name="camera" default="true"
-      doc="相机和 AprilTag 谁来起：true（本 launch 起，默认）/ false（fusion 已起，本 launch 只起相机 TF 和控制）" />
+      doc="相机和 AprilTag 谁来起：true（本 launch 起，默认）/ false（其他任务已起，本 launch 只起相机 TF 和控制）" />
  <!-- 标签版式（决定 tag 边长）：barcode_reader_camera/config/layouts/<layout>.yaml；
       与同时运行的 auto_read.launch / manual_read.launch 用同一个 layout -->
  <arg name="layout" default="qr_top_tag_bottom"

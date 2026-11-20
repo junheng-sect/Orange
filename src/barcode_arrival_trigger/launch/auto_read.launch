@@ -1,7 +1,6 @@
 <launch>
   <!-- 到位自动读码：相机读码节点 + 到位触发节点（mode 含 serial 时再加串口读码器）；不含相机、AprilTag、控制。
-       前提：相机 + AprilTag + front_marker_control 已在跑（fusion.sh + ov13855_marker_tracking.launch camera:=false，
-       或 fusion.sh no-camera 选项 + ov13855_marker_tracking.launch），layout 两边必须相同。
+       前提：相机 + AprilTag + front_marker_control 已在跑（普通 fusion 提供定位，ov13855_marker_tracking.launch 起相机、视觉和控制），layout 两边必须相同。
        每次到位的结果在 save_dir/时间_版式/ 的 arrival_read.csv。mode 含 serial 时不要同时运行 DroneVision（共用 /dev/ttyS1）。
        可选值见下面的 doc。 -->
   <arg name="mode" default="camera"

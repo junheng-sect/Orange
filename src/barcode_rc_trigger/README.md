@@ -16,14 +16,9 @@ source /home/orangepi/mid360s_ws/scripts/ros_net.sh
 roslaunch barcode_rc_trigger manual_read.launch camera:=true
 ```
 
-不跑 fusion 的地面测试：MAVROS 单独起，`manual_read` 加 `camera:=true` 自己起相机和 AprilTag：
+单独做相机读码地面测试时，板端使用常驻 MAVROS，运行上面的终端 2 命令即可。
 
-```bash
-roslaunch mavros px4.launch                                    # 终端 1
-roslaunch barcode_rc_trigger manual_read.launch camera:=true   # 终端 2
-```
-
-自动移到码前、再手动拨杆读码（`front_marker_control` 负责移动和对准）：配合 fusion 时，fusion 起来后、`manual_read` 之前
+自动移到码前、再手动拨杆读码时，先按上述步骤启动 fusion 和 manual_read。
 再开一个终端（同样先 source、export ROS_IP），起相机 TF 和控制：
 
 ```bash

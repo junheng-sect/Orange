@@ -6,21 +6,20 @@
 
 ## 快速开始
 
-只支持 OV13855 链路。实飞配合 fusion（MAVROS、定位、相机和 AprilTag 都由它起），三个终端按顺序启动：
+只支持 OV13855 链路。实飞配合 fusion（MAVROS 常驻，fusion 启动定位），三个终端按顺序启动：
 
 ```bash
 # 终端 1：fusion
 cd /home/orangepi/mid360s_ws/scripts && ./fusion.sh
 # 终端 2、3 先执行：
 source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash && source /home/orangepi/mid360s_ws/scripts/ros_net.sh
-# 终端 2：相机 TF + 控制（到位判定）；camera:=false 用 fusion 起的相机和 AprilTag
-roslaunch front_marker_control ov13855_marker_tracking.launch camera:=false
+# 终端 2：相机、AprilTag、TF 和到位控制
+roslaunch front_marker_control ov13855_marker_tracking.launch
 # 终端 3：相机读码节点 + 到位触发节点
 roslaunch barcode_arrival_trigger auto_read.launch
 ```
 
 飞机切 OFFBOARD 后由控制节点移到码前（tag 正前方机体 0.8 m，相机到 tag 约 0.62 m），进入 `POS_HOLD` 就自动读一次。
-不跑 fusion 时终端 2 去掉 `camera:=false`，由控制入口自己起相机和 AprilTag（MAVROS 和定位另起）。
 
 忘了参数怎么填：`roslaunch --ros-args barcode_arrival_trigger auto_read.launch`
 

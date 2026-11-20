@@ -231,14 +231,12 @@ roslaunch front_marker_control ov13855_marker_tracking.launch
 tag 边长取自标签版式文件，默认 `layout:=qr_top_tag_bottom`（`barcode_reader_camera/config/layouts/`），
 换标签时传 `layout:=<名字>`。
 
-和 `mid360s_ws/scripts/fusion.sh` 一起跑时（fusion 默认已起相机和 AprilTag），加 `camera:=false` 只起相机静态 TF
-和控制节点，否则相机/AprilTag 节点重名，会和 fusion 那一套（带 respawn）互相踢掉：
+普通 fusion 只提供定位。按上面的命令启动跟踪时，该入口同时启动 OV13855 和 AprilTag。如果其他入口已经启动了这两项，可复用现有视觉节点，版式取自相机任务配置。
 
 ```bash
 roslaunch front_marker_control ov13855_marker_tracking.launch camera:=false
 ```
 
-此时 AprilTag 用 fusion 的视觉 YAML（tag 43.7 mm），只与 `qr_top_tag_bottom` / `dm_top_tag_bottom` 版式一致。
 悬停目标 `target_xyz_body: [0.8, 0, 0]` 是 tag 相对 drone_base 的位置；相机在 drone_base 前 0.18 m，所以到位时
 相机到 tag 约 0.62 m。到位后自动读码见 `barcode_arrival_trigger`（`auto_read.launch`），手动拨杆读码见
 `barcode_rc_trigger`（`manual_read.launch`，CSV 会记下拨杆时的控制模式）。
