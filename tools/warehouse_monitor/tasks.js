@@ -247,8 +247,22 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
         `${scan.observation} · ${scan.phase}${tag} · 发现 ${scan.discovered} 张 · 成功 ${scan.success} · 失败 ${scan.failed}${order}${mode}`;
     }
     byId("task-cancel").hidden = !(active ? active.canCancel : request?.state === "queued");
-    byId("task-stop").hidden = !active?.canStop || !status.online;
-    byId("task-cancel").disabled = byId("task-stop").disabled = busy;
+    const stop = byId("task-stop");
+    const actionDone = active?.state === "action_done";
+    stop.hidden = !actionDone && (!active?.canStop || !status.online);
+    stop.disabled = busy || !status.online || !active?.canStop;
+    byId("task-cancel").disabled = busy;
+    const finishHint = byId("task-finish-hint");
+    finishHint.hidden = !actionDone;
+    if (actionDone) {
+      finishHint.textContent = !status.online
+        ? "等待 Orange Pi 重连后再收尾。"
+        : !active.canStop && active.mode === "OFFBOARD"
+          ? "着地上锁后，用遥控器切回定点模式（POSCTL），关通道 6，再点「结束任务并收尾」。"
+          : !active.canStop
+            ? "等待飞控确认着地上锁；关通道 6 后点「结束任务并收尾」。"
+            : "关通道 6 后点「结束任务并收尾」。显示「已收尾」后再断电。";
+    }
   }
 
   function accept(snapshot) {
