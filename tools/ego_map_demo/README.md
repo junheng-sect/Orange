@@ -20,11 +20,32 @@ ego-map-demo --stop
 PCD未占据的位置按静态演示的空闲空间近似，不提供实机的未知空间/动态障碍证明。
 这里不运行项目实机导航适配器、执行器或 MAVROS，不代表飞行验收。
 
+## 源码与构建边界
+
 算法来自官方固定版本 `ZJU-FAST-Lab/ego-planner-swarm@92fe9f7227b2da819133eb8e0e8c7fc000f6ae20`，
 直接调用 `EGOPlannerManager::reboundReplan`，包含原版 A* 引导、B样条优化、时间重分配。
 官方源码在 `official/`。构建时去掉管理器头文件中未使用的 DataDisp 消息头引用，
 并把旧版头文件中超出int范围的默认迭代上限1e10修正为INT_MAX；优化流程沿用官方实现。
 显示成功前对采样曲线与相邻采样间的线段逐段检查膨胀栅格，并核对起终点。
+
+`official/` 是离线对照快照，独立 Docker 构建通过 CMake 直接读取它。演示目录根部的 `CATKIN_IGNORE` 防止从 Orange 仓库根扫描时发现第二套 EGO 包。实机适配、规划器修改与导航集成在 [实机 EGO](../../src/navigation/ego_swarm/UPSTREAM.md) 维护。更新离线快照时需同时核对上游提交、许可证和 `UPSTREAM.json`。
+
+在本目录运行以下命令可校验 83 个入库文件。清单另含上游生成的 Python 字节码 `official/quadrotor_msgs/src/quadrotor_msgs/__init__.pyc`，源码快照省略了该文件。
+
+```bash
+python3 - <<'PYTHON'
+import hashlib
+import json
+from pathlib import Path
+
+hashes = json.loads(Path("UPSTREAM.json").read_text())["sha256"]
+hashes.pop("official/quadrotor_msgs/src/quadrotor_msgs/__init__.pyc")
+for name, expected in hashes.items():
+    if hashlib.sha256(Path(name).read_bytes()).hexdigest() != expected:
+        raise SystemExit(f"SHA-256 校验失败：{name}")
+print(f"{len(hashes)} 个源码文件校验通过")
+PYTHON
+```
 
 独立 Docker 容器 **--network none**，只有容器内 Master，无法连接板端飞控或实机 ROS。
 主机仅挂载只读地图、X11和独立的结果/布局目录。关闭窗口时一起结束本容器内节点。

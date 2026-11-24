@@ -11,16 +11,33 @@
 
 ## 仓库结构
 
-- `src/`：28 个一级目录，共 33 个 ROS 包。原有 23 个包包括`drone_navigation`、`ego_swarm`（含 `bspline_opt`、`path_searching`、`plan_env`、`ego_planner`（目录 `plan_manage`）、`quadrotor_msgs`、`traj_utils` 6 个子包）、`fastlio_dll`、`dual_camera_recorder`、`front_marker_control`、`front_marker_vision`、`ov13855_cam`、`ov13855_apriltag_vision`、`ov9281_usb_cam`、`camera_calibration_pkg`、`tether_winch_control`、`vz_chirp_control`、`vz_step_control`、`orange_visualization`、`barcode_*` 四件套（`barcode_arrival_trigger`、`barcode_rc_trigger`、`barcode_reader_camera`、`barcode_reader_serial`）。
-- MID-360S 的 10 个包位于同一 `src/` 下，包括 `fast_lio`（目录 `FAST_LIO`）、`lidar_imu_init`（目录 `LiDAR_IMU_Init`）、`car_bridge`、`drone_mapping`、`drone_relocalization`、`fastlio_gravity_bridge`、`livox_ros_driver2`、`mid360s_calib`、`voxel_slam` 和 `ywl_localization`。
+工作空间共有 33 个 ROS 包，默认发现 27 个。目录名保留上游写法，ROS 包名取自各自的 `package.xml`。
+
+| 源码目录 | 包目录 |
+|---|---|
+| `src/drivers/` | `livox_ros_driver2`、`ov13855_cam`、`ov9281_usb_cam`、`barcode_reader_serial`、`tether_winch_control` |
+| `src/localization/` | `FAST_LIO`（包名 `fast_lio`）、`LiDAR_IMU_Init`（包名 `lidar_imu_init`）、`fastlio_gravity_bridge`、`fastlio_dll`、`ywl_localization`、`voxel_slam`、`drone_mapping`、`drone_relocalization`、`car_bridge` |
+| `src/navigation/` | `drone_navigation`、`front_marker_control`、`ego_swarm/` 下的 6 个包（`bspline_opt`、`path_searching`、`plan_env`、`plan_manage`〔包名 `ego_planner`〕、`quadrotor_msgs`、`traj_utils`） |
+| `src/perception/` | `front_marker_vision`、`ov13855_apriltag_vision`、`barcode_reader_camera`、`barcode_rc_trigger`、`barcode_arrival_trigger` |
+| `src/visualization/` | `orange_visualization` |
+| `src/experiments/` | `camera_calibration_pkg`、`mid360s_calib`、`dual_camera_recorder`、`vz_chirp_control`、`vz_step_control` |
+
+以下六个包在各自的包根目录带有空文件 `CATKIN_IGNORE`。
+
+- `lidar_imu_init`、`vz_chirp_control`、`vz_step_control` 可分别启用。
+- `barcode_reader_serial` 可单独启用。启用 `barcode_rc_trigger` 时还需启用 `barcode_reader_serial`；启用 `barcode_arrival_trigger` 时需要这三个包。OV13855 相机读码包 `barcode_reader_camera` 默认参与构建，室内 test4/test5 可直接使用它。
+
+在 Noetic 工作空间根目录，将所需包及上述带标记依赖的 `CATKIN_IGNORE` 临时改名为 `CATKIN_IGNORE.off`，运行 `scripts/build.sh <ROS包名>`。实验结束后将标记改回原名，使下次包发现恢复默认范围。该标记控制源码发现，已有 devel 产物可能仍存在。
+
 - `scripts/build.sh` 在 Noetic 环境下构建 `third_party/Livox-SDK2` 与 `third_party/gtsam-4.0.3`，安装到工作空间的 `.deps/`，再执行 `catkin build`。
 - `scripts/` 包含归档配对、常驻服务、室内外导航与离线测试入口。
 - `docker/ros-noetic-rviz/` 提供 Ubuntu 和 macOS 的 RViz 镜像及启动器，网络设置见各平台的 `local*.env.example`。
+- 实机 EGO 位于 `src/navigation/ego_swarm/`。离线固定版与实机版的维护边界见 [地图演示说明](tools/ego_map_demo/README.md#源码与构建边界)。
 - `tools/`：`warehouse_monitor`（仓库巡检网页监控）、`car_web`（车/无人机网页面板）、`ego_rviz`、`ego_map_demo`、`seeker-boot-*`、`front_marker_jitter_analysis.py`、`capture_front_marker_jitter.sh`。
 
 ## MID-360S 本机配置
 
-- 将 `src/livox_ros_driver2/config/MID360s_config.json` 复制为同目录下的 `MID360s_config.local.json`，填写主机网口和雷达 IPv4 地址。驱动与预检默认使用这份私有配置，也可通过 `MID360S_LIVOX_CONFIG` 指定配置文件的绝对路径。
+- 将 `src/drivers/livox_ros_driver2/config/MID360s_config.json` 复制为同目录下的 `MID360s_config.local.json`，填写主机网口和雷达 IPv4 地址。驱动与预检默认使用这份私有配置，也可通过 `MID360S_LIVOX_CONFIG` 指定配置文件的绝对路径。
 - 板端用 `ORANGE_ROS_MASTER_IP` 核对 `ros0` 的固定地址。该值取自环境变量或工作空间根目录的私有 `.env`。车端 rosbridge 默认使用 `spirit.local:9090`，可通过环境变量 `CAR_HOST` 设置车端主机。
 
 ## Git 工作流与安全边界

@@ -190,8 +190,8 @@ nt_default_dll() {
 nav_test_main() {
   NT_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
   MAP="${DEFAULT_MAP:-$MAP_ROOT/20261105_114605_outdoor}"
-  RELOC_CONFIG="${DEFAULT_RELOC_CONFIG:-$WS/src/drone_relocalization/config/outdoor.yaml}"
-  MAP_FRAME="${DEFAULT_MAP_FRAME:-$WS/src/car_bridge/config/map_frame_outdoor.yaml}"
+  RELOC_CONFIG="${DEFAULT_RELOC_CONFIG:-$WS/src/localization/drone_relocalization/config/outdoor.yaml}"
+  MAP_FRAME="${DEFAULT_MAP_FRAME:-$WS/src/localization/car_bridge/config/map_frame_outdoor.yaml}"
   NAV_CONFIG="${DEFAULT_NAV_CONFIG:-$NT_DIR/outdoor_nav.yaml}"
   PREVIEW_RADIUS="${DEFAULT_PREVIEW_RADIUS:-0.2}"
   PREVIEW_HALF_HEIGHT="${DEFAULT_PREVIEW_HALF_HEIGHT:-0.15}"
@@ -304,7 +304,7 @@ nt_bringup() {
   local _prior_file="" _prior_map_sha=""
   if [ "$LIVE_GRID_ONLY" -eq 0 ]; then
     _prior_file="$MAP/prior_grid.bin"
-    if ! _prior_map_sha="$(python3 -B "$WS/src/drone_mapping/scripts/build_prior_grid" "$MAP" --verify 2>>"$LOG")"; then
+    if ! _prior_map_sha="$(python3 -B "$WS/src/localization/drone_mapping/scripts/build_prior_grid" "$MAP" --verify 2>>"$LOG")"; then
       err "先验栅格校验失败，确认 $_prior_file 对应当前地图。详情见 $LOG"
       finish 1 force
     fi

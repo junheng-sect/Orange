@@ -346,7 +346,7 @@ if [ "$NET_CHECK" -eq 1 ]; then
   else
     warn "Wi-Fi 未连接：核心照常运行，只是本机 RViz / ssh 暂时连不上"
   fi
-  read -r LIDAR_IFACE_IP LIDAR_IP < <(python3 "$WS/src/drone_mapping/src/drone_mapping/lidar_config.py" "$WS") || exit 1
+  read -r LIDAR_IFACE_IP LIDAR_IP < <(python3 "$WS/src/localization/drone_mapping/src/drone_mapping/lidar_config.py" "$WS") || exit 1
   if ! ip -4 addr show 2>/dev/null | grep -qw "$LIDAR_IFACE_IP"; then
     err "雷达网口未配置 $LIDAR_IFACE_IP（enP3p49s0 无载波：雷达没上电或网线没插）"
     err "排查：ip -4 -br addr show enP3p49s0  |  nmcli device status"

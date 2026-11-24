@@ -13,7 +13,7 @@
 set -o pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WS="$(cd "$DIR/.." && pwd)"
-BUILD_MAP="$WS/src/drone_mapping/scripts/build_map"   # = rosrun drone_mapping build_map
+BUILD_MAP="$WS/src/localization/drone_mapping/scripts/build_map"   # = rosrun drone_mapping build_map
 BAG_DIR="$HOME/test_data/mapping"
 PREFIX="flight"
 DO_BUILD=1

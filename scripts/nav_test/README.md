@@ -384,7 +384,7 @@ ROS 服务单次等待上限 2 s，并受起飞/航段/降落阶段的剩余时�
 
 后续实飞20261113_164142表明，上一版“位置到地面下10 cm后速度归零并等2 s”仍未得到PX4着地确认。因此旧修复只作为历史验证，不再代表当前末段逻辑。现参考 [land_with_tracking_v2](https://github.com/junheng-sect/ROS2PUBLIC/blob/rasip_pi/src/land_with_tracking_v2/land_with_tracking_v2/land_with_tracking_v2_node.py) 的持续速度下压与普通disarm；本项目仍仅允许在新鲜PX4着地后请求上锁。
 
-真实网关专项隔离验证：`bash ~/orange/src/drone_navigation/test/run_landing_isolated.sh /tmp/landing_validation`（仅模拟FCU与预览输出）。本次bag固定输入回归工具为同目录 `replay_landing.py`。14:00旧批次缺少原始着地/估计器话题；16:41新批次已具备这些原始输入。当前使用16:41批次的真实着地/估计器/模式/位置记录验证：不误报TOUCHED、不在空中请求上锁，并能进入Z速度下压。固定历史输入不会响应新控制，不能证明实机会落地。当前完整证据见 `~/test_data/nav10_validation/20261113_velocity_press_fix/`；旧版验证留作历史。
+真实网关专项隔离验证：`bash ~/orange/src/navigation/drone_navigation/test/run_landing_isolated.sh /tmp/landing_validation`（仅模拟FCU与预览输出）。本次bag固定输入回归工具为同目录 `replay_landing.py`。14:00旧批次缺少原始着地/估计器话题；16:41新批次已具备这些原始输入。当前使用16:41批次的真实着地/估计器/模式/位置记录验证：不误报TOUCHED、不在空中请求上锁，并能进入Z速度下压。固定历史输入不会响应新控制，不能证明实机会落地。当前完整证据见 `~/test_data/nav10_validation/20261113_velocity_press_fix/`；旧版验证留作历史。
 
 ### 新建带图任务的 DLL 旁路
 

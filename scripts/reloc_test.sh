@@ -24,7 +24,7 @@ WS="$(cd "$DIR/.." && pwd)"
 ROS_SETUP="/opt/ros/noetic/setup.bash"
 WS_SETUP="$WS/devel/setup.bash"
 FASTLIO_LAUNCHER="$DIR/start_mid360s_fastlio.sh"
-RELOC_CFG_DIR="$WS/src/drone_relocalization/config"
+RELOC_CFG_DIR="$WS/src/localization/drone_relocalization/config"
 MAP_ROOT="$HOME/test_data/mapping"
 
 MAP="$MAP_ROOT/20261105_114605_outdoor"; CONFIG="$RELOC_CFG_DIR/outdoor.yaml"

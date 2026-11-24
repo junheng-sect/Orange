@@ -156,7 +156,7 @@ else
     [[ $CHECK_ONLY -eq 1 ]] && echo "[PASS] 板端 Wi-Fi IP $WIFI_IP（本机 RViz 经它访问 $ROS_IP）"
 fi
 
-read -r EXPECTED_LIDAR_NET_IP LIDAR_DEVICE_IP < <(python3 "$WS_DIR/src/drone_mapping/src/drone_mapping/lidar_config.py" "$WS_DIR") || exit 1
+read -r EXPECTED_LIDAR_NET_IP LIDAR_DEVICE_IP < <(python3 "$WS_DIR/src/localization/drone_mapping/src/drone_mapping/lidar_config.py" "$WS_DIR") || exit 1
 if ! ip -4 addr show | grep -qw "$EXPECTED_LIDAR_NET_IP"; then
     echo "[ERROR] 板端未配置雷达接口 IP $EXPECTED_LIDAR_NET_IP (enP3p49s0 可能 DOWN 或网线未连接)" >&2
     if [[ $CHECK_ONLY -eq 1 ]]; then CHECK_FAILED=1; else exit 1; fi

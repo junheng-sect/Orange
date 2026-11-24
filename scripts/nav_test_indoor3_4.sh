@@ -8,8 +8,8 @@ NT_MANUAL_FLIGHT=1
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SELF_DIR/nav_test/common.sh"
 DEFAULT_MAP="$MAP_ROOT/20261114_101654_indoor_fly_raw_000001"
-DEFAULT_RELOC_CONFIG="$WS/src/drone_relocalization/config/indoor.yaml"
-DEFAULT_MAP_FRAME="$WS/src/car_bridge/config/map_frame_indoor_fly.yaml"
+DEFAULT_RELOC_CONFIG="$WS/src/localization/drone_relocalization/config/indoor.yaml"
+DEFAULT_MAP_FRAME="$WS/src/localization/car_bridge/config/map_frame_indoor_fly.yaml"
 DEFAULT_NAV_CONFIG="$NT_DIR/indoor_fly_nav.yaml"
 DEFAULT_EV_MODE=odom
 

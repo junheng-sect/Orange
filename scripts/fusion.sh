@@ -637,7 +637,7 @@ fi
 
 if [ "$DO_WINCH" -eq 1 ]; then
   WINCH_ARG=true
-  log "绕线器：开启，使用 orange/src/tether_winch_control/config/winch.yaml"
+  log "绕线器：开启，使用 orange/src/drivers/tether_winch_control/config/winch.yaml"
   warn "绕线器启动即发送备用 DUTY；定位通信就绪后按 YAML 自动启用；退出会尝试发送备用 DUTY"
 else
   WINCH_ARG=false

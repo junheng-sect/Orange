@@ -188,9 +188,13 @@ def script_command(task):
         return [str(SCRIPTS / "nav_test12.sh"), "--ywl"]
     command = [str(SCRIPTS / ("nav_" + task["id"] + ".sh"))]
     if task["id"].startswith("test_indoor"):
+        source = SCRIPTS.parent / "src"
+        # The selected board checkout can still use the flat mid360s_ws layout.
+        if (source / "localization").is_dir():
+            source = source / "localization"
         command += ["--map", str(MAPS / task["mapId"]),
                     "--nav-config", str(SCRIPTS / "nav_test/indoor_fly_nav.yaml"),
-                    "--map-frame", str(SCRIPTS.parent / "src/car_bridge/config/map_frame_indoor_fly.yaml"),
+                    "--map-frame", str(source / "car_bridge/config/map_frame_indoor_fly.yaml"),
                     "--ev-mode", "odom"]
     return command
 

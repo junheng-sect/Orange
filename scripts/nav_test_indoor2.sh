@@ -17,8 +17,8 @@
 TEST_NAME=test_indoor2
 INDOOR_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_MAP="$HOME/test_data/mapping/20261021_110311_indoor"
-DEFAULT_RELOC_CONFIG="$INDOOR_SCRIPT_DIR/../src/drone_relocalization/config/indoor.yaml"
-DEFAULT_MAP_FRAME="$INDOOR_SCRIPT_DIR/../src/car_bridge/config/map_frame.yaml"
+DEFAULT_RELOC_CONFIG="$INDOOR_SCRIPT_DIR/../src/localization/drone_relocalization/config/indoor.yaml"
+DEFAULT_MAP_FRAME="$INDOOR_SCRIPT_DIR/../src/localization/car_bridge/config/map_frame.yaml"
 DEFAULT_NAV_CONFIG="$INDOOR_SCRIPT_DIR/nav_test/indoor_nav.yaml"
 DEFAULT_PREVIEW_RADIUS=0.4
 DEFAULT_PREVIEW_HALF_HEIGHT=0.3

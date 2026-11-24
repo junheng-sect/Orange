@@ -5,7 +5,7 @@ set -o pipefail
 SELF=$(realpath -e -- "$0") || exit 1
 source "$(dirname -- "$SELF")/nav_test/common.sh" || exit 1
 MAP="$MAP_ROOT/20261105_114605_outdoor"
-RELOC_CONFIG="$WS/src/drone_relocalization/config/outdoor.yaml"
+RELOC_CONFIG="$WS/src/localization/drone_relocalization/config/outdoor.yaml"
 DLL_MAP="${MAP}_screenshot_roi"
 YWL_MAP="${MAP}_screenshot_roi"
 RECORDER="$DIR/rc_record/record_outdoor_dll_ywl"

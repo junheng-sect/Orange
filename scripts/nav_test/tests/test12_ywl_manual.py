@@ -48,7 +48,7 @@ def fixture(args):
             if args.mode == "dll-missing" and directory != source_map and filename == "map_world.pcd":
                 continue
             (directory / filename).write_text("test fixture only\n")
-    config = workspace / "src/drone_relocalization/config"
+    config = workspace / "src/localization/drone_relocalization/config"
     config.mkdir(parents=True)
     (config / "outdoor.yaml").write_text("{}\n")
     subprocess.run(["git", "init", "-q", str(workspace)], check=True)

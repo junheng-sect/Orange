@@ -30,8 +30,8 @@ tools/ego_rviz/maps/
 *.bag.active
 *.pcd
 *.log
-/src/LiDAR_IMU_Init/Log/*.txt
-/src/LiDAR_IMU_Init/result/*.txt
-/src/livox_ros_driver2/config/MID360s_config.local.json
+/src/localization/LiDAR_IMU_Init/Log/*.txt
+/src/localization/LiDAR_IMU_Init/result/*.txt
+/src/drivers/livox_ros_driver2/config/MID360s_config.local.json
 /docker/ros-noetic-rviz/local.mac.env
 /docker/ros-noetic-rviz/.image.mac.env

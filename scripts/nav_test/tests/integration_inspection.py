@@ -11,6 +11,7 @@ import time
 import numpy as np
 import rosgraph
 import rospy
+from rospkg import RosPack
 from drone_navigation.core import wrap
 from drone_navigation.ros_common import xyz
 from geometry_msgs.msg import Point
@@ -18,7 +19,7 @@ from traj_utils.msg import PathTrajectory
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
-sys.path.insert(0, str(Path.home() / 'orange/src/drone_navigation/test'))
+sys.path.insert(0, str(Path(RosPack().get_path('drone_navigation')) / 'test'))
 from integration import Harness
 
 

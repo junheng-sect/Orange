@@ -136,7 +136,7 @@ def checkpoints(bag, folder, rows, seeds, capture_map=None):
     # Use the same multi-start local reference and motion checks as the A-B-A analysis.
     import rospkg
     import hashlib
-    src = Path(__file__).resolve().parents[2]/'src/fastlio_dll/scripts'
+    src = Path(__file__).resolve().parents[2]/'src/localization/fastlio_dll/scripts'
     sys.path.insert(0,str(src))
     from aba_reference import static_cloud, register
     from analyze_aba import sensors, stops, initial_guess, window_pose, difference
