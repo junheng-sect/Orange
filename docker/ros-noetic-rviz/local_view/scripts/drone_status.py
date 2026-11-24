@@ -2,7 +2,7 @@
 """本机只读状态桥：在本机 docker 里订阅板端几个低频话题，汇总成一份 JSON，给网页的无人机面板（car_web）每秒拉一次。
 
 板端不跑任何新进程，只多一个订阅者；本节点只读：不发布、不调服务、不写参数，HTTP 也只有 GET /status。
-数据都来自板端开机常驻的 MAVROS（mid360s_ws/scripts/resident/）和 fusion 的节点：
+数据都来自板端开机常驻的 MAVROS（scripts/resident/）和 fusion 的节点：
   /mavros/state             1 Hz   连上飞控、解锁、模式、system_status（STANDBY=当前模式解锁检查全过）
   /mavros/battery           0.5 Hz 电压、电流、剩余；台架没接电池时电压 0、剩余 < 0
   /mavros/sys_status        5 Hz   各部件健康位（enabled 且不 healthy 的就是不健康部件，含遥控）

@@ -27,12 +27,11 @@
 # ==============================================================================
 set -o pipefail
 
-NT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+NT_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 DIR="$(cd "$NT_DIR/.." && pwd)"
 WS="$(cd "$DIR/.." && pwd)"
 ROS_SETUP="/opt/ros/noetic/setup.bash"
 WS_SETUP="$WS/devel/setup.bash"
-ORANGE_SETUP="$HOME/orange/devel/setup.bash"
 MAP_ROOT="$HOME/test_data/mapping"
 
 nt_help() {
@@ -188,7 +187,7 @@ nt_default_dll() {
 }
 
 nav_test_main() {
-  NT_SCRIPT="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  NT_SCRIPT="$(realpath -e -- "$0")"
   MAP="${DEFAULT_MAP:-$MAP_ROOT/20261105_114605_outdoor}"
   RELOC_CONFIG="${DEFAULT_RELOC_CONFIG:-$WS/src/localization/drone_relocalization/config/outdoor.yaml}"
   MAP_FRAME="${DEFAULT_MAP_FRAME:-$WS/src/localization/car_bridge/config/map_frame_outdoor.yaml}"
@@ -296,15 +295,15 @@ nt_bringup() {
   log "外部定位送飞控：$([ "$EV_MODE" = odom ] && echo 'odom（位姿 + 速度）' || echo 'pose（只发位姿）')"
   [ "$PREVIEW" -eq 1 ] && warn "只预览：导航不发飞控（enable_output=false），膨胀 ${PREVIEW_RADIUS} / ${PREVIEW_HALF_HEIGHT} m"
   local _f
-  for _f in "$ROS_SETUP" "$WS_SETUP" "$ORANGE_SETUP" "$MAP/map_world.pcd" "$MAP/meta.json" "$RELOC_CONFIG" "$MAP_FRAME" "$NAV_CONFIG" \
+  for _f in "$ROS_SETUP" "$WS_SETUP" "$MAP/map_world.pcd" "$MAP/meta.json" "$RELOC_CONFIG" "$MAP_FRAME" "$NAV_CONFIG" \
             "$DIR/fusion.sh" "$NT_DIR/nav_forward.py"; do
     [ -f "$_f" ] || { err "缺少 $_f"; finish 1 force; }
   done
-  source "$ROS_SETUP"; source "$WS_SETUP"; source "$ORANGE_SETUP" --extend
+  source "$ROS_SETUP" && source "$WS_SETUP" || { err "无法加载 $WS_SETUP"; finish 1 force; }
   local _prior_file="" _prior_map_sha=""
   if [ "$LIVE_GRID_ONLY" -eq 0 ]; then
     _prior_file="$MAP/prior_grid.bin"
-    if ! _prior_map_sha="$(python3 -B "$WS/src/localization/drone_mapping/scripts/build_prior_grid" "$MAP" --verify 2>>"$LOG")"; then
+    if ! _prior_map_sha="$(PYTHONDONTWRITEBYTECODE=1 rosrun drone_mapping build_prior_grid "$MAP" --verify 2>>"$LOG")"; then
       err "先验栅格校验失败，确认 $_prior_file 对应当前地图。详情见 $LOG"
       finish 1 force
     fi

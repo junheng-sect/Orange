@@ -1,5 +1,7 @@
 # test indoor 1 验证记录（2026-11-08）
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 本次新增板端室内测试入口与配置，沿用现有 EGO/任务层/执行器/网关。
 验证期间未启动真实 fusion/重定位链路，未解锁、起飞或向真实飞控发送设定值。
 
@@ -64,7 +66,7 @@ EGO 的约 0.289 m/s 单轴值是规划目标，其现有可行性容差为 5%�
 - 可复制的低空隔离验收命令如下；`--height` 只控制合成场景的起始导航 z，不发真实飞行指令。
 
 ```bash
-bash ~/mid360s_ws/scripts/nav_test/tests/run_indoor1_isolated.sh \
+bash "$ORANGE_ROOT"/scripts/nav_test/tests/run_indoor1_isolated.sh \
   /绝对路径/新的验收目录 --height 0.5
 ```
 

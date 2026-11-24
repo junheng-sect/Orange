@@ -1,18 +1,20 @@
 # FAST-LIO2 + DLL
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 在 ROS Noetic 上为现有 FAST-LIO2 约 10 Hz 的里程计叠加地图纠偏。配准核心采用 [DLL 固定版本](https://github.com/robotics-upo/dll/tree/04623521a21e809f8b695d65a141387fb9b1a2f9) 的距离场与四自由度优化，使用原地图坐标建立 0.10 m 网格。
 
 ## 手持 A → B → A 的单包三组对照
 
 1. 在 A 标记机体位置和朝向，飞控保持上锁，通道 6 先拨到关闭位。从电脑执行：
    ```bash
-   ssh -t orange '~/mid360s_ws/scripts/nav_test12.sh --no-dll'
+   ssh -t orange 'cd ~/orange && exec ./scripts/nav_test12.sh --no-dll'
    ```
 2. 室外重定位确认后拨通道 6 开包，看到「录包中」后在 A 静止至少 20 秒。手持到 B 放稳 10 秒；按标记放回 A，再静止 10 秒。关闭通道 6，看到「已封包」后按 Ctrl+C 收尾。B 和沿途应在共用子图内。选能看到两个朝向的固定墙面的 B 点。
 3. 在板端用实际 bag 路径运行，输出目录须是新目录：
    ```bash
    bag="$HOME/test_data/nav_test/<时间>_test12/<录制文件>.bag"
-   "$HOME/orange/src/localization/fastlio_dll/scripts/replay_aba.sh" "$bag" "${bag%.bag}_aba"
+   "$ORANGE_ROOT/src/localization/fastlio_dll/scripts/replay_aba.sh" "$bag" "${bag%.bag}_aba"
    ```
    入口默认用 11 月 5 日室外原图计算 A 的双窗口初值，校验同源地图哈希后用截图裁图分别进行完整的 DLL 和 YWL 回放。DLL 回放中原始 FAST-LIO2 的局部轨迹乘以固定的 A 初值即为第三组。已有 CSV 的 `fixed_map_*` 字段使用首个 DLL 校正，三组评分使用 `odom_*` 重新计算。在线重定位时间与离线初值时间分别记录。
 
@@ -21,14 +23,16 @@
 时间标注相对包中第一帧原始雷达。记录的本地里程计仅用于识别静止段和传播粗略朝向。B 的默认 ICP 粗位置来自仅按 A 对齐的本地里程计，五种扰动检验局部收敛；独立地标粗值可用 `--b-hint X Y Z IMU_YAW_DEG` 指定（`drone_map` 中的雷达 IMU 原点和航向）。多个中途停顿时，用 `--b-at 秒数` 指认 B 停顿内的时刻。上述参数也可加在完整回放命令的末尾。已有回放可单独重算，例如：
 
 ```bash
-source ~/mid360s_ws/devel/setup.bash
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 ~/orange/src/localization/fastlio_dll/scripts/analyze_aba.py \
+source "$ORANGE_ROOT"/devel/setup.bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 "$ORANGE_ROOT"/src/localization/fastlio_dll/scripts/analyze_aba.py \
   "${bag%.bag}_aba" --b-at 85 --output "${bag%.bag}_aba/aba_review.json"
 ```
 
 B 参考衡量先验图内的一致性。初值、同一地图的系统误差和重复场景会影响结论。
 
 ## 室外同包回放 DLL 与 YWL
+
+默认使用当前 Orange 构建的两个包。复现独立版本时显式设置 `YWL_REPLAY_WS` 和 `DLL_REPLAY_WS` 指向对应工作空间。
 
 早期室外对照子图为 `$HOME/test_data/mapping/20261105_114605_outdoor_shared`，范围包含现有 test11 航点。当前 test12 使用下文的截图裁图。
 
@@ -38,7 +42,7 @@ B 参考衡量先验图内的一致性。初值、同一地图的系统误差和
 ssh -t orange '~/.local/bin/record_outdoor_dll_ywl'
 ```
 
-板端也可直接运行 `~/mid360s_ws/scripts/nav_test12.sh`。先让 Channel 6 处于关闭位，等终端确认 FAST-LIO2 和原室外重定位就绪，再拨到录制位并留够 20 秒静止数据。DLL 作为旁路运行，进入 TRACKING 后网页单列其与主位姿的水平差、高度差和航向差；缺测期间通道 6 继续录包。默认 test12 的实测 bag 可通过 [漂移指标导出说明](../../../tools/warehouse_monitor/README.md#test12-的-dll-对照差) 复盘。落地静止几秒后拨回关闭位，约 1 秒后封包。着地并上锁后按 Ctrl+C 收尾，SSH 断开可用 `tmux attach -t nav12` 接回。bag、DLL 日志、地图哈希和运行配置保存在 `~/test_data/nav_test/<时间>_test12/`。原手飞录包入口使用 `--no-dll`。
+板端也可直接运行 `"$ORANGE_ROOT"/scripts/nav_test12.sh`。先让 Channel 6 处于关闭位，等终端确认 FAST-LIO2 和原室外重定位就绪，再拨到录制位并留够 20 秒静止数据。DLL 作为旁路运行，进入 TRACKING 后网页单列其与主位姿的水平差、高度差和航向差；缺测期间通道 6 继续录包。默认 test12 的实测 bag 可通过 [漂移指标导出说明](../../../tools/warehouse_monitor/README.md#test12-的-dll-对照差) 复盘。落地静止几秒后拨回关闭位，约 1 秒后封包。着地并上锁后按 Ctrl+C 收尾，SSH 断开可用 `tmux attach -t nav12` 接回。bag、DLL 日志、地图哈希和运行配置保存在 `~/test_data/nav_test/<时间>_test12/`。原手飞录包入口使用 `--no-dll`。
 
 封包后用 `rosbag info` 确认原始雷达为 `livox_ros_driver2/CustomMsg`，IMU 为 `sensor_msgs/Imu`。PX4 ULog 按原方式下载。
 
@@ -72,12 +76,11 @@ DLL_REPLAY_CONFIG="$ws/src/fastlio_dll/config/outdoor_large_field.yaml" DLL_STAR
 
 ## 实机旁路录包
 
-按原有方式启动 FAST-LIO2、重力桥及同一地图的 `drone_reloc`。在香橙派另开终端，使用本任务的独立工作区。
+按原有方式启动 FAST-LIO2、重力桥及同一地图的 `drone_reloc`。在香橙派另开终端，加载当前 Orange 检出。
 
 ```bash
-ws="$HOME/test_data/fastlio_dll/20261117/observer_ws"
-source "$ws/devel/setup.bash"
-source "$HOME/mid360s_ws/scripts/ros_net.sh"
+source "$ORANGE_ROOT/devel/setup.bash"
+source "$ORANGE_ROOT/scripts/ros_net.sh"
 rosrun fastlio_dll record_observation.sh \
   "$HOME/test_data/mapping/20261021_110311_indoor" \
   "$HOME/test_data/fastlio_dll/flight_$(date +%Y%m%d_%H%M%S)"
@@ -95,15 +98,15 @@ rostopic echo /dll_localization/status
 
 ## 香橙派回放
 
-把本包复制到独立 catkin 工作区的 `src/fastlio_dll` 下。依赖现有 `mid360s_ws` 已构建的 FAST-LIO、重力桥、重定位包及板端 Ceres、PCL。
+把本包复制到独立 catkin 工作区的 `src/fastlio_dll` 下。依赖当前 Orange 检出 已构建的 FAST-LIO、重力桥、重定位包及板端 Ceres、PCL。
 
 ```bash
 run="$HOME/test_data/fastlio_dll/20261117"
 ws="$run/ws"
 source /opt/ros/noetic/setup.bash
-source "$HOME/mid360s_ws/devel/setup.bash"
+source "$ORANGE_ROOT/devel/setup.bash"
 cd "$ws"
-catkin config --extend "$HOME/mid360s_ws/devel" --cmake-args -DCMAKE_BUILD_TYPE=Release
+catkin config --extend "$ORANGE_ROOT/devel" --cmake-args -DCMAKE_BUILD_TYPE=Release
 catkin build fastlio_dll -j2
 source "$ws/devel/setup.bash"
 

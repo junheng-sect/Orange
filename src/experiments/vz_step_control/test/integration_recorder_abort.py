@@ -12,7 +12,7 @@ session and kills the bag recorder mid-STABILIZE. Expected behaviour:
     still in OFFBOARD, and are not re-boosted.
 
 Run with a sourced devel workspace:
-    cd /home/vslam/seeker
+    cd "$(git rev-parse --show-toplevel)"
     source /opt/ros/noetic/setup.bash && source devel/setup.bash
     python3 src/experiments/vz_step_control/test/integration_recorder_abort.py /tmp/vz_live_bags
 Exit code 0 = all assertions passed.

@@ -5,7 +5,7 @@
 # ==============================================================================
 TEST_NAME=test_indoor3_4
 NT_MANUAL_FLIGHT=1
-SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+SELF_DIR="$(cd "$(dirname -- "$(realpath -e -- "$0")")" && pwd)"
 source "$SELF_DIR/nav_test/common.sh"
 DEFAULT_MAP="$MAP_ROOT/20261114_101654_indoor_fly_raw_000001"
 DEFAULT_RELOC_CONFIG="$WS/src/localization/drone_relocalization/config/indoor.yaml"

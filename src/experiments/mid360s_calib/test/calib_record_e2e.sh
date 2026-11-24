@@ -14,7 +14,8 @@ export ROS_IP="127.0.0.1"
 export ROS_HOSTNAME="127.0.0.1"
 set +u
 source /opt/ros/noetic/setup.bash
-source "$HOME/mid360s_ws/devel/setup.bash"
+workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../../.." && pwd -P)"
+source "$workspace/devel/setup.bash"
 set -u
 
 WORK="$(mktemp -d /tmp/calib_record_e2e.XXXXXX)"

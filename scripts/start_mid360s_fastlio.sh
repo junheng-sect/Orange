@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ==============================================================================
 # 一键前台启动 Livox MID-360S 驱动、FAST-LIO2 与重力对齐桥接
-# 路径: ~/mid360s_ws/scripts/start_mid360s_fastlio.sh
+# 路径: ./scripts/start_mid360s_fastlio.sh
 # 用法: ./start_mid360s_fastlio.sh [--check] [--send-to-mavros] [--ev-mode pose|odom]
 #   --send-to-mavros   把外部定位送给飞控：pose 方式送 /mavros/vision_pose/pose_cov，
 #                      odom 方式送 /mavros/odometry/out（位姿 + 速度，要 MAVROS 用 MAVLink2）
@@ -19,7 +19,7 @@ set -euo pipefail
 # 残留节点、全退了再启动 chronyd。没外网也能启动，运行中联网不会跳时间。
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 WS_DIR="${WS_DIR:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
 ROS_SETUP="/opt/ros/noetic/setup.bash"
 WS_SETUP="${WS_DIR}/devel/setup.bash"
@@ -156,7 +156,7 @@ else
     [[ $CHECK_ONLY -eq 1 ]] && echo "[PASS] 板端 Wi-Fi IP $WIFI_IP（本机 RViz 经它访问 $ROS_IP）"
 fi
 
-read -r EXPECTED_LIDAR_NET_IP LIDAR_DEVICE_IP < <(python3 "$WS_DIR/src/localization/drone_mapping/src/drone_mapping/lidar_config.py" "$WS_DIR") || exit 1
+read -r EXPECTED_LIDAR_NET_IP LIDAR_DEVICE_IP < <(python3 -m drone_mapping.lidar_config "$WS_DIR") || exit 1
 if ! ip -4 addr show | grep -qw "$EXPECTED_LIDAR_NET_IP"; then
     echo "[ERROR] 板端未配置雷达接口 IP $EXPECTED_LIDAR_NET_IP (enP3p49s0 可能 DOWN 或网线未连接)" >&2
     if [[ $CHECK_ONLY -eq 1 ]]; then CHECK_FAILED=1; else exit 1; fi

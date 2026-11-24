@@ -1,5 +1,7 @@
 # vz_chirp_control
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 用于悬停工作点附近的 Z 速度对数扫频。节点保持进入 OFFBOARD 时的 XY 位置和
 yaw，只向 Z 速度注入小幅 chirp。
 
@@ -19,7 +21,7 @@ yaw，只向 Z 速度注入小幅 chirp。
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/vslam/seeker/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch vz_chirp_control vz_chirp_control.launch
 ```
 
@@ -39,7 +41,7 @@ OFFBOARD 或 disarm 时 bag 自动关闭。
 rostopic echo -n 1 /vz_chirp/bag_path
 ```
 
-默认保存目录为 `/home/vslam/seeker/logs/vz_chirp`。每次进入一次 armed OFFBOARD
+默认保存目录为 `~/test_data/bags/vz_chirp`。每次进入一次 armed OFFBOARD
 都会创建一个新的标准 ROS1 `.bag`。
 
 ## 记录内容
@@ -88,7 +90,7 @@ roslaunch vz_chirp_control vz_chirp_control.launch record:=false
 ## 构建和测试
 
 ```bash
-cd /home/vslam/seeker
+cd "$ORANGE_ROOT"
 catkin build vz_chirp_control --no-deps
 catkin run_tests vz_chirp_control
 catkin_test_results build/vz_chirp_control

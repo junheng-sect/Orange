@@ -1,7 +1,9 @@
 # EGO-Swarm 单机接入：软件验收记录
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 日期：2026-11-03 12:34:36 Asia/Shanghai。目标：Orange Pi 5 Max / Ubuntu20.04 / ROS Noetic。
-原始证据目录：`/home/orangepi/test_data/navigation_acceptance/20261103_123436`。
+原始证据目录：`~/test_data/navigation_acceptance/20261103_123436`。
 
 ## 已通过
 
@@ -24,7 +26,7 @@
 
 ## 复现
 
-软件回归：`bash ~/orange/src/navigation/drone_navigation/test/run_isolated.sh`。
+软件回归：`bash "$ORANGE_ROOT"/src/navigation/drone_navigation/test/run_isolated.sh`。
 单元回归：source ROS和orange/devel后，`catkin run_tests drone_navigation --no-status`。
 隔离脚本只起停自己的测试节点与11431端口，不启停常驻roscore/MAVROS、Livox、FAST-LIO、相机或绕线器。
 运行和部署参数见README.md；固定上游修订与许可证见../ego_swarm/UPSTREAM.md。
@@ -32,7 +34,7 @@
 
 ## Review 修复回归（2026-11-03）
 
-证据目录：`/home/orangepi/test_data/navigation_acceptance/20261103_review_fixes.7DaS14`。
+证据目录：`~/test_data/navigation_acceptance/20261103_review_fixes.7DaS14`。
 
 - 导航 catkin 构建通过；单元测试23项（原13项＋运行回归10项），0错误、0失败。
 - 新增运行回归使用实际 Gateway/Executor 回调、mock ROS传输和时钟：prepare后水平/竖直移动1米，切换OFFBOARD第一帧位置等于切换状态回调时最新PX4位置，速度为零；切换后保持点冻结。

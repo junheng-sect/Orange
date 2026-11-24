@@ -67,6 +67,6 @@ recorder_health_timeout_sec: 1.0
 # 录包器健康消息话题（VzRecorderHealth，~2 Hz latched）
 recorder_health_topic: /vz_chirp/recorder_health
 # rosbag 输出根目录
-bag_directory: /home/vslam/seeker/logs/vz_chirp
+bag_directory: ~/test_data/bags/vz_chirp
 # bag 路径发布话题（String，latched）
 bag_path_topic: /vz_chirp/bag_path

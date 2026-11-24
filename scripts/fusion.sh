@@ -6,7 +6,7 @@
 #   + 系留绕线器默认关闭（系留时使用 --winch 开启）
 #   + OV13855 由监看面板或视觉任务按需启动
 #
-# 路径: ~/mid360s_ws/scripts/fusion.sh
+# 路径: ./scripts/fusion.sh
 # launch: scripts/launch/ 下 fusion_core / fusion_aux（fusion.launch 是手动合集）
 # 用法: ./fusion.sh [选项]
 #   --no-record         不启动 RC 触发录包节点（本次不会有 bag）
@@ -40,9 +40,8 @@
 # start_handheld_test.sh；两个入口共用 /tmp/mid360s_fusion.lock，互相排斥。
 #
 # 手动启动（不经本脚本，没有时钟冻结；launch 里的注释指的就是这段；roscore / MAVROS 已常驻）：
-#   cd ~/mid360s_ws
+#   从 Orange 根目录执行以下命令
 #   source scripts/ros_net.sh && source /opt/ros/noetic/setup.bash && source devel/setup.bash
-#   source ~/orange/devel/setup.bash --extend
 #   export ROS_PACKAGE_PATH="$PWD/scripts:$ROS_PACKAGE_PATH"   # rc_record 靠它定位
 #   roslaunch --screen --required scripts/launch/fusion_core.launch      # 然后另开终端：
 #   roslaunch --screen scripts/launch/fusion_aux.launch
@@ -59,11 +58,10 @@
 # ==============================================================================
 set -o pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 WS="$(cd "$DIR/.." && pwd)"
 ROS_SETUP="/opt/ros/noetic/setup.bash"
 WS_SETUP="$WS/devel/setup.bash"
-ORANGE_SETUP="$HOME/orange/devel/setup.bash"
 CORE_LAUNCH="$DIR/launch/fusion_core.launch"
 AUX_LAUNCH="$DIR/launch/fusion_aux.launch"
 FC_TIME_PY="$DIR/fc_set_time.py"
@@ -446,11 +444,7 @@ done
 [ -f "$RC_RECORD_DIR/package.xml" ] || { err "缺少 $RC_RECORD_DIR/package.xml（roslaunch 靠它定位 rc_record 包）"; exit 1; }
 ok "脚本、launch 与 rc_record 包文件齐全（工作空间 $WS）"
 
-set +u; source "$ROS_SETUP"; source "$WS_SETUP"; set -u
-if [ "$DO_WINCH" -eq 1 ]; then
-  [ -f "$ORANGE_SETUP" ] || { err "缺少 $ORANGE_SETUP；请构建 orange 或使用 --no-winch"; exit 1; }
-  set +u; source "$ORANGE_SETUP" --extend; set -u
-fi
+set +u; source "$ROS_SETUP" && source "$WS_SETUP" || exit 1; set -u
 # rc_record 不是 catkin 包，把 scripts 挂进 ROS_PACKAGE_PATH，roslaunch 才解析得到它
 export ROS_PACKAGE_PATH="$DIR${ROS_PACKAGE_PATH:+:$ROS_PACKAGE_PATH}"
 

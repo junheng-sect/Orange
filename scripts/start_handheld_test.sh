@@ -4,7 +4,7 @@
 #   MID-360S 驱动 + FAST-LIO2 + 重力对齐桥接(位姿送飞控)，用开机常驻的 roscore / MAVROS（scripts/resident/）
 #   + RC 开关触发录包节点（遥控器通道 6 拨到触发位即开始录 bag）
 #
-# 路径: ~/mid360s_ws/scripts/start_handheld_test.sh
+# 路径: ./scripts/start_handheld_test.sh
 # 用法: ./start_handheld_test.sh [选项]
 #   --check             只做前置检查，不启动任何节点
 #   --no-lidar          调试：只起录包节点（MAVROS 常驻），用于单独验证「开关 -> 录包」
@@ -23,11 +23,11 @@
 #
 # 前台运行：Ctrl+C / SIGTERM 停止本次启动的节点；录包节点先收 SIGINT，bag 正常写索引。
 # 常驻 roscore / MAVROS 不归本脚本起停，收尾也不动它们。
-# 本脚本不修改 mid360s_ws 源码，不写飞控参数（除显式 --fix-params）。
+# 本脚本不修改 Orange 源码，不写飞控参数（除显式 --fix-params）。
 # ==============================================================================
 set -o pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 WS="$(cd "$DIR/.." && pwd)"
 ROS_SETUP="/opt/ros/noetic/setup.bash"
 WS_SETUP="$WS/devel/setup.bash"
@@ -346,7 +346,7 @@ if [ "$NET_CHECK" -eq 1 ]; then
   else
     warn "Wi-Fi 未连接：核心照常运行，只是本机 RViz / ssh 暂时连不上"
   fi
-  read -r LIDAR_IFACE_IP LIDAR_IP < <(python3 "$WS/src/localization/drone_mapping/src/drone_mapping/lidar_config.py" "$WS") || exit 1
+  read -r LIDAR_IFACE_IP LIDAR_IP < <(python3 -m drone_mapping.lidar_config "$WS") || exit 1
   if ! ip -4 addr show 2>/dev/null | grep -qw "$LIDAR_IFACE_IP"; then
     err "雷达网口未配置 $LIDAR_IFACE_IP（enP3p49s0 无载波：雷达没上电或网线没插）"
     err "排查：ip -4 -br addr show enP3p49s0  |  nmcli device status"

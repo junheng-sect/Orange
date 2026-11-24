@@ -3,15 +3,15 @@
 #   ./test_rc_record_e2e.sh [master 端口，默认 11377]
 # 期望：脚本自动翻转通道 6 两次触发位，最终在临时目录里得到 2 个有效 bag。
 set -u
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 PORT="${1:-11377}"
 export ROS_MASTER_URI="http://127.0.0.1:${PORT}"
 export ROS_IP="127.0.0.1"
 export ROS_HOSTNAME="127.0.0.1"
 set +u
 source /opt/ros/noetic/setup.bash
-source "$HOME/mid360s_ws/devel/setup.bash"
-source "$HOME/orange/devel/setup.bash" --extend
+workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../.." && pwd -P)"
+source "$workspace/devel/setup.bash"
 set -u
 
 BAGDIR="$(mktemp -d /tmp/rc_record_e2e.XXXXXX)"

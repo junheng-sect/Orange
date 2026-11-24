@@ -139,5 +139,5 @@ run_test() {
   done
 }
 
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/common.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/common.sh"
 nav_test_main "$@"

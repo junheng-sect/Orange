@@ -50,7 +50,7 @@ HIGHRES_IMU_ID = 105
 
 
 def calib_topics():
-    """标定包的话题与消息类型（CustomMsg 需要 source mid360s_ws/devel/setup.bash）。"""
+    """标定包的话题与消息类型（CustomMsg 需要 source devel/setup.bash）。"""
     from livox_ros_driver2.msg import CustomMsg
     return [
         ('/livox/lidar', CustomMsg),
@@ -144,7 +144,7 @@ class CalibBagRecorder(object):
             self._topics = calib_topics()
         except ImportError as exception:
             rospy.logfatal('导入不到 livox_ros_driver2/CustomMsg（需要 source '
-                           'mid360s_ws/devel/setup.bash）：%s', exception)
+                           'devel/setup.bash）：%s', exception)
             rospy.signal_shutdown('livox CustomMsg unavailable')
             raise
 

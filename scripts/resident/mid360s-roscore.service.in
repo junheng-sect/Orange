@@ -1,5 +1,5 @@
 # 常驻 ROS master（ros0 的固定地址，master 走 127.0.0.1:11311）。
-# 源文件在 mid360s_ws/scripts/resident/，改完重跑 install.sh 才会生效。
+# 源文件在 scripts/resident/，改完重跑 install.sh 才会生效。
 [Unit]
 Description=mid360s resident ROS master (ros0)
 After=NetworkManager.service
@@ -8,8 +8,8 @@ After=NetworkManager.service
 Type=simple
 User=orangepi
 Group=orangepi
-WorkingDirectory=~
-ExecStart=/bin/bash ./mid360s_ws/scripts/resident/run_roscore.sh
+WorkingDirectory=@WORKSPACE@
+ExecStart=/bin/bash ./scripts/resident/run_roscore.sh
 # roscore 按 SIGINT 收尾最干净
 KillSignal=SIGINT
 TimeoutStopSec=20

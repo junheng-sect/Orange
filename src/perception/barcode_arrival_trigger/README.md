@@ -1,5 +1,7 @@
 # barcode_arrival_trigger
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 到位自动读码：`front_marker_control` 进入 `POS_HOLD`（到位定点）时自动读一次码，发布 `~result`，日志里打一块汇总，
 结果和 tag 位置记进 `arrival_read.csv`。
 本包只负责触发和发布；到位判定、失败重试、巡检航点调度都不在这里。手动拨 CH9 读码是 `barcode_rc_trigger`，两者互不干扰。
@@ -10,9 +12,9 @@
 
 ```bash
 # 终端 1：fusion
-cd /home/orangepi/mid360s_ws/scripts && ./fusion.sh
+cd "$ORANGE_ROOT"/scripts && ./fusion.sh
 # 终端 2、3 先执行：
-source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash && source /home/orangepi/mid360s_ws/scripts/ros_net.sh
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash && source "$ORANGE_ROOT"/scripts/ros_net.sh
 # 终端 2：相机、AprilTag、TF 和到位控制
 roslaunch front_marker_control ov13855_marker_tracking.launch
 # 终端 3：相机读码节点 + 到位触发节点
@@ -110,7 +112,7 @@ roslaunch barcode_arrival_trigger auto_read.launch
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build barcode_arrival_trigger
 catkin run_tests barcode_arrival_trigger --no-deps && catkin_test_results build/barcode_arrival_trigger
 ```

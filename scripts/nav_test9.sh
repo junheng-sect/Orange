@@ -31,7 +31,7 @@
 # common.sh 使用 TEST_NAME 和 test_arg 设置的 SHIFT。
 # shellcheck disable=SC2034
 TEST_NAME=test9
-NAV_TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nav_test"
+NAV_TEST_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)/nav_test"
 DEFAULT_NAV_CONFIG="$NAV_TEST_DIR/outdoor_nav_z3.yaml"
 DELAY=3
 HOLD=3
@@ -148,5 +148,5 @@ run_test() {
   done
 }
 
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/common.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/common.sh"
 nav_test_main "$@"

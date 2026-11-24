@@ -1,4 +1,4 @@
-# 原样复制自 mid360s_ws/scripts/rc_record/rc_record_policy.py（飞行录包同一份逻辑）；改动请两边同步。
+# 原样复制自 scripts/rc_record/rc_record_policy.py（飞行录包同一份逻辑）；改动请两边同步。
 """RC 开关触发录包的纯策略（不依赖 ROS、不做 IO）。
 
 设计参照板端 orange 工作空间里 vz_step_control 的 offboard_bag_recorder：

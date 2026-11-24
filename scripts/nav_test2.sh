@@ -2,7 +2,7 @@
 # ==============================================================================
 # 导航实飞 test2：前、右、后、左各 1 m，四个角稳定到达后各保持 5 s，保持起始高度和航向。
 #
-# 路径: ~/mid360s_ws/scripts/nav_test2.sh
+# 路径: ./scripts/nav_test2.sh
 # 用法: ./nav_test2.sh [--delay 3] [公共选项]
 #   --delay S          切进 OFFBOARD 后原地保持多少秒再出发（默认 3，0 < S <= 30）
 #
@@ -76,5 +76,5 @@ run_test() {
   done
 }
 
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/common.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/common.sh"
 nav_test_main "$@"

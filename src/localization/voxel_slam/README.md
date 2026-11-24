@@ -1,5 +1,7 @@
 # voxel_slam（Voxel-SLAM，本仓库内嵌版）
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 hku-mars 的激光-惯性 SLAM（[论文 arXiv:2410.08935](https://arxiv.org/abs/2410.08935)，[视频](https://youtu.be/Cg9W01aIUzE)），
 ICRA HILTI 2023 激光单会话第 2、ICCV 2023 激光-惯性赛道第 1。一共五个模块：
 
@@ -21,7 +23,7 @@ ICRA HILTI 2023 激光单会话第 2、ICCV 2023 激光-惯性赛道第 1。一�
 ## 编译
 
 ```bash
-cd ~/mid360s_ws
+cd "$ORANGE_ROOT"
 ./scripts/build.sh                 # 先编 GTSAM 到 .deps/gtsam-4.0.3，再 catkin build 全部包
 catkin build voxel_slam            # 之后单独重编本包（build.sh 跑过一次以后，catkin 参数里已经有 GTSAM_DIR）
 ```
@@ -31,7 +33,7 @@ catkin build voxel_slam            # 之后单独重编本包（build.sh 跑过�
 ### 1. 推荐：通过 drone_mapping 建图
 
 ```bash
-source /opt/ros/noetic/setup.bash && source ~/mid360s_ws/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
 rosrun drone_mapping build_map                    # 实机：录原始包，Ctrl+C 后自动离线跑 Voxel-SLAM 并拼图
 rosrun drone_mapping build_map --bag RAW.bag      # 用录好的原始包离线重建
 ```

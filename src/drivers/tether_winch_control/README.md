@@ -1,5 +1,7 @@
 # 两档系留绕线器控制
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 根据 MID360S 定位判断无人机与固定出线点的距离变化，通过 TCP 向绕线器发送
 `DUTY=<整数>#`。电机始终向收线方向施力，DUTY 越大力矩越大；放线由无人机拉动。
 本包不控制飞机，不发送飞行设定值。
@@ -89,10 +91,10 @@ printf '%s' 'DUTY=270#' | nc -N 192.168.31.87 8080
 ```bash
 ssh orange
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build tether_winch_control
-source /home/orangepi/orange/devel/setup.bash
-source /home/orangepi/mid360s_ws/scripts/ros_net.sh
+source "$ORANGE_ROOT"/devel/setup.bash
+source "$ORANGE_ROOT"/scripts/ros_net.sh
 roslaunch tether_winch_control tether_winch.launch
 ```
 
@@ -100,8 +102,8 @@ roslaunch tether_winch_control tether_winch.launch
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
-source /home/orangepi/mid360s_ws/scripts/ros_net.sh
+source "$ORANGE_ROOT"/devel/setup.bash
+source "$ORANGE_ROOT"/scripts/ros_net.sh
 rostopic echo /tether_winch_control/status
 # 默认自动启用，无需以下启用命令；它保留用于故障恢复或 auto_enable=false：
 rosservice call /tether_winch_control/set_enabled 'data: true'
@@ -122,10 +124,10 @@ roslaunch tether_winch_control tether_winch.launch simulation_values:=true
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover \
-  -s ~/orange/src/drivers/tether_winch_control/test -v
-cd /home/orangepi/orange
+  -s "$ORANGE_ROOT"/src/drivers/tether_winch_control/test -v
+cd "$ORANGE_ROOT"
 catkin run_tests tether_winch_control
 catkin_test_results build/tether_winch_control/test_results
 ```
@@ -137,8 +139,8 @@ catkin_test_results build/tether_winch_control/test_results
 无需 ROS 的轨迹模拟：
 
 ```bash
-PYTHONPATH=~/orange/src/drivers/tether_winch_control/src \
-python3 ~/orange/src/drivers/tether_winch_control/scripts/simulate_winch \
+PYTHONPATH="$ORANGE_ROOT"/src/drivers/tether_winch_control/src \
+python3 "$ORANGE_ROOT"/src/drivers/tether_winch_control/scripts/simulate_winch \
   --low-duty 100 --high-duty 300 --csv /tmp/tether_winch_trace.csv
 ```
 

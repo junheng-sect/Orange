@@ -1,5 +1,7 @@
 # barcode_reader_serial
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 串口读码器（`/dev/ttyS1`）：每次调用 `~read` 触发读码器一次，等一帧回复，返回读到的码。
 平时由 `barcode_rc_trigger`（`mode:=serial` / `both`）或 `barcode_arrival_trigger` 调用。
 移植自 Drone-Vision C# 程序的 `BarcodeReaderSerial`（`camera_then_serial` 的串口那一路）。
@@ -7,7 +9,7 @@
 ## 快速开始
 
 ```bash
-source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch barcode_reader_serial barcode_reader.launch
 # 另一个终端：触发一次，看结果
 rosservice call /barcode_reader_serial/read "timeout_s: 0.0"
@@ -83,7 +85,7 @@ rostopic echo /barcode_reader_serial/result
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build barcode_reader_serial
 catkin run_tests barcode_reader_serial --no-deps && catkin_test_results build/barcode_reader_serial
 ```

@@ -1,5 +1,5 @@
 # Common board bring-up for indoor4/5. The public entry point selects the variant.
-SCAN_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCAN_SCRIPTS="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/.." && pwd)"
 SCAN_VARIANT="${TEST_NAME#test_}"
 SCAN_NAME="test${SCAN_VARIANT#indoor}"
 DEFAULT_MAP="$HOME/test_data/mapping/20261114_101654_indoor_fly_raw_000001"

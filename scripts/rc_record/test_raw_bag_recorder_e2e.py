@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Isolated CH6 -> light + real C++ raw bag test, no MAVROS or hardware.
-Run on the board after sourcing ROS Noetic and mid360s_ws/devel/setup.bash.
+Run on the board after sourcing ROS Noetic and devel/setup.bash.
 """
 import json
 import os

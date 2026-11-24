@@ -1,6 +1,8 @@
 # 本机 Docker RViz
 
-本目录随 mid360s_ws 管理显示脚本、Dockerfile、RViz/launch 配置与面板测量工具。
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
+本目录随 Orange 管理显示脚本、Dockerfile、RViz/launch 配置与面板测量工具。
 支持 Ubuntu 桌面 X11 + NVIDIA Docker，以及 Apple Silicon Mac 的 ARM64 Docker + 浏览器 RViz。
 显示和辅助节点都在本机容器运行，不在 Orange Pi 板端增加进程。
 
@@ -153,7 +155,7 @@ cp -n docker/ros-noetic-rviz/local.env.example docker/ros-noetic-rviz/local.env
 - `OV13855 Preview` 图像面板订阅 `/ov13855_apriltag_vision/image_preview`，Transport Hint 为 `compressed`
   （960px 带标注预览，约 15Hz、1 MB/s，由 orange 工作空间视觉节点发布）。不要改成 raw 或订阅原分辨率话题，
   raw 约 55 MB/s 会占满 Wi-Fi。板端 `scripts/fusion.sh` 默认经 `scripts/launch/camera.launch` 拉起相机与视觉节点
-  （`--no-camera` 关闭）；单独启动相机/视觉时须先 `source ~/mid360s_ws/scripts/ros_net.sh`，否则本机收不到图像。
+  （`--no-camera` 关闭）；单独启动相机/视觉时须先 `source "$ORANGE_ROOT"/scripts/ros_net.sh`，否则本机收不到图像。
   个人配置 `home/ros/.rviz/` 只在不存在时从模板复制，已有个人配置需自行 Add 该面板或删除后重新生成。
 - 保留 GPU 渲染、历史/当前点云与路径配置。2026-09-26 在旧入口完成隔离容器的 IPC 对照、滚动/加宽复测，用户确认手动最大化正常；不是板端实时点云验收。
 

@@ -5,7 +5,7 @@
 # --preview 只输出导航预览，要求从地图原点上方约 1 m 开始。
 set -o pipefail
 TEST_NAME=test11
-NAV_TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nav_test"
+NAV_TEST_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)/nav_test"
 DEFAULT_NAV_CONFIG="$NAV_TEST_DIR/outdoor_nav_inspection.yaml"
 DEFAULT_PREVIEW_RADIUS=0.40
 DEFAULT_PREVIEW_HALF_HEIGHT=0.30

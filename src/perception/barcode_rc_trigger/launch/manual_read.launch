@@ -1,6 +1,6 @@
 <launch>
   <!-- 手动读码：拨一下遥控器 CH9 读一次码，终端打印汇总，每次启动的结果都在 ~/test_data/barcode/时间_版式/ 一个文件夹里。
-       默认配合 mid360s_ws/scripts/fusion.sh（使用板端常驻 MAVROS，拨杆扫码时加 camera:=true）；不跑 fusion 时加 camera:=true，MAVROS 另起。
+       默认配合 scripts/fusion.sh（使用板端常驻 MAVROS，拨杆扫码时加 camera:=true）；不跑 fusion 时加 camera:=true，MAVROS 另起。
        每个参数的可选值见下面的 doc（命令行列出全部参数的方法见 README「快速开始」）。
        注意：camera:=false 时 AprilTag 用 fusion 的 tag 43.7 mm，layout 只能是 qr_top_tag_bottom / dm_top_tag_bottom；
        mode 含 serial 时不要同时运行 DroneVision（共用 /dev/ttyS1）。 -->

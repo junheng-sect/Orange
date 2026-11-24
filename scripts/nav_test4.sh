@@ -12,7 +12,7 @@
 # common.sh 使用 TEST_NAME 和 test_arg 设置的 SHIFT。
 # shellcheck disable=SC2034
 TEST_NAME=test4
-DEFAULT_NAV_CONFIG="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/nav_test/outdoor_nav_long.yaml"
+DEFAULT_NAV_CONFIG="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)/nav_test/outdoor_nav_long.yaml"
 DELAY=3
 test_desc() { echo "2 m、4 m 直线往返，保持起始高度和航向"; }
 
@@ -69,5 +69,5 @@ run_test() {
   done
 }
 
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/common.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/common.sh"
 nav_test_main "$@"

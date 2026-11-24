@@ -13,7 +13,7 @@
 # 服务重起时重选；手动起的要重跑本脚本。板端重启（master 换了）不用管，节点自己会重来。
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=common.sh
 source "$SCRIPT_DIR/common.sh"
 
@@ -44,16 +44,21 @@ done
 # 服务跑的是 --fg：每次起都重新选 ROS_IP、补路由；本机和板端不在一个网时起不来，每 10 s 重试。
 # 服务没有终端输 sudo 密码，要 sudo 补路由的网（手机热点等）得先手动跑一次本脚本或 run_rviz.sh。
 install_unit() {
-  local docker_bin
+  local docker_bin launcher="$HOME/.local/bin/drone-status"
+  mkdir -p "$HOME/.local/bin"
+  if [[ -e "$launcher" && ! -L "$launcher" ]]; then
+    die "入口已被其他文件占用：$launcher"
+  fi
+  ln -sfnT -- "$SCRIPT_DIR/run_drone_status.sh" "$launcher"
   docker_bin="$(command -v docker)" || die "未找到 docker 命令。"
   mkdir -p "$(dirname "$unit_file")"
   cat >"$unit_file" <<EOF
 [Unit]
-Description=无人机状态桥（mid360s_ws docker/ros-noetic-rviz，:$port/status，给仓库无人机巡检页）
+Description=无人机状态桥（docker/ros-noetic-rviz，:$port/status，给仓库无人机巡检页）
 
 [Service]
 Environment=DRONE_STATUS_SERVICE=1
-ExecStart="$SCRIPT_DIR/run_drone_status.sh" --fg --port $port --bind $bind
+ExecStart=%h/.local/bin/drone-status --fg --port $port --bind $bind
 ExecStopPost=-$docker_bin rm -f $name
 Restart=always
 RestartSec=10

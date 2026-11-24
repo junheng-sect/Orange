@@ -5,7 +5,7 @@
 不连飞控、不发布任何 MAVROS 设定值。
 
 跑法（板端，先 source 三个 setup.bash）：
-    cd ~/mid360s_ws/scripts/nav_test/tests
+    cd ./scripts/nav_test/tests
     python3 -m unittest -v test_nav_turn
 """
 import math

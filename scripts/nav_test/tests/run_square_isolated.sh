@@ -2,14 +2,14 @@
 # 单独 master + 合成状态，绝不连接板端常驻 master，不发布飞控设定值。
 set -eo pipefail
 source /opt/ros/noetic/setup.bash
-source "$HOME/mid360s_ws/devel/setup.bash"
-source "$HOME/orange/devel/setup.bash" --extend
+workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../.." && pwd -P)"
+source "$workspace/devel/setup.bash"
 set -u
 export ROS_MASTER_URI=http://127.0.0.1:11435
 export ROS_IP=127.0.0.1
 unset ROS_HOSTNAME
 export PYTHONDONTWRITEBYTECODE=1
-SQUARE_TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SQUARE_TEST_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 SQUARE_SCRIPT="$SQUARE_TEST_DIR/../nav_square.py"
 # 允许在同一临时目录内验证部署候选文件。
 [ -f "$SQUARE_SCRIPT" ] || SQUARE_SCRIPT="$SQUARE_TEST_DIR/nav_square.py"

@@ -138,7 +138,7 @@ def build(scripts, maps):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scripts", type=Path, default=Path.home() / "mid360s_ws/scripts")
+    parser.add_argument("--scripts", type=Path, default=Path(__file__).resolve().parents[2] / "scripts")
     parser.add_argument("--maps", type=Path, default=Path.home() / "test_data/mapping")
     args = parser.parse_args()
     print(json.dumps(build(args.scripts, args.maps), indent=2, ensure_ascii=False))

@@ -2,7 +2,7 @@
 # ==============================================================================
 # 导航实飞 test6：地面解锁后自动起飞到 1 m 并悬停
 #
-# 路径: ~/mid360s_ws/scripts/nav_test6.sh
+# 路径: ./scripts/nav_test6.sh
 # 用法: ./nav_test6.sh [--delay 3] [公共选项]
 #   --delay S          解锁后多少秒起飞（默认 3，1~4：PX4 解锁后 10 s 不起飞会自动上锁）
 #
@@ -63,5 +63,5 @@ run_test() {
 for _a in "$@"; do
   [ "$_a" = --preview ] && { echo "test6 不支持 --preview：只预览时网关不发飞控，切不进 OFFBOARD，没法起飞" >&2; exit 2; }
 done
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/common.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/common.sh"
 nav_test_main "$@"

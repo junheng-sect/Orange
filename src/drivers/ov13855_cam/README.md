@@ -1,5 +1,7 @@
 # ov13855_cam
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 ROS Noetic OV13855/RKISP 独立驱动包。传感器固定输出 4224×3136，ISP 同时出两路，各由一个节点发布：
 
 | 节点 | 设备 | 输出 | 话题 | 用途 |
@@ -13,7 +15,7 @@ ROS Noetic OV13855/RKISP 独立驱动包。传感器固定输出 4224×3136，IS
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch ov13855_cam ov13855.launch              # 两路都起
 roslaunch ov13855_cam ov13855.launch full:=false  # 只起 1280×960（只跟踪 tag、不读码）
 ```
@@ -59,7 +61,7 @@ Y 平面当作 mono8 的前提是 ISP 输出全范围：colorimetry 第一位为
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build ov13855_cam ov13855_apriltag_vision
 ```
 
@@ -67,6 +69,6 @@ catkin build ov13855_cam ov13855_apriltag_vision
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin run_tests ov13855_cam --no-deps
 ```

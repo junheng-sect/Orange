@@ -115,7 +115,7 @@ def topic_type_registry():
         registry['/tether_winch_control/status'] = WinchStatus
     except ImportError:
         rospy.logwarn('无法导入 tether_winch_control/WinchStatus；'
-                      '请构建 orange 工作空间并 source orange/devel/setup.bash --extend')
+                      '请构建 orange 工作空间并 source devel/setup.bash')
     try:
         from livox_ros_driver2.msg import CustomMsg
         registry['/livox/lidar'] = CustomMsg
@@ -199,7 +199,7 @@ class RcBagRecorder(object):
                     wanted.append('/livox/lidar')
             else:
                 rospy.logerr('record_raw_cloud=true 但导入不到 livox_ros_driver2/CustomMsg'
-                             '（需要 source mid360s_ws/devel/setup.bash），已忽略')
+                             '（需要 source devel/setup.bash），已忽略')
         if bool(rospy.get_param('~record_registered_cloud', False)):
             if '/cloud_registered' not in wanted:
                 wanted.append('/cloud_registered')

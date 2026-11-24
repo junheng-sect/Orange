@@ -11,7 +11,7 @@ set -euo pipefail
 # 5. 配置 catkin 参数 (ROS1, Python 3, Release, LIVOX_SDK_ROOT, GTSAM_DIR) 并执行 catkin build
 # ==============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 WS_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ROS_SETUP="/opt/ros/noetic/setup.bash"

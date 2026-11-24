@@ -35,3 +35,6 @@ tools/ego_rviz/maps/
 /src/drivers/livox_ros_driver2/config/MID360s_config.local.json
 /docker/ros-noetic-rviz/local.mac.env
 /docker/ros-noetic-rviz/.image.mac.env
+
+# Browser-visible car rosbridge endpoints for this installation
+/tools/car_web/config.local.js

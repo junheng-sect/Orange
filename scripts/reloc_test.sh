@@ -2,7 +2,7 @@
 # ==============================================================================
 # 重定位实机测试 一键启动：MID-360S 驱动 + FAST-LIO2 + 重力桥（不送飞控）+ drone_relocalization
 #
-# 路径: ~/mid360s_ws/scripts/reloc_test.sh
+# 路径: ./scripts/reloc_test.sh
 # 用法: ./reloc_test.sh [选项]
 #   （默认）室外图 20261105_114605_outdoor + config/outdoor.yaml（起飞圆柱：原点 3 m 内）
 #   --indoor           室内图 20261021_110311_indoor + config/indoor.yaml
@@ -19,7 +19,7 @@
 # ==============================================================================
 set -o pipefail
 
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 WS="$(cd "$DIR/.." && pwd)"
 ROS_SETUP="/opt/ros/noetic/setup.bash"
 WS_SETUP="$WS/devel/setup.bash"
@@ -48,7 +48,7 @@ if [ -z "${TMUX:-}" ] && [ -t 0 ] && command -v tmux >/dev/null 2>&1; then
     exec tmux attach -t reloc
   fi
   _args=(--map "$MAP" --config "$CONFIG"); [ "$DO_RECORD" -eq 1 ] || _args+=(--no-record)
-  exec tmux new-session -s reloc "RELOC_TEST_IN_TMUX=1 $(printf '%q ' "$DIR/$(basename "${BASH_SOURCE[0]}")" "${_args[@]}")"
+  exec tmux new-session -s reloc "RELOC_TEST_IN_TMUX=1 $(printf '%q ' "$(realpath -e -- "${BASH_SOURCE[0]}")" "${_args[@]}")"
 fi
 
 MAP="$(cd "$MAP" 2>/dev/null && pwd)" || { echo "地图目录不存在" >&2; exit 2; }

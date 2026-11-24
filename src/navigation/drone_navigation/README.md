@@ -1,5 +1,7 @@
 # drone_navigation：EGO-Swarm 单机航点导航
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 ROS Noetic / Orange Pi 5 Max。规划坐标为 `drone_odom`，保存航点为 `drone_map`，最终输出转换到 `px4_map`。
 默认只发布 `/drone_nav/setpoint_preview`；不会创建 `/mavros/setpoint_raw/local` 发布者。
 人工起飞、人工切 OFFBOARD；程序不调用解锁、模式、起飞或降落服务。首版不接系留和视觉控制。
@@ -8,13 +10,13 @@ ROS Noetic / Orange Pi 5 Max。规划坐标为 `drone_odom`，保存航点为 `d
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/mid360s_ws
+cd "$ORANGE_ROOT"
 catkin build fast_lio --no-status -j2 -p1
 source devel/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build drone_navigation ego_planner --no-status -j2 -p2
 source devel/setup.bash --extend
-source /home/orangepi/mid360s_ws/scripts/ros_net.sh
+source "$ORANGE_ROOT"/scripts/ros_net.sh
 ```
 
 FAST-LIO 仅增加同源时间戳 `/fastlio/velocity`（camera_init 世界系速度），原滤波器、/Odometry、重力桥和外部视觉定位不变。
@@ -36,7 +38,7 @@ max_vel/max_acc 默认均为三维合量 0.5，主 launch 可显式传入；EGO 
 板端分别开终端（各终端均 source 上述环境）：
 
 ```bash
-cd /home/orangepi/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./fusion.sh --no-winch --no-camera
 # 定位已启动后另一个终端；不再起小车桥：
 roslaunch drone_relocalization relocalize.launch car:=false map_dir:=/实际地图目录
@@ -86,14 +88,14 @@ RViz 单点发到 `/drone_nav/goal`，PoseStamped 的 frame_id 必须为 drone_m
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s ~/orange/src/navigation/drone_navigation/test -p 'test_*.py' -v
+source "$ORANGE_ROOT"/devel/setup.bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s "$ORANGE_ROOT"/src/navigation/drone_navigation/test -p 'test_*.py' -v
 ```
 
 隔离集成测试（脚本自行起停专用 Master 和测试节点，11431 被占用时拒绝运行）：
 
 ```bash
-bash ~/orange/src/navigation/drone_navigation/test/run_isolated.sh
+bash "$ORANGE_ROOT"/src/navigation/drone_navigation/test/run_isolated.sh
 ```
 
 `test/integration.py` 只允许指向隔离 ROS Master（建议11431），由测试包装脚本启动导航后注入合成位姿/点云/FCU状态。
@@ -116,4 +118,4 @@ bash ~/orange/src/navigation/drone_navigation/test/run_isolated.sh
 降落状态额外记录 `land_target_z`（位置字段）、`land_ground_z`、`land_limit_z`、`land_limit_reached`、`land_z_velocity_only`（为true时Z位置字段不参与控制）、`land_command_vz`、`land_disarm_requests`、`land_disarm_result`。状态为 DESCENDING/PRESSING/TOUCHED/DONE/STOPPED；降落及等待上锁时独占设定值。服务ACK不算上锁，仍以新鲜实际FCU状态确认。
 
 末段参考 [land_with_tracking_v2](https://github.com/junheng-sect/ROS2PUBLIC/blob/rasip_pi/src/land_with_tracking_v2/land_with_tracking_v2/land_with_tracking_v2_node.py)，保留本项目原0.1 m/s慢降、XY/yaw保持及故障停止。参考项目的0.35 m/s也是下降速度指令，不是直接最低油门；本项目仅在PX4确认着地后普通上锁，未采用其低高度启发式直接请求上锁。
-独立ROS验证：`bash ~/orange/src/navigation/drone_navigation/test/run_landing_isolated.sh /tmp/landing_check`，只用私有Master与模拟上锁服务，不输出实机设定值。
+独立ROS验证：`bash "$ORANGE_ROOT"/src/navigation/drone_navigation/test/run_landing_isolated.sh /tmp/landing_check`，只用私有Master与模拟上锁服务，不输出实机设定值。

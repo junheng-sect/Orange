@@ -1,9 +1,11 @@
 # 导航实飞测试
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 ## test indoor 1：室内前进 1 m
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test_indoor1.sh --ev-mode odom
 ```
 
@@ -34,11 +36,11 @@ cd ~/mid360s_ws/scripts
 **室内预览沿用实飞包络**，不会套用旧室外预览的小膨胀。
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test_indoor1.sh --preview --ev-mode odom
 
 # 独立 localhost Master + 合成观测，验证 EGO/任务层/执行器/预览网关，不连接常驻 Master
-bash ~/mid360s_ws/scripts/nav_test/tests/run_indoor1_isolated.sh
+bash "$ORANGE_ROOT"/scripts/nav_test/tests/run_indoor1_isolated.sh
 ```
 
 实现验证与实飞验收边界见 `INDOOR1_VALIDATION.md`。以上入口均需先结束其他导航测试。
@@ -46,7 +48,7 @@ bash ~/mid360s_ws/scripts/nav_test/tests/run_indoor1_isolated.sh
 ## test indoor 2：固定机头的 0.5 m 方形
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test_indoor2.sh --ev-mode odom
 ```
 
@@ -70,11 +72,11 @@ cd ~/mid360s_ws/scripts
 预览沿用相同室内包络，仍需手持/模拟状态按目标移动到点：
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test_indoor2.sh --preview --ev-mode odom
 
 # 独立 localhost:11442，合成导航 z=0.50 m，不连接实机 Master 或发送飞控设定值
-bash ~/mid360s_ws/scripts/nav_test/tests/run_indoor2_isolated.sh
+bash "$ORANGE_ROOT"/scripts/nav_test/tests/run_indoor2_isolated.sh
 ```
 
 现场结束时人工切回定点、降落、上锁，再 Ctrl+C。验证记录见 `INDOOR2_VALIDATION.md`。
@@ -82,9 +84,9 @@ bash ~/mid360s_ws/scripts/nav_test/tests/run_indoor2_isolated.sh
 
 ## 室内 test3_1 四点 AprilTag 识别
 
-板端使用本仓库和 `junheng-sect/Orange` 的 `main`，后者提供相机、视觉消息、规划器和仓库监控。两个工作空间按各自说明使用 catkin 构建。
+板端在同一个 Orange 检出中构建相机、视觉消息、定位和规划器。导航入口从该检出加载 `devel/setup.bash`。
 
-从本仓库根目录运行以下命令可复现合成四点测试。脚本使用独立 ROS master 和预览网关，自行生成图像、标签、占据观测及里程计。默认加载 `~/orange/devel/setup.bash`，验证其他检出时可用 `INDOOR_ORANGE_SETUP` 指定已构建的 Orange 环境。
+从本仓库根目录运行以下命令可复现合成四点测试。脚本使用独立 ROS master 和预览网关，自行生成图像、标签、占据观测及里程计。默认加载脚本所在 Orange 检出的 `devel/setup.bash`，验证其他检出时可用 `INDOOR_ORANGE_SETUP` 指定已构建的 Orange 环境。
 
 ```bash
 ./scripts/nav_test/tests/run_indoor3_1_isolated.sh
@@ -96,13 +98,13 @@ bash ~/mid360s_ws/scripts/nav_test/tests/run_indoor2_isolated.sh
 
 ### 同架次双相机 test3_2
 
-在板端运行 `~/mid360s_ws/scripts/nav_test_indoor3_2.sh`，手持预览加 `--preview`。沿用上述四点、原图拍照与每点 2 秒观察窗口。上方 OV13855 用 1280×960、15 Hz 检测，下方 OV9281 用 USB MJPEG 1280×800、30 Hz 和对应内参。两路均检测 tag36h11。
+在板端运行 `"$ORANGE_ROOT"/scripts/nav_test_indoor3_2.sh`，手持预览加 `--preview`。沿用上述四点、原图拍照与每点 2 秒观察窗口。上方 OV13855 用 1280×960、15 Hz 检测，下方 OV9281 用 USB MJPEG 1280×800、30 Hz 和对应内参。两路均检测 tag36h11。
 
 `apriltag_observations.csv` 每行对应一个点位、一台相机和一个 ID。按 `camera`、`waypoint`、`id` 对照，用 `seen_frames / window_frames` 比较各自的命中率。每点各保存一张原始灰度 PNG，包括零命中点。上相机示例为 `01_左下.png`（4224×3136），下相机为 `01_左下_ov9281.png`（1280×800）。以下相机在同窗内最接近上相机图像时间戳的一帧配对。`photo_file` 和 `photo_stamp_ns` 对应本行相机。JSON 的 `legs[].photos` 记录双方的文件、时间戳和坐标系，`photo_delta_ms` 为两个消息时间戳差的绝对值（毫秒）。任务 JSON 的 `legs[].observation.cameras` 也记录零命中点的帧数、ID 和最大帧间隔，`coverage` 给出各自的 0–5 覆盖情况。任何一路在窗口内出现超过 0.5 秒的间隙，都保存窗口统计并沿用任务断流处理。
 
 ### test3_3 · OV13855 锁定 Tag 1 与扫码
 
-板端执行 `~/mid360s_ws/scripts/nav_test_indoor3_3.sh`，手持预览加 `--preview`。人工起飞悬停，将 Tag 1 放入 OV13855 视野后切入 OFFBOARD。五秒搜索期内沿用原低速、多帧位姿及法线一致性检查；锁定后，目标为 OV13855 光心沿 Tag 1 中心外法线向外 0.80 m，地图航向 −89.5°。锁定与控制点换算共用 `ov13855_camera_tf.yaml` 中的平移和旋转。
+板端执行 `"$ORANGE_ROOT"/scripts/nav_test_indoor3_3.sh`，手持预览加 `--preview`。人工起飞悬停，将 Tag 1 放入 OV13855 视野后切入 OFFBOARD。五秒搜索期内沿用原低速、多帧位姿及法线一致性检查；锁定后，目标为 OV13855 光心沿 Tag 1 中心外法线向外 0.80 m，地图航向 −89.5°。锁定与控制点换算共用 `ov13855_camera_tf.yaml` 中的平移和旋转。
 
 稳定到位后只使用随后两秒内的新帧。1280×960 检测给出 Tag 1 位姿，4224×3136 灰度原图配对容差为 10 ms。按货签版式从 Tag 上方裁切 QR，首次读到配置正文（默认 `BOX-01`）立即结束；其他正文继续尝试，超时后悬停。切出 OFFBOARD 取消当前轮，切出后再切入才开始下一轮。
 
@@ -115,7 +117,7 @@ bash ~/mid360s_ws/scripts/nav_test/tests/run_indoor2_isolated.sh
 ## test7：室外全局航点（drone_map 绝对坐标）
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test7.sh
 # 自定义航点（可重复 --point，按给出顺序飞）；--hold 改每点保持秒数
 ./nav_test7.sh --point "0,0,1,0" --point "1.5,0,1.5,90" --hold 5
@@ -149,17 +151,17 @@ cd ~/mid360s_ws/scripts
 预览（导航不发飞控，需手持按目标移动）：
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test7.sh --preview --ev-mode odom
 
 # 离线单测：绝对点、反变换、每点保持、已在点上跳过、拒绝条件（不需要 master/飞控）
-cd ~/mid360s_ws/scripts/nav_test/tests && python3 -m unittest -v test_nav_global
+cd "$ORANGE_ROOT"/scripts/nav_test/tests && python3 -m unittest -v test_nav_global
 ```
 
 ## test8：全局航点 + 段前转向（机头朝前进方向）
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test8.sh
 ./nav_test8.sh --hold 3          # 每个"前进"段到点后再停 3 s 观察
 ```
@@ -189,17 +191,17 @@ cd ~/mid360s_ws/scripts
 
 ```bash
 # 预览（导航不发飞控，手持按目标移动/转向）
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test8.sh --preview --ev-mode odom
 
 # 离线单测：前进/转向展开、航向=前进方向、转向段不保持、共线路线不转向、180° 掉头
-cd ~/mid360s_ws/scripts/nav_test/tests && python3 -m unittest -v test_nav_turn
+cd "$ORANGE_ROOT"/scripts/nav_test/tests && python3 -m unittest -v test_nav_turn
 ```
 
 ## test9：竖直矩形（1 m ↔ 3 m）
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test9.sh                    # 默认路线，每点停 3 s
 ./nav_test9.sh --hold 0           # 到点就飞，不停
 ./nav_test9.sh --point "2,0,1" --point "2,-2,2"   # 自定义（3 个数=只管位置）
@@ -223,11 +225,11 @@ cd ~/mid360s_ws/scripts
 
 ```bash
 # 预览（导航不发飞控，手持按目标移动）
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test9.sh --preview --ev-mode odom
 
 # 离线单测（含"test9 路线需要 z3 配置""省略航向时保持机头"两项）
-cd ~/mid360s_ws/scripts/nav_test/tests && python3 -m unittest -v test_nav_global
+cd "$ORANGE_ROOT"/scripts/nav_test/tests && python3 -m unittest -v test_nav_global
 ```
 
 ## 其他航段测试
@@ -237,7 +239,7 @@ cd ~/mid360s_ws/scripts/nav_test/tests && python3 -m unittest -v test_nav_global
 启动时已经处于 OFFBOARD 不触发；一轮结束后必须切回定点再切 OFFBOARD 才重跑。
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test4.sh --ev-mode odom
 # test4 收尾以后再运行 test5，二者不能同时运行
 ./nav_test5.sh --ev-mode odom
@@ -267,7 +269,7 @@ test4 前需清空整个飞行范围，包括停放车辆。起飞点应靠近�
 预览入口如下（定位和地图仍需实物/模拟输入；脚本不会自动模拟飞机移动）：
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test4.sh --preview --ev-mode odom
 ./nav_test5.sh --preview --ev-mode odom
 ```
@@ -282,8 +284,8 @@ SSH 断开可用 `tmux attach -t nav` 返回；不要在另一终端重复启动
 在板端运行，均使用独立 localhost Master，不连接常驻 Master、不发布真实 MAVROS 设定值：
 
 ```bash
-bash ~/mid360s_ws/scripts/nav_test/tests/run_sequence_isolated.sh
-bash ~/mid360s_ws/scripts/nav_test/tests/run_climb_replay.sh \
+bash "$ORANGE_ROOT"/scripts/nav_test/tests/run_sequence_isolated.sh
+bash "$ORANGE_ROOT"/scripts/nav_test/tests/run_climb_replay.sh \
   ~/test_data/nav_test/20261107_134510_test2/test2_000001.bag \
   ~/test_data/nav45_validation/climb_replay
 ```
@@ -293,8 +295,8 @@ bash ~/mid360s_ws/scripts/nav_test/tests/run_climb_replay.sh \
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/orange/devel/setup.bash
-python3 ~/mid360s_ws/scripts/nav_test/analyze_sequence.py \
+source "$ORANGE_ROOT"/devel/setup.bash
+python3 "$ORANGE_ROOT"/scripts/nav_test/analyze_sequence.py \
   /绝对路径/test4_000001.bag /绝对路径/goal_test4_时间.json --out /绝对路径/analysis
 ```
 
@@ -333,7 +335,7 @@ python3 ~/mid360s_ws/scripts/nav_test/analyze_sequence.py \
 ### 板端命令与现场操作
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test10.sh --dry-run             # 只打印，不初始化 ROS、不启动链路、不写运行记录
 ./nav_test10.sh --delay 3             # 实飞：必须有飞手在场，脚本不自动解锁
 ```
@@ -355,7 +357,7 @@ cd ~/mid360s_ws/scripts
 `~/test_data/nav_test/<时间>_test10/` 中保存 RC bag、`nav_test.log`、`goal_test10_*.json` 和 `flight_test10_*.json`。完整流程记录保存各阶段时间、地图变换、状态、结束原因；goal 的 `legs[].phases` 按实际位置/航向与执行器状态标记 `MOTION / TURN / SETTLING / HOLD`，分析时不要把第 1/3 段整段都算成纯平移或纯 yaw。阶段切分是遥测判别，精确角速度/漂移仍用 bag/ulg 对齐复核。
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test10.sh --preview
 ```
 
@@ -365,9 +367,8 @@ cd ~/mid360s_ws/scripts
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source ~/mid360s_ws/devel/setup.bash
-source ~/orange/devel/setup.bash
-cd ~/mid360s_ws/scripts/nav_test/tests
+source "$ORANGE_ROOT"/devel/setup.bash
+cd "$ORANGE_ROOT"/scripts/nav_test/tests
 PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -p 'test_nav_*.py'
 ./run_outdoor_full_isolated.sh
 ```
@@ -384,7 +385,7 @@ ROS 服务单次等待上限 2 s，并受起飞/航段/降落阶段的剩余时�
 
 后续实飞20261113_164142表明，上一版“位置到地面下10 cm后速度归零并等2 s”仍未得到PX4着地确认。因此旧修复只作为历史验证，不再代表当前末段逻辑。现参考 [land_with_tracking_v2](https://github.com/junheng-sect/ROS2PUBLIC/blob/rasip_pi/src/land_with_tracking_v2/land_with_tracking_v2/land_with_tracking_v2_node.py) 的持续速度下压与普通disarm；本项目仍仅允许在新鲜PX4着地后请求上锁。
 
-真实网关专项隔离验证：`bash ~/orange/src/navigation/drone_navigation/test/run_landing_isolated.sh /tmp/landing_validation`（仅模拟FCU与预览输出）。本次bag固定输入回归工具为同目录 `replay_landing.py`。14:00旧批次缺少原始着地/估计器话题；16:41新批次已具备这些原始输入。当前使用16:41批次的真实着地/估计器/模式/位置记录验证：不误报TOUCHED、不在空中请求上锁，并能进入Z速度下压。固定历史输入不会响应新控制，不能证明实机会落地。当前完整证据见 `~/test_data/nav10_validation/20261113_velocity_press_fix/`；旧版验证留作历史。
+真实网关专项隔离验证：`bash "$ORANGE_ROOT"/src/navigation/drone_navigation/test/run_landing_isolated.sh /tmp/landing_validation`（仅模拟FCU与预览输出）。本次bag固定输入回归工具为同目录 `replay_landing.py`。14:00旧批次缺少原始着地/估计器话题；16:41新批次已具备这些原始输入。当前使用16:41批次的真实着地/估计器/模式/位置记录验证：不误报TOUCHED、不在空中请求上锁，并能进入Z速度下压。固定历史输入不会响应新控制，不能证明实机会落地。当前完整证据见 `~/test_data/nav10_validation/20261113_velocity_press_fix/`；旧版验证留作历史。
 
 ### 新建带图任务的 DLL 旁路
 
@@ -392,11 +393,11 @@ ROS 服务单次等待上限 2 s，并受起飞/航段/降落阶段的剩余时�
 
 用 `--show-dll-config` 可以在启动前核对当前任务的默认策略；命令只打印配置。导航就绪后，任务用本次重定位地图启动 DLL。已知大室外图选用经同源哈希校验的裁图。网页同时保留原导航主位姿与 DLL 对照栏。目录中的 `dll.log`、`dll_observer.json` 和配置副本用于复盘。对照量是同一扫描时刻的 DLL 减 FAST-LIO2，不写入生产 TF。
 
-默认按原有设置录包，并增加两路地图位姿、校正、状态与会话信息。需要雷达原始数据以便重跑或静止检查点 ICP 时，在本次命令末尾加 `--record-raw-lidar`；只用原定位可加 `--no-dll`。通用录包导出：`python3 ~/orange/tools/warehouse_monitor/export_dll_drift.py "$bag" "${bag%.bag}_drift"`（先 source 板端 mid360s_ws 环境）。四点观察的短停可以作同帧差值分析；ICP 工具只为满足其静止时长和几何质量条件的窗口出参考值。
+默认按原有设置录包，并增加两路地图位姿、校正、状态与会话信息。需要雷达原始数据以便重跑或静止检查点 ICP 时，在本次命令末尾加 `--record-raw-lidar`；只用原定位可加 `--no-dll`。通用录包导出：`python3 "$ORANGE_ROOT"/tools/warehouse_monitor/export_dll_drift.py "$bag" "${bag%.bag}_drift"`（先加载板端当前检出的 devel 环境）。四点观察的短停可以作同帧差值分析；ICP 工具只为满足其静止时长和几何质量条件的窗口出参考值。
 
 ## 室内 test5 固定纸面四点扫码
 
-板端运行 `~/mid360s_ws/scripts/nav_test_indoor5.sh`，手持预览加 `--preview`。四个观察点沿用室内 test4，地图航向 −89.5°。货签竖直正放，外法线沿机头反方向。OV13855 在 1280×960 图上检测四角，由同帧机体姿态、相机外参和 43.7 mm 黑框拟合中心位置；扫码时使用固定纸面将 QR 区域投影到全分辨率图。机体控制点的候选高度和运行高度上限均为 1.70 m，光心距纸面中心 0.80 m。
+板端运行 `"$ORANGE_ROOT"/scripts/nav_test_indoor5.sh`，手持预览加 `--preview`。四个观察点沿用室内 test4，地图航向 −89.5°。货签竖直正放，外法线沿机头反方向。OV13855 在 1280×960 图上检测四角，由同帧机体姿态、相机外参和 43.7 mm 黑框拟合中心位置；扫码时使用固定纸面将 QR 区域投影到全分辨率图。机体控制点的候选高度和运行高度上限均为 1.70 m，光心距纸面中心 0.80 m。
 
 test5 的 EGO 三维规划上限为 0.40 m/s、0.40 m/s²，执行器和网关的三维保护上限为 0.50 m/s、0.50 m/s²。
 

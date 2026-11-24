@@ -1,5 +1,7 @@
 # barcode_rc_trigger
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 拨一下遥控器 CH9，读一次码。终端打印一块汇总，结果和 tag 位置记进 CSV，用来测在什么位置能读成功。
 本包只负责触发，真正读码的是 `barcode_reader_camera`（相机）和 `barcode_reader_serial`（串口读码器）。
 
@@ -9,10 +11,10 @@
 
 ```bash
 # 终端 1
-cd /home/orangepi/mid360s_ws/scripts && ./fusion.sh
+cd "$ORANGE_ROOT"/scripts && ./fusion.sh
 # 终端 2
-source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash
-source /home/orangepi/mid360s_ws/scripts/ros_net.sh
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
+source "$ORANGE_ROOT"/scripts/ros_net.sh
 roslaunch barcode_rc_trigger manual_read.launch camera:=true
 ```
 
@@ -159,7 +161,7 @@ roslaunch barcode_rc_trigger barcode_rc_trigger.launch mode:=both
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build barcode_rc_trigger
 catkin run_tests barcode_rc_trigger --no-deps && catkin_test_results build/barcode_rc_trigger
 ```

@@ -1,5 +1,7 @@
 # drone_mapping
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 无人机先验地图建图。实机：拉起 MID-360S 驱动、FAST-LIO2 和重力对齐桥接，录原始包；按 Ctrl+C 结束后，
 离线对原始包跑 **Voxel-SLAM**（带局部 BA、回环和全局 BA），再用它的轨迹把原始点拼成地图（地图系就是建图那次的 `drone_odom`，10-21 改名前叫 `world`）。
 产出放在 `~/test_data/mapping/<时间>[_名字]/`，`map_world.pcd` + `meta.json` 的格式和以前一样，`drone_reloc.py --map` 直接用。
@@ -19,7 +21,7 @@ Voxel-SLAM 不发 `nav_msgs/Odometry`，**飞行定位仍用 FAST-LIO**；实机
 ## 用法
 
 ```bash
-source /opt/ros/noetic/setup.bash && source ~/mid360s_ws/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
 rosrun drone_mapping build_map                      # 实机：等提示「初始化完成」再走，回到起点按 Ctrl+C
 rosrun drone_mapping build_map --name lab           # 输出目录名加后缀
 rosrun drone_mapping build_map --bag RAW.bag        # 用录好的原始包离线重建（map_flight.sh 落地后就是这样调的）
@@ -140,7 +142,7 @@ test/test_mapping.py            单元测试
 ## 测试
 
 ```bash
-cd ~/orange && python3 -B -m unittest discover -s src/localization/drone_mapping/test
+cd "$ORANGE_ROOT" && python3 -B -m unittest discover -s src/localization/drone_mapping/test
 ```
 
 ## 已知限制

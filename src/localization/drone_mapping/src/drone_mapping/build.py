@@ -135,9 +135,10 @@ def ensure_ros_env(entry):
             sys.exit(3)
     ip = core_ip() or '127.0.0.1'
     # source 前先清空位置参数，不然 --help 之类会传给 catkin 的 setup 脚本
-    cmd = ('ARGS=("$@"); set --; source %s && source %s && export BUILD_MAP_ENV=1 ROS_MASTER_URI=http://127.0.0.1:%d ROS_IP=%s '
-           '&& unset ROS_HOSTNAME && exec python3 "$0" "${ARGS[@]}"' % (ROS_SETUP, WS_SETUP, MASTER_PORT, ip))
-    os.execvp('bash', ['bash', '-c', cmd, entry] + sys.argv[1:])
+    cmd = ('ros_setup=$1; ws_setup=$2; shift 2; ARGS=("$@"); set --; '
+           'source "$ros_setup" && source "$ws_setup" && export BUILD_MAP_ENV=1 ROS_MASTER_URI=http://127.0.0.1:%d ROS_IP=%s '
+           '&& unset ROS_HOSTNAME && exec python3 "$0" "${ARGS[@]}"' % (MASTER_PORT, ip))
+    os.execvp('bash', ['bash', '-c', cmd, entry, ROS_SETUP, WS_SETUP] + sys.argv[1:])
 
 
 def write_meta(d, meta):

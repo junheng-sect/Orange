@@ -5,7 +5,7 @@
 # 节点一退 roslaunch 跟着退，由 systemd 重启整个服务。
 # --wait：master 没起来就等，不让 roslaunch 自己另起一个 master（常驻 roscore 会因端口被占起不来）。
 # 开机时和 roscore 同一刻起，ros0 地址可能还没建立：跟 run_roscore.sh 一样先等它，最多 60 s。
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 
 for attempt in $(seq 60); do
   source "$DIR/../ros_net.sh" 2>/dev/null && break

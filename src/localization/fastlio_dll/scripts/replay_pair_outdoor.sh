@@ -9,11 +9,15 @@ fi
 bag=$(realpath -e "$1")
 out=$(realpath -m "$2")
 map=$(realpath -e "${3:-$HOME/test_data/mapping/20261105_114605_outdoor_shared}")
-ywl_ws=${YWL_REPLAY_WS:-$HOME/mid360s_ws-ywl}
-dll_ws=${DLL_REPLAY_WS:-$HOME/test_data/fastlio_dll/20261117/outdoor_ws}
+scripts=$(dirname -- "$(realpath -e -- "$0")")
+source "$scripts/workspace.sh"
+if [[ -z ${YWL_REPLAY_WS:-} || -z ${DLL_REPLAY_WS:-} ]]; then
+  workspace=$(dll_workspace "$scripts")
+fi
+ywl_ws=${YWL_REPLAY_WS:-$workspace}
+dll_ws=${DLL_REPLAY_WS:-$workspace}
 seed_seconds=${PAIR_SEED_SECONDS:-18}
 seed_map=$(realpath -e "${PAIR_SEED_MAP:-$map}")
-scripts=$(cd "$(dirname "$0")" && pwd)
 
 test -s "$ywl_ws/devel/setup.bash"
 test -s "$dll_ws/devel/setup.bash"

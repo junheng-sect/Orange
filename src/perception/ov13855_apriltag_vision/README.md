@@ -1,12 +1,14 @@
 # ov13855_apriltag_vision
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 OV13855 独立 ROS Noetic AprilTag 视觉包。输入图像与 CameraInfo，输出相机坐标系下的标签位姿。
 当前位姿解算直接采用 `Drone-Vision/vision_core/src/vision_detect.cpp` 的默认 OpenCV `solvePnP` 路径，
 不依赖旧视觉包，不再包含从旧视觉包迁入的位姿筛选与确认机制。
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch ov13855_apriltag_vision ov13855_apriltag_vision.launch
 ```
 
@@ -53,7 +55,7 @@ CameraInfo 必须有效，图像尺寸和 frame 必须与其匹配；无目标�
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch front_marker_control ov13855_marker_tracking.launch
 ```
 
@@ -65,13 +67,13 @@ roslaunch front_marker_control ov13855_marker_tracking.launch
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build ov13855_apriltag_vision
 catkin run_tests ov13855_apriltag_vision --no-deps
-source /home/orangepi/orange/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 rostest front_marker_control test_ov13855_input.test
 # 相机空闲时运行；独立 master、仅运行相机与视觉，22 秒后退出。
-python3 ~/orange/src/perception/ov13855_apriltag_vision/test/live_camera_check.py
+python3 "$ORANGE_ROOT"/src/perception/ov13855_apriltag_vision/test/live_camera_check.py
 ```
 
 测试涵盖与 Drone-Vision 原始 solvePnP 调用的数值对照、标签四方向姿态、缩放还原、

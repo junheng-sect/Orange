@@ -210,11 +210,12 @@ class Indoor4Runner(GlobalRunner):
 
     def freeze(self):
         goals = super().freeze()
-        metadata = {}
-        for workspace in (Path(__file__).resolve().parents[2], Path.home() / 'orange'):
-            def git(*args):
-                return subprocess.check_output(['git', '-C', str(workspace), *args], text=True).strip()
-            metadata[workspace.name] = dict(commit=git('rev-parse', 'HEAD'), status=git('status', '--short'))
+        workspace = Path(__file__).resolve().parents[2]
+
+        def git(*args):
+            return subprocess.check_output(['git', '-C', str(workspace), *args], text=True).strip()
+
+        metadata = {workspace.name: dict(commit=git('rev-parse', 'HEAD'), status=git('status', '--short'))}
         self.record.update(
             map_sha256=self.route['map_sha256'], versions=metadata,
             configuration={p.name: dict(sha256=hashlib.sha256(p.read_bytes()).hexdigest(),

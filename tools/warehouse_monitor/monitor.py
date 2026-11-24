@@ -517,7 +517,7 @@ class Monitor:
 
 def start_status_bridge():
     # Reuse the same checks as the Ubuntu status service in this ROS process.
-    source = Path.home() / "mid360s_ws/docker/ros-noetic-rviz/local_view/scripts/drone_status.py"
+    source = Path(__file__).resolve().parents[2] / "docker/ros-noetic-rviz/local_view/scripts/drone_status.py"
     try:
         spec = importlib.util.spec_from_file_location("warehouse_drone_status", source)
         module = importlib.util.module_from_spec(spec)

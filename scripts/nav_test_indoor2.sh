@@ -15,7 +15,7 @@
 # common.sh 使用 TEST_NAME 和 test_arg 设置的 SHIFT。
 # shellcheck disable=SC2034
 TEST_NAME=test_indoor2
-INDOOR_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INDOOR_SCRIPT_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 DEFAULT_MAP="$HOME/test_data/mapping/20261021_110311_indoor"
 DEFAULT_RELOC_CONFIG="$INDOOR_SCRIPT_DIR/../src/localization/drone_relocalization/config/indoor.yaml"
 DEFAULT_MAP_FRAME="$INDOOR_SCRIPT_DIR/../src/localization/car_bridge/config/map_frame.yaml"
@@ -78,5 +78,5 @@ run_test() {
   done
 }
 
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/common.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/common.sh"
 nav_test_main "$@"

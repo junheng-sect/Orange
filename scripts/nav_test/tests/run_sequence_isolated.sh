@@ -2,10 +2,11 @@
 # Private master, synthetic sensors; never starts resident services or FCU output.
 set -eo pipefail
 source /opt/ros/noetic/setup.bash
-source "$HOME/orange/devel/setup.bash"
+workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../.." && pwd -P)"
+source "$workspace/devel/setup.bash"
 export ROS_MASTER_URI=http://127.0.0.1:11439 ROS_IP=127.0.0.1 PYTHONDONTWRITEBYTECODE=1
 unset ROS_HOSTNAME
-T_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+T_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 T_OUT="${1:-$HOME/test_data/nav45_validation/$(date +%Y%m%d_%H%M%S)}"
 mkdir -p "$T_OUT"
 export ROS_LOG_DIR="$T_OUT/roslogs"
@@ -21,7 +22,7 @@ import socket
 with socket.socket() as s:
     if s.connect_ex(('127.0.0.1',11439))==0:raise SystemExit('private master port 11439 already in use')
 PY
-python3 - "$T_OUT/config.yaml" "$HOME/mid360s_ws/scripts/nav_test/outdoor_nav_long.yaml" <<'PY'
+python3 - "$T_OUT/config.yaml" "$workspace/scripts/nav_test/outdoor_nav_long.yaml" <<'PY'
 import sys,yaml
 c=yaml.safe_load(open(sys.argv[2]))
 c['config']['map_id']='synthetic'

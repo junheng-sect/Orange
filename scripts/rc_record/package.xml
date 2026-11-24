@@ -6,7 +6,7 @@
   可执行文件。roslaunch 要求 <node> 的 pkg 能被 rospack 找到、type 是包目录里的可
   执行文件，这两条它都满足（type 就是同目录的 start_rc_record.sh）。
 
-  代价是启动前必须把 ~/mid360s_ws/scripts 加进 ROS_PACKAGE_PATH：
+  代价是启动前必须把 ./scripts 加进 ROS_PACKAGE_PATH：
   scripts/fusion.sh 已经做了；手动 roslaunch scripts/launch/fusion_aux.launch（或合集 fusion.launch）时要自己
   export，否则会报 "cannot find package rc_record"。
 -->

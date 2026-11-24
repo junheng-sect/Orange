@@ -31,4 +31,4 @@ install(PROGRAMS scripts/replay.sh scripts/record_observation.sh
   scripts/record_outdoor_rc.py scripts/replay_aba.sh scripts/analyze_aba.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 install(FILES LICENSE DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
-install(FILES scripts/aba_reference.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(FILES scripts/workspace.sh scripts/aba_reference.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

@@ -51,5 +51,4 @@ PYTHON
 主机仅挂载只读地图、X11和独立的结果/布局目录。关闭窗口时一起结束本容器内节点。
 当前结果记录在 `results/latest.json` 和 `results/path.csv`。
 
-源码保存在板端 `/home/orangepi/orange/tools/ego_map_demo`，本机安装在
-`~/.local/share/ego-swarm-map-demo`，不构建或修改本机独立 ROS 仓库。
+Ubuntu 的 `ego-map-demo` 指向本仓库的 `tools/ego_map_demo/scripts/run.sh`。布局和结果保存在 `${XDG_DATA_HOME:-$HOME/.local/share}/ego-swarm-map-demo`；默认地图为同一数据目录中 `ego-swarm-rviz/maps/current/map_world.pcd`。通过 `EGO_RVIZ_SHARED` 可覆盖共享 RViz 脚本目录。

@@ -1,5 +1,7 @@
 # 室内 test2 验证记录（2026-11-08）
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 ## 行为与边界
 
 新增 `nav_test_indoor2.sh`：人工定点起飞悬停，新的 OFFBOARD 边沿触发，保持 3 s 后冻结本轮起点、
@@ -42,7 +44,7 @@ candidate 记录保留，不作为最终通过证据。
 每轮现场记录位于 `~/test_data/nav_test/<时间>_test_indoor2/`，可用既有 `analyze_sequence.py` 分析四段和保持。
 
 ```bash
-cd ~/mid360s_ws/scripts
+cd "$ORANGE_ROOT"/scripts
 ./nav_test_indoor2.sh --ev-mode odom
 # 只预览的独立运行：增加 --preview
 ```

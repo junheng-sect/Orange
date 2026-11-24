@@ -1,4 +1,4 @@
-# 原样复制自 mid360s_ws/scripts/rc_record/sequence_allocator.py（飞行录包同一份逻辑）；改动请两边同步。
+# 原样复制自 scripts/rc_record/sequence_allocator.py（飞行录包同一份逻辑）；改动请两边同步。
 """六位序号 bag 路径分配（崩溃安全）。
 
 参照板端 orange 工作空间 vz_step_control/scripts/sequence_allocator.py 的语义：

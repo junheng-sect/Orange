@@ -35,7 +35,15 @@
 - 实机 EGO 位于 `src/navigation/ego_swarm/`。离线固定版与实机版的维护边界见 [地图演示说明](tools/ego_map_demo/README.md#源码与构建边界)。
 - `tools/`：`warehouse_monitor`（仓库巡检网页监控）、`car_web`（车/无人机网页面板）、`ego_rviz`、`ego_map_demo`、`seeker-boot-*`、`front_marker_jitter_analysis.py`、`capture_front_marker_jitter.sh`。
 
-## MID-360S 本机配置
+## 入口与本机配置
+
+- 板端使用单一检出。导航和采集入口从自身所在的 Orange 加载 `devel/setup.bash`。移动板端检出后，请从新位置重跑 `scripts/resident/install.sh`。可先运行 `scripts/resident/install.sh --render /tmp/orange-units` 检查生成的两份 systemd 单元。
+- 仓库监控通过 SSH 别名 `orange` 连接。不同主机或远端检出路径可在本机 `.env` 设置 `ORANGE_SSH_HOST`、`ORANGE_REMOTE_ROOT`。远端根目录按远端用户解释。
+- 独立安装 `seeker-boot-start` 时可建立指向 `tools/` 下脚本的符号链接。复制脚本时，用 `SEEKER_TOOLS` 指向包含生成器与 YAML 的工具目录。
+- 小车网页通过相邻的私有 `tools/car_web/config.local.js` 读取多个 rosbridge 端点，例如 `window.CAR_ROSBRIDGE_URLS = ["ws://car-a.local:9090", "ws://car-b.local:9090"];`。这些地址对访问页面的浏览器可见。可用 `?ws=` 单次覆盖，未配置时使用 `ws://spirit.local:9090`。此方式也适用于直接打开 HTML。
+- Ubuntu 的快捷入口链接到当前检出，EGO 继续使用对应的 `ego-swarm-rviz` 和 `ego-swarm-map-demo` 用户数据目录。地图和布局位置见 [EGO RViz](tools/ego_rviz/README.md) 和 [离线地图演示](tools/ego_map_demo/README.md)。
+
+### MID-360S
 
 - 将 `src/drivers/livox_ros_driver2/config/MID360s_config.json` 复制为同目录下的 `MID360s_config.local.json`，填写主机网口和雷达 IPv4 地址。驱动与预检默认使用这份私有配置，也可通过 `MID360S_LIVOX_CONFIG` 指定配置文件的绝对路径。
 - 板端用 `ORANGE_ROS_MASTER_IP` 核对 `ros0` 的固定地址。该值取自环境变量或工作空间根目录的私有 `.env`。车端 rosbridge 默认使用 `spirit.local:9090`，可通过环境变量 `CAR_HOST` 设置车端主机。

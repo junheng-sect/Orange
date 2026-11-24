@@ -1,5 +1,7 @@
 # camera_calibration_pkg
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 OV13855 单目内参标定（ROS Noetic）。由本机 ROS2 版 `~/project/pi_ws/src/camera_calibration_pkg` 改写：
 相机换成 `ov13855_cam`，标定用官方 `camera_calibration/cameracalibrator.py`，经 `auto_save_calibrator.py` 包装：
 CALIBRATE 完成后自动打印重投影误差并保存，结果先另存，人工确认后再替换。
@@ -14,8 +16,8 @@ CALIBRATE 完成后自动打印重投影误差并保存，结果先另存，人�
 生成其它规格（自动选 A4/A3；打印选 100% / 实际大小，打印后用尺复核边长并以实测值作为 `square`）：
 
 ```bash
-source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash
-cd ~/orange/src/experiments/camera_calibration_pkg/board
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
+cd "$ORANGE_ROOT"/src/experiments/camera_calibration_pkg/board
 rosrun camera_calibration_pkg generate_checkerboard.py --cols 7 --rows 5 --square 0.041
 ```
 
@@ -25,7 +27,7 @@ rosrun camera_calibration_pkg generate_checkerboard.py --cols 7 --rows 5 --squar
 （只有 ssh 时先 `export DISPLAY=:0`，窗口出现在板端桌面，NoMachine 里可见）：
 
 ```bash
-source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch camera_calibration_pkg ov13855_calibration.launch size:=7x5 square:=0.041
 ```
 
@@ -55,7 +57,7 @@ launch 只起被标定那一路的相机节点（`ov13855_full_cam` / `ov13855_c
 官方工具不能剔除坏样本（例如个别角点误检），对已保存的 tar 重算：
 
 ```bash
-source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
 rosrun camera_calibration_pkg recalibrate.py --size 7x5 --square 0.0397 --max-image-error 1.0
 ```
 
@@ -72,7 +74,7 @@ launch 已默认 `-k 3`（官方默认只估 k1、k2，本镜头画面边缘误�
 确认无误后手动替换并重启相机节点：
 
 ```bash
-cp ~/.ros/camera_info/ov13855_4224x3136_<时间戳>_k3.yaml ~/orange/src/drivers/ov13855_cam/config/ov13855_4224x3136.yaml
+cp ~/.ros/camera_info/ov13855_4224x3136_<时间戳>_k3.yaml "$ORANGE_ROOT"/src/drivers/ov13855_cam/config/ov13855_4224x3136.yaml
 ```
 
 非 4:3 输出（如 16:9）时 ISP 横纵缩放倍数不同，fx 与 fy 本就不相等，因此不加 `--fix-aspect-ratio`。
@@ -92,7 +94,7 @@ rosrun camera_calibration_pkg save_calibration.py --size 7x5 --square 0.041
 主点按像素中心 (c+0.5)·s−0.5，畸变系数不变。替换 4224x3136 标定后，同步换算自通路 1280x960：
 
 ```bash
-cd ~/orange/src/drivers/ov13855_cam/config
+cd "$ORANGE_ROOT"/src/drivers/ov13855_cam/config
 rosrun camera_calibration_pkg scale_calibration.py ov13855_4224x3136.yaml --width 1280 --height 960 \
   --camera-name ov13855_1280x960 --out ov13855_1280x960.yaml
 ```
@@ -104,6 +106,6 @@ rosrun camera_calibration_pkg scale_calibration.py ov13855_4224x3136.yaml --widt
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build camera_calibration_pkg && catkin run_tests camera_calibration_pkg --no-deps
 ```

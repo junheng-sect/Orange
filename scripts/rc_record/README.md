@@ -1,7 +1,9 @@
 # RC 开关触发录包（rc_record）
 
-> 位置：`~/mid360s_ws/scripts/rc_record/`（属于 mid360s_ws 仓库）。
-> 融合快速启动：`cd ~/mid360s_ws/scripts && ./fusion.sh`
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
+> 位置：`"$ORANGE_ROOT"/scripts/rc_record/`（属于 Orange 仓库）。
+> 融合快速启动：`cd "$ORANGE_ROOT"/scripts && ./fusion.sh`
 > —— 本录包节点在附属组 `launch/fusion_aux.launch` 里（节点退出自动重启，不连带定位核心），
 > 用 `RC_BAG_PREFIX`/`RC_BAG_DIR` 把包名前缀（默认 `noprop`）与输出目录传进来。
 > 逐项体检入口：`./start_handheld_test.sh`（会 ping 雷达、核对飞控参数、测频）。
@@ -64,7 +66,7 @@ rostopic echo /mavros/rc/in    # 看 channels[5]（通道 6）在两个位置各
 ## 用法
 
 ```bash
-cd ~/mid360s_ws/scripts/rc_record
+cd "$ORANGE_ROOT"/scripts/rc_record
 
 # 1) 先有 ROS Master：由一键脚本拉起 MAVROS（或手动 roslaunch mavros px4.launch）
 # 2) 前台启动录包节点
@@ -74,9 +76,9 @@ cd ~/mid360s_ws/scripts/rc_record
 RC_BAG_PREFIX=handheld RC_BAG_DIR=~/test_data/bags ./start_rc_record.sh
 
 # 一体化（推荐）：MAVROS + 雷达/FAST-LIO + 本节点一起起，默认前缀 noprop
-cd ~/mid360s_ws/scripts && ./fusion.sh
+cd "$ORANGE_ROOT"/scripts && ./fusion.sh
 # 逐项体检版（ping 雷达 / 核对飞控参数 / 测频 / 等 EKF）：
-cd ~/mid360s_ws/scripts && ./start_handheld_test.sh
+cd "$ORANGE_ROOT"/scripts && ./start_handheld_test.sh
 ```
 
 状态话题（便于在另一个终端观察）：
@@ -102,7 +104,7 @@ rostopic echo /rc_record/bag_path    # latched："OPEN <path>" / "CLOSED <path>"
 | `rc_warn_timeout_s` | `5.0` | 多久收不到 RC 就告警 |
 | `stop_on_rc_loss` | `false` | false: 丢遥控也不截断正在录的包 |
 | `bag_directory` / `bag_prefix` | `~/test_data/bags` / `handheld` | 输出位置与包名前缀 |
-| `record_raw_cloud` | `false` | true 额外录 `/livox/lidar`（约 +5 MB/s，需先 source mid360s_ws/devel） |
+| `record_raw_cloud` | `false` | true 额外录 `/livox/lidar`（约 +5 MB/s，需先 source devel） |
 | `record_registered_cloud` | `false` | true 额外录 `/cloud_registered`（约 +3 MB/s）；可用 `RC_RECORD_REGISTERED_CLOUD=true` 覆盖 |
 | `status_rate` | `2.0` | `/rc_record/status` 频率 |
 | `topics` | 见 yaml | 录制话题；类型必须在节点的登记表里，否则启动时跳过并报错 |
@@ -135,8 +137,7 @@ rostopic echo /rc_record/bag_path    # latched："OPEN <path>" / "CLOSED <path>"
 `tether_winch_control/WinchStatus`。包含档位、距离、径向速度、目标DUTY、
 最近发送DUTY/时间和通信错误；这些是控制/发送状态，不是电机实际反馈。
 
-`start_rc_record.sh` 会在 MID360S 环境后追加加载
-`~/orange/devel/setup.bash --extend`，保留 Livox 消息环境。
+`start_rc_record.sh` 从自身所在工作空间加载一次 `devel/setup.bash`，其中包含 Livox 和绕线器消息。
 需要板端已经构建 `tether_winch_control` 消息；缺失时会明确告警并跳过此话题。
 录制器可先启动，绕线器状态发布者稍后出现时也能订阅；只有录包期间收到的消息会写入bag。
 配置修改后需重启录制器生效，不影响原来的RC触发规则，不启动绕线器节点。

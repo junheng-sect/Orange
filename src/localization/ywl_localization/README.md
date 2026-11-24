@@ -1,26 +1,22 @@
 # YWL fixed-map localization
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 ROS1 Noetic sidecar for MID360S raw `livox_ros_driver2/CustomMsg` and `sensor_msgs/Imu`.
 See [UPSTREAM.md](UPSTREAM.md) for source provenance. Baseline development starts at
 `52c8665b76a3580fcb2f8aea7ea7c385dc7b55c8`.
 
 ## Build on Orange Pi
 
-Use an independent catkin checkout and the board's existing Livox SDK2 installation:
+Run from the Orange checkout:
 
 ```bash
-source /opt/ros/noetic/setup.bash
-catkin_make --cmake-only -DROS_EDITION=ROS1 -DCMAKE_BUILD_TYPE=Release \
-  -DLIVOX_SDK_ROOT="$HOME/mid360s_ws/.deps/livox-sdk2" \
-  '-DCATKIN_WHITELIST_PACKAGES=livox_ros_driver2;fast_lio;fastlio_gravity_bridge;drone_mapping;drone_relocalization;ywl_localization'
-cmake --build build --target fast_lio_generate_messages_cpp livox_ros_driver2_generate_messages_cpp livox_ros_driver2_generate_messages_py -j2
-cmake --build build --target fastlio_mapping gravity_bridge_node ywl_localization_node -j2
+scripts/build.sh
 source devel/setup.bash
 python3 "$(rospack find ywl_localization)/test/test_init_adapter.py"
 ```
 
-The explicit first build step creates the message headers the baseline FAST-LIO target includes. Tested
-with Ubuntu 20.04 ARM64, GCC 9, ROS Noetic, PCL 1.10.0, Eigen 3.3.7 and OpenSSL 1.1.1f.
+The original independent checkout generated the FAST-LIO and Livox message headers before compiling the FAST-LIO, gravity bridge and YWL nodes. That baseline was tested on Ubuntu 20.04 ARM64 with GCC 9, ROS Noetic, PCL 1.10.0, Eigen 3.3.7 and OpenSSL 1.1.1f.
 
 ## Topics and handoff
 
@@ -55,7 +51,7 @@ The fixed tree receives no additions or deletions. Take velocity from the separa
 
 ## Outdoor test12 manual flight
 
-On the board, run `~/mid360s_ws/scripts/nav_test12.sh --ywl` or select **test12 · YWL**
+On the board, run `"$ORANGE_ROOT"/scripts/nav_test12.sh --ywl` or select **test12 · YWL**
 under the outdoor map in the warehouse monitor. Keep the aircraft still at the takeoff point
 until YWL reports TRACKING. Flip Channel 6 to record, confirm recording, and leave 20 seconds of
 stationary data before the pilot takes off. Once grounded and disarmed, flip Channel 6 back and

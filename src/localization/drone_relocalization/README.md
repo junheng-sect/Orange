@@ -1,5 +1,7 @@
 # drone_relocalization
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 一次性自动重定位：室内小图（默认 `config/indoor.yaml`），以及室外大图在固定起飞区内启动（`config/outdoor.yaml`，11-05 加，见「室外大图」）。
 复用已运行的 MID-360S、FAST-LIO 和重力桥，在未知起始位置/朝向下匹配先验地图。
 两个独立静止窗口确认后固定 `drone_map ← drone_odom`，后续只传播里程计，**不做持续地图校正、不向 PX4/MAVROS 发送位姿或控制指令**。
@@ -14,20 +16,20 @@
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd ~/mid360s_ws && catkin build drone_relocalization
-source ~/mid360s_ws/devel/setup.bash
+cd "$ORANGE_ROOT" && catkin build drone_relocalization
+source "$ORANGE_ROOT"/devel/setup.bash
 ```
 
 未来手持实机测试时，先在一个终端启动现有传感器链路（本命令不启动 MAVROS）：
 
 ```bash
-~/mid360s_ws/scripts/start_mid360s_fastlio.sh
+"$ORANGE_ROOT"/scripts/start_mid360s_fastlio.sh
 ```
 
 另一个板端终端执行，设备保持静止直至 `/drone_reloc/status` 为 `LOCALIZED`、`valid=true`：
 
 ```bash
-source ~/mid360s_ws/scripts/ros_net.sh && source /opt/ros/noetic/setup.bash && source ~/mid360s_ws/devel/setup.bash
+source "$ORANGE_ROOT"/scripts/ros_net.sh && source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch drone_relocalization relocalize.launch map_dir:=$HOME/test_data/mapping/20261021_110311_indoor
 ```
 
@@ -42,7 +44,7 @@ launch 起重定位节点，默认带上 `car_bridge`（`car:=false` 关闭）�
 
 ## RViz 对照显示（本机）
 
-本机（mid360s_ws 仓库根目录）：
+本机（Orange 仓库根目录）：
 
 ```bash
 ./scripts/run_rviz.sh --reloc
@@ -69,7 +71,7 @@ launch 起重定位节点，默认带上 `car_bridge`（`car:=false` 关闭）�
 rosrun drone_relocalization relocalize --map ~/test_data/mapping/20261021_110311_indoor
 ```
 
-旧的 `python3 ~/mid360s_ws/scripts/drone_reloc.py ...` 转发到新入口。没 source 时入口会补 ROS/工作空间环境，并原样保留参数及 ROS 网络设置。
+旧的 `python3 "$ORANGE_ROOT"/scripts/drone_reloc.py ...` 转发到新入口。没 source 时入口会补 ROS/工作空间环境，并原样保留参数及 ROS 网络设置。
 
 ## 一次性定位流程
 
@@ -127,7 +129,7 @@ rosrun drone_relocalization relocalize --map ~/test_data/mapping/20261021_110311
 **出门前先在板端离线跑一次把缓存建好**（在线 60 s 预算包含载入时间）：
 
 ```bash
-source /opt/ros/noetic/setup.bash && source ~/mid360s_ws/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
 M=~/test_data/mapping/20261105_114605_outdoor
 rosrun drone_relocalization relocalize --map $M --config $(rospack find drone_relocalization)/config/outdoor.yaml --bag $M/raw.bag --at 1 --save ""
 ```
@@ -135,7 +137,7 @@ rosrun drone_relocalization relocalize --map $M --config $(rospack find drone_re
 实机测试用一键脚本（开机后一条命令，默认就是这张室外图和 `outdoor.yaml`）：
 
 ```bash
-~/mid360s_ws/scripts/reloc_test.sh
+"$ORANGE_ROOT"/scripts/reloc_test.sh
 ```
 
 脚本依次做这几件事：
@@ -187,7 +189,7 @@ JSON v2 中 `transform.translation` 为 xyz，`transform.q_xyzw` 为四元数，
 离线读取实际外参，对逐点时间插值去畸变；不会把多个扫描直接堆在一个时刻。
 
 ```bash
-source /opt/ros/noetic/setup.bash && source ~/mid360s_ws/devel/setup.bash
+source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash
 rosrun drone_relocalization relocalize --map ~/test_data/mapping/20261021_110311_indoor --bag ~/test_data/mapping/20261021_110311_indoor/raw.bag --at 1
 rosrun drone_relocalization relocalize --map ~/test_data/mapping/20261021_110311_indoor --bag ~/test_data/mapping/20261021_110311_indoor/raw.bag --eval --step 3 --out /tmp/reloc_eval.json
 rosrun drone_relocalization relocalize --map ~/test_data/mapping/20261021_110311_indoor --bag ~/test_data/mapping/20261021_110311_indoor/raw.bag --startup-eval --at 1 --out /tmp/reloc_startup.json
@@ -209,11 +211,11 @@ rosrun drone_relocalization relocalize --map ~/test_data/mapping/20261021_110311
 ## 软件验收
 
 ```bash
-python3 -B -m unittest discover -s ~/orange/src/localization/drone_relocalization/test -v
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B ~/orange/src/localization/drone_relocalization/test/regression.py
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B ~/orange/src/localization/drone_relocalization/test/acceptance.py --out ~/test_data/reloc_acceptance/20261020/acceptance.json
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B ~/orange/src/localization/drone_relocalization/test/ros_replay.py
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B ~/orange/src/localization/drone_relocalization/test/bench_map.py
+python3 -B -m unittest discover -s "$ORANGE_ROOT"/src/localization/drone_relocalization/test -v
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B "$ORANGE_ROOT"/src/localization/drone_relocalization/test/regression.py
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B "$ORANGE_ROOT"/src/localization/drone_relocalization/test/acceptance.py --out ~/test_data/reloc_acceptance/20261020/acceptance.json
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B "$ORANGE_ROOT"/src/localization/drone_relocalization/test/ros_replay.py
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 python3 -B "$ORANGE_ROOT"/src/localization/drone_relocalization/test/bench_map.py
 ```
 
 最后一项自行创建 `127.0.0.1:11531` 独立master，已占用就退出；只发布历史点云构成的模拟静止流及测试TF/里程计，

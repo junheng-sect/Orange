@@ -2,7 +2,7 @@
 # ==============================================================================
 # 导航实飞 test3：切 OFFBOARD 原地悬停 3 s 后自动降落，直到落地上锁
 #
-# 路径: ~/mid360s_ws/scripts/nav_test3.sh
+# 路径: ./scripts/nav_test3.sh
 # 用法: ./nav_test3.sh [--hover 3] [公共选项]
 #   --hover S          切进 OFFBOARD 后原地悬停多少秒再降落（默认 3）
 #
@@ -59,5 +59,5 @@ run_test() {
 for _a in "$@"; do
   [ "$_a" = --preview ] && { echo "test3 不支持 --preview：只预览时网关不发飞控，切不进 OFFBOARD，没法测降落" >&2; exit 2; }
 done
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/common.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/common.sh"
 nav_test_main "$@"

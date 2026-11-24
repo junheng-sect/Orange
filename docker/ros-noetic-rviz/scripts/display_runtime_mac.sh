@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mac-only launch contract for mid360s_ws and Orange EGO (Bash 3.2).
+# Mac-only launch contract for Orange RViz and EGO (Bash 3.2).
 # Callers set image/name/home, command and extra_mounts, then call run_display.
 require_value() { [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 缺少参数"; }
 validate_web_port() {

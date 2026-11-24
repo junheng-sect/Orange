@@ -5,7 +5,7 @@
     /mavros/timesync_status；包在 bag_dir/bag_prefix_000001.bag。
     录包期间把飞控 IMU（HIGHRES_IMU）临时请求到 imu_raw_rate（实测约 190 Hz），关包后恢复默认。
 
-      cd ~/mid360s_ws && source devel/setup.bash
+      从 Orange 根目录执行：source devel/setup.bash
       roslaunch mid360s_calib calib_record.launch              （可加 fastlio:=true）
 
     不要和 scripts/fusion.sh、start_handheld_test.sh 同时运行：同一个 ROS Master 上

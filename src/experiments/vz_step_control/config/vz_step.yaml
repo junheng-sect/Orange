@@ -64,7 +64,7 @@ status_topic: /vz_step/status
 
 # ---- 记录器（vz_step_bag_recorder） ----
 # rosbag 输出根目录
-bag_directory: /home/vslam/bags
+bag_directory: ~/bags
 # bag 路径发布话题（String，latched）
 bag_path_topic: /vz_step/bag_path
 # 记录器健康话题（记录器与控制器共同使用）

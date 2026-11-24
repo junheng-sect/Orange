@@ -6,5 +6,5 @@
 # --preview 只启动预览链路，需手持或模拟走完航点，不发飞控设定值。
 # ==============================================================================
 TEST_NAME=test_indoor4
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/indoor_label_scan.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/indoor_label_scan.sh"
 nav_test_main "$@"

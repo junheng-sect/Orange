@@ -1,5 +1,7 @@
 # orange_visualization
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 Orange Pi 无人机的 TF 与 RViz 可视化包（包名 10-21 由旧 SEEKER 板沿用的 `seeker_visualization` 改来）。
 该包不会修改 MAVROS 参数。RViz 看的是这条 TF 链，机体那一段有两种来源，由 `publish_mavros_tf` 选：
 
@@ -16,7 +18,7 @@ px4_map    ->        drone_base -> usb_camera_optical_frame -> front_marker   # 
   MAVROS Odometry。节点严格校验 `frame_id=px4_map`、`child_frame_id=drone_base`、
   时间戳、数值有限性和单位四元数，只有合法消息才会广播，不提供零位姿兜底；
   MAVROS 未连接或数据非法时，该 TF 边不存在。
-  帧名要求 MAVROS 经 mid360s_ws 的 `scripts/launch/mavros.launch` 启动（10-21 起是 `px4_map` / `drone_base`）；
+  帧名要求 MAVROS 经 Orange 的 `scripts/launch/mavros.launch` 启动（10-21 起是 `px4_map` / `drone_base`）；
   直接 `roslaunch mavros px4.launch` 时消息里还是 `map` / `base_link`，会被拒收。
   只在没跑 FAST-LIO 时打开：重力桥也发 `body -> drone_base`，两边同时发会让 `drone_base` 有两个父帧。
 - `drone_base -> usb_camera_optical_frame`：由 `front_marker_control` 的
@@ -37,7 +39,7 @@ Marker 不再由静态 TF 预设在固定系中，而是由上述 TF 链实时�
 
 ```bash
 source /opt/ros/noetic/setup.bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 source devel/setup.bash
 roslaunch orange_visualization front_marker_rviz.launch
 ```

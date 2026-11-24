@@ -9,7 +9,7 @@ service calls (100 Hz on entry, 30/10 Hz restored after COMPLETE while the
 vehicle is still holding in OFFBOARD).
 
 Run with a sourced devel workspace:
-    cd /home/vslam/seeker
+    cd "$(git rev-parse --show-toplevel)"
     source /opt/ros/noetic/setup.bash && source devel/setup.bash
     python3 src/experiments/vz_step_control/test/integration_vz_wire.py
 Exit code 0 = all assertions passed.

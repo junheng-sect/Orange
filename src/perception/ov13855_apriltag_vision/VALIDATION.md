@@ -1,5 +1,7 @@
 # 直接采用 Drone-Vision solvePnP 的验证记录（2026-09-22）
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 ## 查阅归档
 
 原始数据位于 KIOXIA 的 `Log analysis/log/orange/ov13855_apriltag_vision_validation_20260922/`。下文的数据文件名均相对于该归档目录。也可浏览[保护标签中的原始快照](https://github.com/junheng-sect/Orange/tree/pre-merge-20261124/src/ov13855_apriltag_vision/validation)。
@@ -77,8 +79,8 @@ status 消息会对完全相同的文本限频，因此其条数不能作为识�
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
-python3 ~/orange/src/perception/ov13855_apriltag_vision/test/benchmark_performance.py
+source "$ORANGE_ROOT"/devel/setup.bash
+python3 "$ORANGE_ROOT"/src/perception/ov13855_apriltag_vision/test/benchmark_performance.py
 ```
 
 测试脚本不启动控制节点，最后恢复原相机配置并释放设备；统计脚本test/report_performance.py接收结果目录参数，需要NumPy和Matplotlib。正式相机和视觉配置未修改。

@@ -1,5 +1,7 @@
 # barcode_reader_camera
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 相机读码：用 AprilTag 位姿框出标签区域，在 OV13855 全分辨率（4224×3136）图像上解 QR / DataMatrix / Code128。
 全分辨率图只在读码时订阅（相机主通路 `/ov13855_full/image_raw`），tag 位姿来自自通路 1280×960，见 `ov13855_cam` README。
 提供 `~decode` 服务，平时由 `barcode_rc_trigger`（拨 CH9 手动读）或 `barcode_arrival_trigger`（到位自动读）调用。
@@ -7,7 +9,7 @@ ROS 接口全集、读码流程、与 Drone-Vision 原实现的差异见 [DETAIL
 
 ## 快速开始
 
-先 `source /opt/ros/noetic/setup.bash && source /home/orangepi/orange/devel/setup.bash`。
+先 `source /opt/ros/noetic/setup.bash && source "$ORANGE_ROOT"/devel/setup.bash`。
 
 | 场景 | 命令 |
 | --- | --- |
@@ -151,7 +153,7 @@ rosrun barcode_reader_camera decode_image 图片.jpg --annotate /tmp/out.jpg
 ## 构建和测试
 
 ```bash
-cd /home/orangepi/orange
+cd "$ORANGE_ROOT"
 catkin build barcode_reader_camera
 catkin run_tests barcode_reader_camera --no-deps && catkin_test_results build/barcode_reader_camera
 ```

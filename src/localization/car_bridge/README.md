@@ -1,5 +1,7 @@
 # car_bridge
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 把 M65 小车的位姿接进板端 TF 树。只读车端 rosbridge（`${CAR_HOST}:9090`），**不给车发任何指令**。
 板端只做这一件事；二维车图、标签这类显示都在本地 docker RViz（`docker/ros-noetic-rviz`，`run_rviz.sh --reloc`）。
 
@@ -51,5 +53,5 @@ roslaunch drone_relocalization relocalize.launch map_dir:=$HOME/test_data/mappin
 ## 测试
 
 ```bash
-python3 -B -m unittest discover -s ~/orange/src/localization/car_bridge/test -v
+python3 -B -m unittest discover -s "$ORANGE_ROOT"/src/localization/car_bridge/test -v
 ```

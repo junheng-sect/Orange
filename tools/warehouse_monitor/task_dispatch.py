@@ -8,10 +8,12 @@ import subprocess
 from threading import Event, Lock, Thread
 import time
 
+from board_connection import DEFAULT_ROOT, in_checkout
+
 REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 TTL = 15 * 60
 TERMINAL = {"done", "failed", "cancelled", "expired"}
-REMOTE = "/home/orangepi/orange/tools/warehouse_monitor/board_tasks.py"
+REMOTE = "tools/warehouse_monitor/board_tasks.py"
 
 
 class TaskConflict(ValueError):
@@ -32,7 +34,8 @@ def task_for(data, task_id, map_key):
 
 
 class Dispatch:
-    def __init__(self, data, cache, host, ssh, stopped):
+    def __init__(self, data, cache, host, ssh, stopped, remote_root=DEFAULT_ROOT):
+        self.remote_root = remote_root
         self.data = data
         self.cache = cache
         self.host = host
@@ -48,7 +51,7 @@ class Dispatch:
 
     def remote(self, verb, body):
         command = shlex.join(["python3", "-B", REMOTE, verb, json.dumps(body, separators=(",", ":"))])
-        result = subprocess.run([*self.ssh, "-T", self.host, command], stdout=subprocess.PIPE,
+        result = subprocess.run([*self.ssh, "-T", self.host, in_checkout(self.remote_root, command)], stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, timeout=8, check=False)
         if result.returncode == 255:
             raise OSError("Orange Pi 尚未连接")

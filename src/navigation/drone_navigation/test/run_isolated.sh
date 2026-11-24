@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
+workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../../.." && pwd -P)"
+source "$workspace/devel/setup.bash"
 set -u
 export ROS_MASTER_URI=http://127.0.0.1:11431
 export ROS_IP=127.0.0.1

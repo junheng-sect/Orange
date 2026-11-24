@@ -7,6 +7,7 @@ stdout 逐行输出 KEY=value，由 wrapper export 后传给 roslaunch 的 $(opt
 wrapper 随之退出，服务启动失败——避免带错配置半启动。
 """
 
+from pathlib import Path
 import sys
 
 import yaml
@@ -26,7 +27,7 @@ FLAGS = {
 
 
 def main():
-    path = sys.argv[1] if len(sys.argv) > 1 else '/home/vslam/seeker/tools/seeker_boot.yaml'
+    path = sys.argv[1] if len(sys.argv) > 1 else Path(__file__).resolve().with_name('seeker_boot.yaml')
     try:
         with open(path) as handle:
             data = yaml.safe_load(handle)

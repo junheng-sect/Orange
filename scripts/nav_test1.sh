@@ -2,7 +2,7 @@
 # ==============================================================================
 # 导航实飞 test1：前进 1 m，保持高度和航向（EGO 第一次实飞；和前视对准的梯形速度对比用）
 #
-# 路径: ~/mid360s_ws/scripts/nav_test1.sh
+# 路径: ./scripts/nav_test1.sh
 # 用法: ./nav_test1.sh [--dist 1.0] [--delay 3] [公共选项]
 #   --dist M           每次沿机头水平方向飞多少米（默认 1.0）
 #   --delay S          切进 OFFBOARD 后原地保持多少秒再自动出发（默认 3）
@@ -65,5 +65,5 @@ run_test() {
   done
 }
 
-source "$(dirname "${BASH_SOURCE[0]}")/nav_test/common.sh"
+source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/common.sh"
 nav_test_main "$@"

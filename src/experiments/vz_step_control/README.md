@@ -1,5 +1,7 @@
 # vz_step_control
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 Z 轴硬阶跃响应测试。节点在 OFFBOARD 下保持锁存的 XY 位置和 yaw，只向 Z 注入
 可配置幅值与时长的速度阶跃，阶跃之间用完整位置定点（含有限 Z 目标）衔接。
 
@@ -26,7 +28,7 @@ PX4 内部 `trajectory_setpoint.position[2]` 仅在速度段为空，位置段�
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/vslam/seeker/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch vz_step_control vz_step_control.launch
 ```
 
@@ -47,7 +49,7 @@ rostopic echo /vz_step/status
 rostopic echo -n 1 /vz_step/bag_path
 ```
 
-默认保存目录为 `/home/vslam/bags`，文件名 `vz_step_000001.bag` 递增；序号由
+默认保存目录为 `~/bags`，文件名 `vz_step_000001.bag` 递增；序号由
 `.vz_step_sequence`（flock 并发保护）与已有 `.bag/.bag.active` 共同决定，
 绝不覆盖。完成或 ABORT 后 bag 再记录 1 s 尾段后关闭。
 
@@ -148,7 +150,7 @@ mode != OFFBOARD”的状态，才允许下一次 OFFBOARD 上升沿开包。若
 ## 构建和测试
 
 ```bash
-cd /home/vslam/seeker
+cd "$ORANGE_ROOT"
 catkin build vz_step_control --no-deps
 catkin run_tests vz_step_control --no-deps
 catkin_test_results build/vz_step_control

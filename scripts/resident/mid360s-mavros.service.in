@@ -2,7 +2,7 @@
 # PartOf：roscore 重启（手动或崩溃后 systemd 自动重启）时 MAVROS 跟着重启，重新注册到新 master；手动停 roscore
 # 时 MAVROS 也停。不用 BindsTo：roscore 崩溃那一刻它会先把 MAVROS 停掉，roscore 自动重启时只重启还在跑的
 # 依赖，MAVROS 就再也起不来了（10-30 实测）。
-# 源文件在 mid360s_ws/scripts/resident/，改完重跑 install.sh 才会生效。
+# 源文件在 scripts/resident/，改完重跑 install.sh 才会生效。
 [Unit]
 Description=mid360s resident MAVROS (/dev/ttyS3)
 Requires=mid360s-roscore.service
@@ -14,8 +14,8 @@ Type=simple
 User=orangepi
 Group=orangepi
 SupplementaryGroups=dialout
-WorkingDirectory=~
-ExecStart=/bin/bash ./mid360s_ws/scripts/resident/run_mavros.sh
+WorkingDirectory=@WORKSPACE@
+ExecStart=/bin/bash ./scripts/resident/run_mavros.sh
 KillSignal=SIGINT
 TimeoutStopSec=20
 Restart=always

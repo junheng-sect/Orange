@@ -2,7 +2,7 @@
   <!--
     手动调试用的合集：一条 roslaunch 起 定位核心 + 录包 / 绕线器。MAVROS 和 roscore 是开机常驻的
     systemd 服务（scripts/resident/），这里不再 include mavros.launch，否则会和常驻 MAVROS 抢串口。
-    实机请用入口脚本 ~/mid360s_ws/scripts/fusion.sh：它把这两组分成单独的 roslaunch，
+    实机请用入口脚本 ./scripts/fusion.sh：它把这两组分成单独的 roslaunch，
     冻结板端时钟，核心（fusion_core.launch）带 required 整组进退，附属节点退出不连带核心，并盯着常驻
     MAVROS 有没有重启。本文件里没有 required，任一节点退出不会停掉其余节点，也不冻结时钟。
     手动启动的完整命令见 fusion.sh 头部注释（关键是先 source scripts/ros_net.sh，再把 scripts 加进

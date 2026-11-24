@@ -11,7 +11,7 @@
 # C++ 仍有网络/缓冲/磁盘开销，改录包方式不代表此前飞行异常已经解决。
 # --no-build 只录包；其余三个开关传给 fusion。原始包在 ~/test_data/mapping。
 set -o pipefail
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 WS="$(cd "$DIR/.." && pwd)"
 BUILD_MAP="$WS/src/localization/drone_mapping/scripts/build_map"   # = rosrun drone_mapping build_map
 BAG_DIR="$HOME/test_data/mapping"

@@ -1,5 +1,7 @@
 # ov9281_usb_cam
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 SEEKER 上 OV9281 的 ROS Noetic MJPEG 相机层。包负责固定 UVC 设备、图像发布和
 CameraInfo，不包含 Marker 检测或运动控制。
 
@@ -13,7 +15,7 @@ launch。
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch ov9281_usb_cam ov9281.launch
 ```
 

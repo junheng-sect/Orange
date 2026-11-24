@@ -2,13 +2,14 @@
 # Indoor4: private localhost master, synthetic camera/flight, no resident services or FCU output.
 set -eo pipefail
 source /opt/ros/noetic/setup.bash
-source "$HOME/orange/devel/setup.bash"
+workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../.." && pwd -P)"
+source "$workspace/devel/setup.bash"
 variant=4
 port=11446
 if [[ ${1:-} == --indoor5 ]]; then variant=5; port=11447; shift; fi
 export ROS_MASTER_URI=http://127.0.0.1:$port ROS_IP=127.0.0.1 PYTHONDONTWRITEBYTECODE=1
 unset ROS_HOSTNAME
-INDOOR_TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INDOOR_TEST_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 INDOOR_EVIDENCE="${1:-$HOME/test_data/nav_indoor${variant}_validation/$(date +%Y%m%d_%H%M%S)}"
 mkdir -p "$INDOOR_EVIDENCE"
 export ROS_LOG_DIR="$INDOOR_EVIDENCE/roslogs"

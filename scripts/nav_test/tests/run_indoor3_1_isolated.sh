@@ -2,10 +2,11 @@
 # Indoor3_1: private localhost master, synthetic z=0.5m, no resident services or FCU output.
 set -eo pipefail
 source /opt/ros/noetic/setup.bash
-source "${INDOOR_ORANGE_SETUP:-$HOME/orange/devel/setup.bash}"
+workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../.." && pwd -P)"
+source "${INDOOR_ORANGE_SETUP:-$workspace/devel/setup.bash}"
 export ROS_MASTER_URI=http://127.0.0.1:11447 ROS_IP=127.0.0.1 PYTHONDONTWRITEBYTECODE=1
 unset ROS_HOSTNAME
-INDOOR_TEST_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+INDOOR_TEST_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 INDOOR_EVIDENCE="${1:-$HOME/test_data/nav_indoor3_1_validation/$(date +%Y%m%d_%H%M%S)}"
 mkdir -p "$INDOOR_EVIDENCE"
 [ ! -e "$INDOOR_EVIDENCE/synthetic.bag" ] || { echo "evidence already exists"; exit 1; }

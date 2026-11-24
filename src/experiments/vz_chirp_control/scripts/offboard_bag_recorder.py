@@ -43,10 +43,8 @@ class OffboardBagRecorder:
         self._bag_path = ''
         self._session = RecorderSession()
 
-        self._output_directory = os.path.abspath(
-            rospy.get_param('~bag_directory',
-                            '/home/vslam/seeker/logs/vz_chirp')
-        )
+        bag_directory = rospy.get_param('~bag_directory', '~/test_data/bags/vz_chirp')
+        self._output_directory = os.path.abspath(os.path.expanduser(bag_directory))
         self._state_topic = rospy.get_param('~state_topic', '/mavros/state')
         self._topics = [
             (

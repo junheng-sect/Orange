@@ -1,5 +1,7 @@
 # front_marker_control
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 ROS Noetic 前视 Marker 运动控制包。唯一视觉输入是标准
 `geometry_msgs/PoseStamped` `/front_marker/pose`；节点不依赖视觉包的自定义消息、OpenCV
 或 CameraInfo。
@@ -205,7 +207,7 @@ v0 约定：起飞前机头正对第一面货架摆放，此时 local yaw 约为
 隔离验证（不会连接默认 ROS master）：
 
 ```bash
-cd /home/vslam/seeker
+cd "$ORANGE_ROOT"
 source /opt/ros/noetic/setup.bash
 export ROS_MASTER_URI=http://127.0.0.1:11389 ROS_IP=127.0.0.1
 export ROS_HOME=/tmp/fmc-yaw-ros-test
@@ -224,7 +226,7 @@ catkin_test_results build/front_marker_control/test_results
 
 ```bash
 source /opt/ros/noetic/setup.bash
-source /home/orangepi/orange/devel/setup.bash
+source "$ORANGE_ROOT"/devel/setup.bash
 roslaunch front_marker_control ov13855_marker_tracking.launch
 ```
 

@@ -2,8 +2,8 @@
 """定位核心数据连续性监控：只读消息头、不解析点云，进程活着不代表定位有效，这里盯数据本身。
 
 fusion.sh 在 roscore 起来后自动拉起，事件和汇总进 fusion 日志，逐秒明细写 CSV；也可以单独跑：
-  source ~/mid360s_ws/scripts/ros_net.sh && source /opt/ros/noetic/setup.bash
-  python3 ~/mid360s_ws/scripts/core_watch.py [--csv 文件] [--summary-sec 60] [--ev-mode pose|odom]
+  source ./scripts/ros_net.sh && source /opt/ros/noetic/setup.bash
+  python3 ./scripts/core_watch.py [--csv 文件] [--summary-sec 60] [--ev-mode pose|odom]
 
 - 每个话题：频率、相邻两帧接收最大间隔、消息时间戳是否倒退、时间戳落后接收时刻多少（lag）。
   话题流起来以后断流超过阈值报 STALE，恢复报 RESUMED；从没来过的只在汇总里列出（雷达没上电、

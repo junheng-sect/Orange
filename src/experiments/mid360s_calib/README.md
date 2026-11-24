@@ -1,12 +1,14 @@
 # mid360s_calib
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 MID-360S 与飞控外参标定（iKalibr）的数据采集包：遥控器通道 6 触发录**标定专用** bag。
 平时飞行仍用 `scripts/fusion.sh` + `scripts/rc_record`，不受本包影响。
 
 ## 用法
 
 ```bash
-cd ~/mid360s_ws && source devel/setup.bash
+cd "$ORANGE_ROOT" && source devel/setup.bash
 roslaunch mid360s_calib calib_record.launch
 ```
 
@@ -65,7 +67,7 @@ PX4 默认只以 50 Hz 发 HIGHRES_IMU。节点在**开包后**调用 `/mavros/s
 ## 测试
 
 ```bash
-cd ~/mid360s_ws
+cd "$ORANGE_ROOT"
 catkin build mid360s_calib --catkin-make-args run_tests && catkin_test_results build/mid360s_calib
 src/experiments/mid360s_calib/test/calib_record_e2e.sh      # 隔离 Master + 假数据端到端（端口默认 11379）
 ```

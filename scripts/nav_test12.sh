@@ -262,17 +262,16 @@ bringup12() {
   ok "$ready。拨 Channel 6 开包，保持静止录够 20 秒，再按原流程手飞"
   if (( USE_DLL )); then
     log 'DLL 正在建立距离场，旁路差值就绪后自动显示'
-    # Load the optional overlay and fingerprint its inputs in its own child.
+    # The child inherits the task workspace; record the exact DLL inputs.
     start_child "$PF_DLL" "$OUT/dll.log" bash -c '
       set -e
-      source "$1" --extend
       pkg=$(rospack find fastlio_dll)
       config="$pkg/config/outdoor_large_field.yaml"
-      sha256sum "$2/map_world.pcd" "$2/meta.json" "$2/manifest.json" "$config" >> "$4/map.sha256"
-      cp -- "$config" "$4/dll_config.yaml"
-      cp -- "$2/manifest.json" "$4/dll_map_manifest.json"
-      exec roslaunch fastlio_dll observe.launch "map_dir:=$2" "legacy_map_dir:=$3" "config:=$config"
-    ' _ "$ORANGE_SETUP" "$DLL_MAP" "$MAP" "$OUT"
+      sha256sum "$1/map_world.pcd" "$1/meta.json" "$1/manifest.json" "$config" >> "$3/map.sha256"
+      cp -- "$config" "$3/dll_config.yaml"
+      cp -- "$1/manifest.json" "$3/dll_map_manifest.json"
+      exec roslaunch fastlio_dll observe.launch "map_dir:=$1" "legacy_map_dir:=$2" "config:=$config"
+    ' _ "$DLL_MAP" "$MAP" "$OUT"
     setsid tail -n +1 -F --pid="$$" "$OUT/dll.log" &
     tail_pids+=("$!")
   fi
