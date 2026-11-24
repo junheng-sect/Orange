@@ -1,28 +1,27 @@
-# Local backups may contain credentials.
-.local-backups/
-.vscode/
-.codex/
-.agents/
-# Agent instructions are per machine, never shared through the repo.
-AGENTS.md
-OrangePi_5_Max_RK3588_用户手册_v1.3.pdf
-logs/
+# Catkin workspace build products and logs
 .catkin_tools/
-.zcode/
-cam_test/
-.pclog/
-.backup_velpos_20260908/
-build/
-devel/
-.pi/
-.nomachine-dl/
-.commandcode/
+/build/
+/devel/
+/install/
+/logs/
 
-# Python bytecode caches, regenerated on every run.
+# Python bytecode
 __pycache__/
 *.pyc
 
-# Private EGO RViz layouts and local map caches.
+# Machine-specific instructions, configuration and backups
+# Note: remove AGENTS.md here in step 4 once the sanitized shared AGENTS.md is tracked.
+AGENTS.md
+AGENTS.local.md
+.env
+.env.local
+.local-backups/
+*.bak
+*.bak-*
+*.codex-backup-*
+
+# Local pclog and EGO RViz data
+.pclog/
 tools/ego_rviz/home/
 tools/ego_rviz/runtime/
 tools/ego_rviz/maps/
