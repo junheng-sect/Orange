@@ -5,4 +5,5 @@
   <buildtool_depend>catkin</buildtool_depend>
   <depend>roscpp</depend><depend>sensor_msgs</depend><depend>std_msgs</depend><depend>boost</depend>
   <depend>libavcodec-dev</depend><depend>libavformat-dev</depend><depend>libavutil-dev</depend>
+  <test_depend>ffmpeg</test_depend>
 </package>

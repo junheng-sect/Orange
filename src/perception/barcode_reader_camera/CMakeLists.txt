@@ -10,12 +10,11 @@ endif()
 find_package(catkin REQUIRED COMPONENTS
   cv_bridge geometry_msgs message_generation ov13855_apriltag_vision roscpp roslib sensor_msgs std_msgs std_srvs)
 find_package(OpenCV REQUIRED COMPONENTS core calib3d imgproc imgcodecs)
-find_package(ZXing REQUIRED)  # /usr/local/lib/cmake/ZXing, ZXing-C++ 3.0 (read-only build)
+find_package(ZXing 3.0 REQUIRED CONFIG)
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(YAML_CPP REQUIRED yaml-cpp)
-find_path(APRILTAG_INCLUDE_DIR apriltag.h PATH_SUFFIXES apriltag)
-find_library(APRILTAG_LIBRARY apriltag)
+find_package(apriltag 3.4.5 REQUIRED CONFIG)
 
 add_message_files(FILES Barcode.msg BarcodeArray.msg BarcodeFrame.msg)
 add_service_files(FILES DecodeBarcodes.srv)
@@ -26,8 +25,7 @@ catkin_package(
   LIBRARIES barcode_reader_camera_decoder
   CATKIN_DEPENDS cv_bridge geometry_msgs message_runtime roscpp sensor_msgs std_msgs std_srvs)
 
-include_directories(include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS}
-  ${APRILTAG_INCLUDE_DIR})
+include_directories(include ${catkin_INCLUDE_DIRS} ${OpenCV_INCLUDE_DIRS} ${YAML_CPP_INCLUDE_DIRS})
 
 # ROS-free decoder core; ZXing stays private to it.
 add_library(barcode_reader_camera_decoder src/multi_decoder.cpp src/config_yaml.cpp src/frame_recorder.cpp)
@@ -44,7 +42,7 @@ set_target_properties(orange_qr PROPERTIES PREFIX "" LIBRARY_OUTPUT_DIRECTORY
 install(TARGETS orange_qr LIBRARY DESTINATION ${CATKIN_GLOBAL_PYTHON_DESTINATION})
 
 add_executable(decode_image src/decode_image_main.cpp)
-target_link_libraries(decode_image barcode_reader_camera_decoder ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
+target_link_libraries(decode_image apriltag::apriltag barcode_reader_camera_decoder ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
 
 add_executable(barcode_reader_camera_node src/barcode_reader_camera_node.cpp)
 add_dependencies(barcode_reader_camera_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
@@ -69,13 +67,13 @@ if(CATKIN_ENABLE_TESTING)
   endif()
   if(TARGET test_multi_decoder)
     target_link_libraries(test_multi_decoder barcode_reader_camera_decoder ${catkin_LIBRARIES}
-      ${APRILTAG_LIBRARY})
+      apriltag::apriltag)
   endif()
   add_rostest_gtest(test_barcode_reader_camera_node test/node.test test/test_node.cpp)
   if(TARGET test_barcode_reader_camera_node)
     add_dependencies(test_barcode_reader_camera_node barcode_reader_camera_node
       ${${PROJECT_NAME}_EXPORTED_TARGETS})
     target_link_libraries(test_barcode_reader_camera_node ${catkin_LIBRARIES} ${OpenCV_LIBRARIES}
-      ${YAML_CPP_LIBRARIES} ${APRILTAG_LIBRARY})
+      ${YAML_CPP_LIBRARIES} apriltag::apriltag)
   endif()
 endif()

@@ -2,9 +2,11 @@
 """Indoor 0.5 m fixed-heading square with independent 2 s holds."""
 import json
 import math
+import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import patch
@@ -231,7 +233,11 @@ PY
 }
 builtin source "$0" "$@"
 '''
-        value=json.loads(subprocess.check_output(['bash','-c',probe,str(script),'--preview'],text=True))
+        with tempfile.TemporaryDirectory() as home:
+            (Path(home) / 'test_data/mapping/20261021_110311_indoor').mkdir(parents=True)
+            value = json.loads(subprocess.check_output(
+                ['bash', '-c', probe, str(script), '--preview'], text=True,
+                env=dict(os.environ, HOME=home)))
         self.assertEqual(value[0], 'test_indoor2')
         self.assertTrue(value[1].endswith('/mapping/20261021_110311_indoor'))
         self.assertTrue(value[2].endswith('/config/indoor.yaml'))

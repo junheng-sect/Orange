@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 #include <opencv2/core.hpp>
-#include <apriltag.h>
+#include <apriltag/apriltag.h>
 namespace ov13855_apriltag_vision {
 struct TagDetection {
   int id;

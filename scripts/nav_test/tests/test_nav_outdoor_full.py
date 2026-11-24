@@ -734,6 +734,7 @@ class FullTests(unittest.TestCase):
         wanted = []
         with patch.object(nav, 'say') as say_mock, \
                 patch.object(nav, 'arguments', return_value=args), \
+                patch.object(rospy, 'init_node'), \
                 patch.object(rospy, 'wait_for_service',
                              side_effect=lambda name, timeout=None: wanted.append(name)), \
                 patch.object(rospy, 'has_param', return_value=True), \

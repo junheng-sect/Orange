@@ -128,10 +128,10 @@ class DriftTests(unittest.TestCase):
     def test_manual_readiness(self):
         p=Progress();p.manual_ready=True;p.recording='待录包'
         health=dict(ground=True,armed=False,landed=1,ready=True,observer_tracking=False,observer_note='等待 DLL 状态')
-        self.assertEqual(p.stage(dict(manual=True),health,False)[0],'wait_pilot')
-        self.assertEqual(p.stage(dict(manual=True,observer='ywl'),health,False)[0],'preparing')
+        self.assertEqual(p.stage(dict(id='test12', manual=True),health,False)[0],'wait_pilot')
+        self.assertEqual(p.stage(dict(id='test12_ywl', manual=True,observer='ywl'),health,False)[0],'preparing')
         health['ready']=False
-        self.assertEqual(p.stage(dict(manual=True),health,False)[0],'preparing')
+        self.assertEqual(p.stage(dict(id='test12', manual=True),health,False)[0],'preparing')
 
 
 if __name__ == '__main__':

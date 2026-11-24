@@ -2,8 +2,10 @@
 """Indoor single-leg semantics using the existing fake clock/action harness."""
 import json
 import math
+import os
 from pathlib import Path
 import sys
+import tempfile
 import subprocess
 import unittest
 from types import SimpleNamespace as NS
@@ -219,8 +221,15 @@ PY
 }
 builtin source "$0" "$@"
 '''
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        for map_name in ('20261021_110311_indoor', '20261105_114605_outdoor'):
+            (Path(home.name) / 'test_data/mapping' / map_name).mkdir(parents=True)
+
         def run(script, *args):
-            return json.loads(subprocess.check_output(['bash', '-c', probe, str(scripts/script), *args], text=True))
+            return json.loads(subprocess.check_output(
+                ['bash', '-c', probe, str(scripts/script), *args], text=True,
+                env=dict(os.environ, HOME=home.name)))
         indoor = run('nav_test_indoor1.sh', '--preview')
         self.assertTrue(indoor[0].endswith('/mapping/20261021_110311_indoor'))
         self.assertTrue(indoor[1].endswith('/config/indoor.yaml'))

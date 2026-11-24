@@ -29,7 +29,7 @@
 
 在 Noetic 工作空间根目录，将所需包及上述带标记依赖的 `CATKIN_IGNORE` 临时改名为 `CATKIN_IGNORE.off`，运行 `scripts/build.sh <ROS包名>`。实验结束后将标记改回原名，使下次包发现恢复默认范围。该标记控制源码发现，已有 devel 产物可能仍存在。
 
-- `scripts/build.sh` 在 Noetic 环境下构建 `third_party/Livox-SDK2` 与 `third_party/gtsam-4.0.3`，安装到工作空间的 `.deps/`，再执行 `catkin build`。
+- `scripts/build.sh` 在 Noetic 环境下构建 `third_party/Livox-SDK2` 与 `third_party/gtsam-4.0.3`，安装到工作空间的 `.deps/`，再执行 `catkin build`。 Ubuntu 上的依赖镜像与干净编译、单测命令见 [Noetic 构建验收](docker/noetic-build/README.md)。
 - `scripts/` 包含归档配对、常驻服务、室内外导航与离线测试入口。
 - `docker/ros-noetic-rviz/` 提供 Ubuntu 和 macOS 的 RViz 镜像及启动器，网络设置见各平台的 `local*.env.example`。
 - 实机 EGO 位于 `src/navigation/ego_swarm/`。离线固定版与实机版的维护边界见 [地图演示说明](tools/ego_map_demo/README.md#源码与构建边界)。

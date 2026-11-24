@@ -46,6 +46,6 @@
   <test_depend>rostest</test_depend>
   <test_depend>tf2_msgs</test_depend>
 
-  <depend>libapriltag-dev</depend>
+  <depend version_gte="3.4.5">apriltag</depend>
   <export/>
 </package>
