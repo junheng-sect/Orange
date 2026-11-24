@@ -3,7 +3,12 @@
 import os,time,json,signal,subprocess,socket,copy,statistics,csv,sys
 from pathlib import Path
 import yaml,numpy as np
-ROOT=Path('/home/orangepi/orange'); OUT=Path(sys.argv[1]) if len(sys.argv)>1 else ROOT/'src/ov13855_apriltag_vision/validation'/time.strftime('performance_%Y%m%d_%H%M%S');OUT.mkdir(parents=True,exist_ok=False)
+ROOT = Path('/home/orangepi/orange')
+if len(sys.argv) > 1:
+    OUT = Path(sys.argv[1]).expanduser().resolve()
+else:
+    OUT = Path.home() / 'test_data' / 'ov13855_apriltag_vision' / time.strftime('performance_%Y%m%d_%H%M%S')
+OUT.mkdir(parents=True, exist_ok=False)
 PORT=11456
 s=socket.socket();s.bind(('127.0.0.1',PORT));s.close()
 if subprocess.run(['fuser','/dev/video11'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0: raise RuntimeError('Camera occupied')

@@ -1,5 +1,11 @@
 # 直接采用 Drone-Vision solvePnP 的验证记录（2026-09-22）
 
+## 查阅归档
+
+原始数据位于 KIOXIA 的 `Log analysis/log/orange/ov13855_apriltag_vision_validation_20260922/`。下文的数据文件名均相对于该归档目录。也可浏览[保护标签中的原始快照](https://github.com/junheng-sect/Orange/tree/pre-merge-20261124/src/ov13855_apriltag_vision/validation)。
+
+归档根目录的 `SHA256SUMS` 包含 285 个文件，其清单文件自身的 SHA-256 为 `aec46442638b1d015c818950876555a7e52e9a659d4a0723ceafe797ca151024`。进入归档目录后，在 macOS 运行 `shasum -a 256 -c SHA256SUMS`，在 Ubuntu 运行 `sha256sum -c SHA256SUMS`，即可逐项复核。
+
 ## 当前实现
 
 位姿路径改为参考项目 `Drone-Vision/vision_core/src/vision_detect.cpp` 的默认
@@ -49,8 +55,7 @@
 status 消息会对完全相同的文本限频，因此其条数不能作为识别或位姿条数；
 本次位姿和矩阵订阅均统计到 169 条 ID 0 输出。
 
-原始数据：`validation/direct_solvepnp_results.json`；
-标注画面：`validation/direct_solvepnp_detected.jpg`。
+原始数据见 `direct_solvepnp_results.json`，标注画面见 `direct_solvepnp_detected.jpg`。
 
 ## 验证边界
 
@@ -62,13 +67,13 @@ status 消息会对完全相同的文本限频，因此其条数不能作为识�
 帧间隔可能超过该阈值；此次仅替换求解流程，没有调整该控制行为。
 
 切换前的测试、约 14 px 重投影拒绝及原始采样数据保留在
-`validation/previous_pipeline_validation.md` 及同目录历史文件中。
+`previous_pipeline_validation.md` 及同目录历史文件中。
 
 ## 分辨率性能测试（2026-09-22）
 
-已完成7档分辨率×15/30 fps×仅相机/相机加检测的28组实测，另有2组前后基线。详见[性能报告](validation/performance_20260922_run2/REPORT.md)、[汇总CSV](validation/performance_20260922_run2/summary.csv)和[对比图](validation/performance_20260922_run2/comparison.png)。原始数据、每秒CPU/温度/频率和启动日志保留在同目录；首次监测API错误导致的失败尝试不纳入统计。
+已完成7档分辨率×15/30 fps×仅相机/相机加检测的28组实测，另有2组前后基线。[性能报告、汇总 CSV 和对比图](https://github.com/junheng-sect/Orange/tree/pre-merge-20261124/src/ov13855_apriltag_vision/validation/performance_20260922_run2) 在归档中分别为 `performance_20260922_run2/` 下的 `REPORT.md`、`summary.csv` 和 `comparison.png`。原始数据、每秒CPU/温度/频率和启动日志保留在同目录；首次监测API错误导致的失败尝试不纳入统计。
 
-重新测试（在板端执行，确保相机空闲并保持标签和场景不动，输出自动使用新时间目录）：
+在板端重新测试时，确保相机空闲并保持标签和场景不动。脚本默认新建 `~/test_data/ov13855_apriltag_vision/performance_YYYYMMDD_HHMMSS/` 保存结果，也可用第一个位置参数指定一个尚不存在的输出目录。
 
 ```bash
 source /opt/ros/noetic/setup.bash
