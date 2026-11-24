@@ -19,6 +19,7 @@
 - 远端：`https://github.com/junheng-sect/Orange.git`，默认分支 `main`。
 - 在 `main` 上拉取更新优先使用 `git pull --rebase origin main`；新功能或结构性重构从最新 `main` 切出独立分支，验证后再合并回 `main`。
 - 提交前检查 `git status` 与 `git diff`；涉及实机行为的改动以板端跑通为准再合并。
+- Commit 信息采用 Conventional Commits 英文 `type` + 简体中文说明：`<type>(<scope>): <中文说明>`（`scope` 可省略，代码名/包名/参数名保留英文），常用 `type` 为 `feat`、`fix`、`docs`、`chore`、`refactor`、`perf`、`test`。
 - 严禁向 `AGENTS.md`、`.env.example` 或任何入库文件写入明文密码、私有局域网 IP、MAC 地址或单机个人绝对路径；严禁使用 `git add -f` 提交 `AGENTS.local.md`、`.env` 等已忽略文件。
 
 ## 实验主库与跨会话交接
