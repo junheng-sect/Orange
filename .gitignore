@@ -10,8 +10,6 @@ __pycache__/
 *.pyc
 
 # Machine-specific instructions, configuration and backups
-# Note: remove AGENTS.md here in step 4 once the sanitized shared AGENTS.md is tracked.
-AGENTS.md
 AGENTS.local.md
 .env
 .env.local
@@ -20,8 +18,7 @@ AGENTS.local.md
 *.bak-*
 *.codex-backup-*
 
-# Local pclog and EGO RViz data
-.pclog/
+# Local EGO RViz data
 tools/ego_rviz/home/
 tools/ego_rviz/runtime/
 tools/ego_rviz/maps/
