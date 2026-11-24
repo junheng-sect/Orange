@@ -5,14 +5,23 @@
 
 ## 多端角色与平台分工
 
-- **板端（Orange Pi 5 Max）**：RK3588，Ubuntu 20.04.6 LTS，ROS Noetic（`desktop-full`）+ `catkin-tools`（`catkin build` 可用，ROS 位于 `/opt/ros/noetic`），工作空间 `/home/orangepi/orange`。板端是唯一的实机算法编译、录包、建图与实机定位/飞行验证端；ROS 核心固定在 dummy 网卡 `ros0`（`10.250.32.1/32`）。
+- **板端（Orange Pi 5 Max）**：RK3588，Ubuntu 20.04.6 LTS，ROS Noetic（`desktop-full`）+ `catkin-tools`（`catkin build` 可用，ROS 位于 `/opt/ros/noetic`），工作空间 `~/orange`。板端是唯一的实机算法编译、录包、建图与实机定位/飞行验证端；ROS 核心固定在 dummy 网卡 `ros0`。
 - **Ubuntu 开发机**：用于底层 RViz 调试（`tools/ego_rviz`、`tools/ego_map_demo`）及原生 ROS 编译/测试。
 - **macOS 开发机**：用于代码编辑、Git 协作、离线分析与 `tools/warehouse_monitor` 网页监控（通过 SSH 隧道连接板端，无需配置 ROS 主机路由）。
 
 ## 仓库结构
 
-- `src/`：18 个一级目录（共 23 个 ROS 包）——`drone_navigation`、`ego_swarm`（含 `bspline_opt`、`path_searching`、`plan_env`、`plan_manage`、`quadrotor_msgs`、`traj_utils` 6 个子包）、`fastlio_dll`、`dual_camera_recorder`、`front_marker_control`、`front_marker_vision`、`ov13855_cam`、`ov13855_apriltag_vision`、`ov9281_usb_cam`、`camera_calibration_pkg`、`tether_winch_control`、`vz_chirp_control`、`vz_step_control`、`orange_visualization`、`barcode_*` 四件套（`barcode_arrival_trigger`、`barcode_rc_trigger`、`barcode_reader_camera`、`barcode_reader_serial`）。
+- `src/`：28 个一级目录，共 33 个 ROS 包。原有 23 个包包括`drone_navigation`、`ego_swarm`（含 `bspline_opt`、`path_searching`、`plan_env`、`ego_planner`（目录 `plan_manage`）、`quadrotor_msgs`、`traj_utils` 6 个子包）、`fastlio_dll`、`dual_camera_recorder`、`front_marker_control`、`front_marker_vision`、`ov13855_cam`、`ov13855_apriltag_vision`、`ov9281_usb_cam`、`camera_calibration_pkg`、`tether_winch_control`、`vz_chirp_control`、`vz_step_control`、`orange_visualization`、`barcode_*` 四件套（`barcode_arrival_trigger`、`barcode_rc_trigger`、`barcode_reader_camera`、`barcode_reader_serial`）。
+- MID-360S 的 10 个包位于同一 `src/` 下，包括 `fast_lio`（目录 `FAST_LIO`）、`lidar_imu_init`（目录 `LiDAR_IMU_Init`）、`car_bridge`、`drone_mapping`、`drone_relocalization`、`fastlio_gravity_bridge`、`livox_ros_driver2`、`mid360s_calib`、`voxel_slam` 和 `ywl_localization`。
+- `scripts/build.sh` 在 Noetic 环境下构建 `third_party/Livox-SDK2` 与 `third_party/gtsam-4.0.3`，安装到工作空间的 `.deps/`，再执行 `catkin build`。
+- `scripts/` 包含归档配对、常驻服务、室内外导航与离线测试入口。
+- `docker/ros-noetic-rviz/` 提供 Ubuntu 和 macOS 的 RViz 镜像及启动器，网络设置见各平台的 `local*.env.example`。
 - `tools/`：`warehouse_monitor`（仓库巡检网页监控）、`car_web`（车/无人机网页面板）、`ego_rviz`、`ego_map_demo`、`seeker-boot-*`、`front_marker_jitter_analysis.py`、`capture_front_marker_jitter.sh`。
+
+## MID-360S 本机配置
+
+- 将 `src/livox_ros_driver2/config/MID360s_config.json` 复制为同目录下的 `MID360s_config.local.json`，填写主机网口和雷达 IPv4 地址。驱动与预检默认使用这份私有配置，也可通过 `MID360S_LIVOX_CONFIG` 指定配置文件的绝对路径。
+- 板端用 `ORANGE_ROS_MASTER_IP` 核对 `ros0` 的固定地址。该值取自环境变量或工作空间根目录的私有 `.env`。车端 rosbridge 默认使用 `spirit.local:9090`，可通过环境变量 `CAR_HOST` 设置车端主机。
 
 ## Git 工作流与安全边界
 

@@ -22,3 +22,16 @@ AGENTS.local.md
 tools/ego_rviz/home/
 tools/ego_rviz/runtime/
 tools/ego_rviz/maps/
+
+# MID-360S local dependency builds, experiment output and private lidar settings
+/.deps/
+/test_artifacts/
+*.bag
+*.bag.active
+*.pcd
+*.log
+/src/LiDAR_IMU_Init/Log/*.txt
+/src/LiDAR_IMU_Init/result/*.txt
+/src/livox_ros_driver2/config/MID360s_config.local.json
+/docker/ros-noetic-rviz/local.mac.env
+/docker/ros-noetic-rviz/.image.mac.env
