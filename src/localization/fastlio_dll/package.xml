@@ -3,7 +3,7 @@
   <name>fastlio_dll</name>
   <version>0.1.0</version>
   <description>Independent DLL map correction for FAST-LIO on Orange Pi.</description>
-  <maintainer email="zjh@localhost.localdomain">Orange workspace maintainer</maintainer>
+  <maintainer email="junhengsect+1647307223@qq.com">Orange workspace maintainer</maintainer>
   <license>BSD-3-Clause</license>
   <buildtool_depend>catkin</buildtool_depend>
   <depend>diagnostic_msgs</depend>
