@@ -1,0 +1,26 @@
+name: ROS Noetic
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: 构建 Noetic 依赖镜像
+        run: docker build -t orange/noetic-build:noetic docker/noetic-build
+
+      - name: 编译默认包并运行测试
+        run: |
+          docker run --rm --pull=never --network none \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp -e GTSAM_JOBS=2 \
+            --mount "type=bind,src=$GITHUB_WORKSPACE,dst=/ws" -w /ws \
+            --entrypoint /bin/bash orange/noetic-build:noetic -ec \
+            'scripts/build.sh -j2 -p1 --no-status && docker/noetic-build/test.sh'
