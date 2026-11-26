@@ -6,7 +6,7 @@
     MID-360S 与飞控外参标定的数据采集：遥控器通道 6 触发录标定专用 bag
     （原始点云 + 雷达 IMU + 飞控 IMU + 时间同步），录包期间临时提高飞控 IMU 频率。
   </description>
-  <maintainer email="orangepi@orangepi5max.local">orangepi</maintainer>
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
   <license>BSD</license>
 
   <buildtool_depend>catkin</buildtool_depend>

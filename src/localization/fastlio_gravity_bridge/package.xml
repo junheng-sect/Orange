@@ -13,7 +13,7 @@
     同时发布 drone_odom -> camera_init 与 body -> drone_base 两段静态 TF。
   </description>
 
-  <maintainer email="orangepi@example.com">orangepi</maintainer>
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
   <license>BSD</license>
 
   <buildtool_depend>catkin</buildtool_depend>

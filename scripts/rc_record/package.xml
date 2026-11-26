@@ -14,6 +14,6 @@
   <name>rc_record</name>
   <version>0.0.1</version>
   <description>RC 通道开关触发录包节点（launch-only 包，不参与 catkin 构建）</description>
-  <maintainer email="orangepi@orangepi5max.local">orangepi</maintainer>
+  <maintainer email="junhengsect+1647307223@qq.com">zjh</maintainer>
   <license>BSD</license>
 </package>
