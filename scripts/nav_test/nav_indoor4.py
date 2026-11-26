@@ -210,6 +210,10 @@ class Indoor4Runner(GlobalRunner):
 
     def freeze(self):
         goals = super().freeze()
+        self.record_scan_setup()
+        return goals
+
+    def record_scan_setup(self):
         workspace = Path(__file__).resolve().parents[2]
 
         def git(*args):
@@ -222,7 +226,6 @@ class Indoor4Runner(GlobalRunner):
                                          yaml=p.read_text()) for p in self.config_paths},
             navigation_config=self.cfg, fixed_route=self.route, batches=[], scans=[])
         self.save()
-        return goals
 
     def guard(self, **kwargs):
         super().guard(**kwargs)

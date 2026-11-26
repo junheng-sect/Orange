@@ -7,6 +7,7 @@ source "$workspace/devel/setup.bash"
 variant=4
 port=11446
 if [[ ${1:-} == --indoor5 ]]; then variant=5; port=11447; shift; fi
+if [[ ${1:-} == --indoor6 ]]; then variant=6; port=11449; shift; fi
 export ROS_MASTER_URI=http://127.0.0.1:$port ROS_IP=127.0.0.1 PYTHONDONTWRITEBYTECODE=1
 unset ROS_HOSTNAME
 INDOOR_TEST_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"

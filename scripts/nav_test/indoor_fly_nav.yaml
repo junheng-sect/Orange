@@ -24,3 +24,4 @@ config:
   planner_limits_by_task:
     test_indoor3_5: {max_vel: 0.40, max_acc: 0.40}
     test_indoor5: {max_vel: 0.40, max_acc: 0.40}
+    test_indoor6: {max_vel: 0.40, max_acc: 0.40}

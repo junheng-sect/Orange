@@ -336,7 +336,7 @@ class Progress:
             if not line or line.startswith("----"):
                 continue
             with self.lock:
-                if " INDOOR4 " in line or " INDOOR5 " in line:
+                if " INDOOR4 " in line or " INDOOR5 " in line or " INDOOR6 " in line:
                     try:
                         scan = json.loads(line.split(" INDOOR", 1)[1].split(" ", 1)[1])
                         if scan["phase"] != "识别标签" and self.scan and "route" not in scan:
@@ -368,6 +368,8 @@ class Progress:
                     self.takeoff_ready = line.endswith("解锁后自动起飞")
                 if " 阶段：" in line:
                     self.phase = line.rsplit(" 阶段：", 1)[1].strip()
+                    if "test_indoor6 阶段：" in line and self.phase != "ROUTE":
+                        self.scan = None
                 if "收尾被拒" in line:
                     self.stop_refused = True
                 if "[ OK ] 网页任务已收尾" in line:
@@ -423,6 +425,13 @@ class Progress:
             if task["automatic"]:
                 if phase == "DONE" or finished:
                     return "action_done", finished or note
+                if task["id"] == "test_indoor6":
+                    stage_label = {"COUNTDOWN": "人工解锁后倒计时", "OFFBOARD_ENTRY": "切入 OFFBOARD",
+                                   "TAKEOFF": "原地起飞至离地 0.50 m", "ROUTE": "四点巡检",
+                                   "LAND_REQUEST": "返航停稳，准备慢降", "LANDING": "慢降，等待着地上锁"}
+                    if phase in stage_label:
+                        label = self.scan["phase"] if phase == "ROUTE" and self.scan else stage_label[phase]
+                        return "running", label + (" · " + note if note else "")
                 if phase in {"COUNTDOWN", "OFFBOARD_ENTRY", "TAKEOFF", "ROUTE", "LAND_REQUEST", "LANDING"} or (
                     health["armed"] and health["mode"] == "OFFBOARD"
                 ):
@@ -543,8 +552,10 @@ def supervise(request_id):
                          message="正在收尾与写盘" if stopping else message,
                          mode=health["mode"], armed=health["armed"], landed=health["landed"],
                          safeGround=health["ground"], healthAt=time.monotonic())
-            if task["id"] in {"test_indoor4", "test_indoor5"} and scan is not None:
+            if task["id"] in {"test_indoor4", "test_indoor5", "test_indoor6"} and scan is not None:
                 value["scan"] = scan
+            elif task["id"] == "test_indoor6":
+                value.pop("scan", None)
             save(value)
         time.sleep(.5)
     reader.join(timeout=1)

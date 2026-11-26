@@ -414,3 +414,9 @@ test5 的 EGO 三维规划上限为 0.40 m/s、0.40 m/s²，执行器和网关�
 按正常 `import-flight-experiment --list --date YYYY-MM-DD` 和 `--run YYYY-MM-DD/实验ID` 导入。在装有 Python 3、OpenCV contrib、NumPy 和 FFmpeg 的电脑上运行 `python3 tools/score_indoor3_5.py "$RUN" "$OUT"`，其中 RUN 为含 manifest.json 的归档目录，OUT 为分析目录。输出逐帧目标与光流 CSV、12 张原图的独立结果、原速回放和中文报告。同一 OpenCV 字典和解码器用于各硬度。纸边测量定位于左纸边及顶部胶带，背景对比度不足时缺测；保留检测帧，短时漏检最多按光流追踪 0.25 秒，另在整帧尝试读出正确 QR。刹停为 [t0, t0+1.5 s)，稳态为 [t0+1.5 s, t0+5 s)。分母包含未检出预期标签的有效帧，分别列出缺录、里程计超差与无法估计的余振。连续三帧的横竖边缘宽度和光流抖动均恢复至该点稳态 P95 内，才报告恢复时间。
 
 隔离地面验收使用 `scripts/nav_test/tests/run_indoor3_1_isolated.sh "$NEW_EVIDENCE_DIR" --mode damper_ground`，须占用空闲的真实 OV13855；使用单独 master、模拟 RC 和无飞控输出的网关。结果清单保留“地面相机+模拟航线”标记。合成相机测试可选 `damper` 或 `damper_stop`。
+
+## 室内 test6 自动起降巡检
+
+板端运行 `scripts/nav_test_indoor6.sh`。在本次选定的起飞位置地面上锁启动，进入 POSCTL 后等待预检通过。通道 6 开录，遥控器人工解锁，3 秒后程序切 OFFBOARD 并在原位爬升 0.50 m。停稳后执行室内 test5 的四点观察和分批扫码。右下观察点完成后，以该点地图高度 0.480 m 返回本次起飞 XY；停稳后按网关 0.10 m/s 慢降，近地沿用下压、着地确认及普通上锁。等高返航中记录实测最大高度偏差，超过 0.15 m 即中止本轮。通道 6 关闭后再收尾。飞手切出 OFFBOARD 或链路异常会终止本轮。
+
+`--preview` 使用同一巡检航线，以开始预览的位置标记返航 XY，手持/模拟走完空中段。实飞的 goal JSON 记录观察、扫码和航段，flight JSON 记录起降阶段、地面原点与返航误差。地图高度和相对起飞地面的爬升高度分别记录。

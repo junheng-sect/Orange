@@ -1,0 +1,160 @@
+"""One indoor6 scenario per process on the loopback-only, hardware-free test master."""
+import os
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+import rospy
+
+from integration_outdoor_full import Fixture, nav
+from integration_indoor5 import CornerCamera
+from nav_indoor6 import RETURN_NAME, Indoor6Flight, load_indoor5_route
+
+
+class IndoorFixture(Fixture):
+    climb_height = .5
+    map_yaw = 0.
+
+    @property
+    def p(self):
+        return self.position
+
+    @property
+    def a(self):
+        return self.yaw
+
+    def check(self, req):
+        p = req.path.poses[-1].pose.position
+        if self.scenario == 'return_blocked' and self.goals and np.linalg.norm([p.x-.36, p.y-.20]) < .02:
+            from traj_utils.srv import CheckTrajectoryResponse
+            return CheckTrajectoryResponse(valid=False, reason='occupied footprint at home')
+        return super().check(req)
+
+    def execute(self, goal):
+        p = goal.waypoints[0].pose.position
+        if self.scenario == 'return_z_excursion' and np.linalg.norm([p.x-.36, p.y-.20]) < .02:
+            with self.lock:
+                self.position[2] += .25
+        if self.scenario == 'return_takeover' and np.linalg.norm([p.x-.36, p.y-.20]) < .02:
+            with self.lock:
+                self.mode = 'POSCTL'
+        return super().execute(goal)
+
+    def prepare_takeoff(self, request):
+        result = super().prepare_takeoff(request)
+        if self.scenario == 'countdown_disarm':
+            with self.lock:
+                self.arm_timer = float('inf')
+                self.armed = False
+        return result
+
+
+class Camera(CornerCamera):
+    def configure(self):
+        super().configure()
+        if self.flight.scenario == 'miss_qr':
+            self.missing_key = 3
+        elif self.flight.scenario == 'empty_final':
+            del self.coords[3]
+            self.tag_axes.pop(3)
+
+    def publish(self, ev):
+        # Other labels already scanned can still be visible at the final point.
+        if (self.flight.scenario == 'empty_final' and np.linalg.norm(self.flight.p - self.route[3]['xyz']) < .04):
+            from std_msgs.msg import Header
+            from ov13855_apriltag_vision.msg import TagCornerArray
+            from nav_indoor4 import FRAME
+            self.tags.publish(TagCornerArray(header=Header(stamp=rospy.Time.now(), frame_id=FRAME),
+                                            family='tag36h11', width=1280, height=960, tags=[]))
+            return
+        super().publish(ev)
+
+
+def main(out, scenario):
+    assert os.environ['ROS_MASTER_URI'] == 'http://127.0.0.1:11448'
+    route = load_indoor5_route()
+    rospy.init_node('indoor6_fixture')
+    fixture = IndoorFixture()
+    fixture.reset(scenario)
+    fixture.position[:2] = [.36, .20]
+    fixture.map_id = route['map_id']
+    cfg = rospy.get_param('/drone_nav/config')
+    cfg.update(takeoff_height=.5, allow_short_goals=True, map_id=fixture.map_id)
+    rospy.set_param('/drone_nav/config', cfg)
+    camera = Camera(fixture, cfg, route['points'])
+    out.mkdir(parents=True)
+    args = SimpleNamespace(preview=False, out=str(out), route=route, points=[(*p['xyz'], route['yaw_deg']) for p in route['points']],
+                           hold=route['hold_s'], delay=3., max_start_offset=float('inf'), check_segments=False)
+    # run_full owns init_node in production. Here ROS is initialized by the fixture.
+    import json
+    from unittest.mock import patch
+    class Runner(Indoor6Flight):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            fixture.runner = self
+    try:
+        with patch.object(rospy, 'init_node'), patch.object(nav,'TAKEOFF_TIMEOUT', 5. if scenario=='done_low' else 20.), \
+                patch.object(nav,'LAND_TIMEOUT', 8. if scenario=='land_no_disarm' else 40.):
+            try:
+                code = nav.run_full(args, Runner, 'test_indoor6')
+            except nav.Stopped:
+                assert scenario == 'startup_armed'
+                code = 1
+        if scenario == 'startup_armed':
+            assert code and not fixture.requests and not fixture.goals
+        else:
+            flight = json.loads(next(out.glob('flight_*.json')).read_text())
+            record = json.loads(next(out.glob('goal_*.json')).read_text())
+            success = scenario in ('normal','miss_qr','empty_final')
+            assert (code == 0) == success, (scenario,flight.get('reason'))
+            assert (flight['end']=='SUCCEEDED') == success
+            assert (record['end']=='SUCCEEDED') == success
+            if success:
+                assert not fixture.armed and fixture.landed == 1 and fixture.land_count == 1
+                assert record['legs'][-1]['direction'] == RETURN_NAME
+                np.testing.assert_allclose(fixture.goals[-1], [.36,.20,.48], atol=1e-6)
+                assert len(record['batches']) == 4
+                assert record['tag_counts']['read_ok'] == (6 if scenario=='normal' else 5), record['tag_counts']
+                assert flight['takeoff_stable']['fc_position'][2] == .5
+                assert flight['return_error_m'] < .01
+                assert flight['return_max_z_error_m'] < .01
+                assert flight['takeoff_stable_ns'] > 0
+                if scenario != 'empty_final':
+                    np.testing.assert_allclose(fixture.goals[-2],route['points'][-1]['xyz'])
+                    assert abs(fixture.goals[-3][2]-.48)>.05
+            elif scenario == 'land_no_disarm':
+                assert fixture.land_count == 1 and fixture.armed
+            else:
+                assert fixture.land_count == 0
+                expected_reason = {'countdown_disarm':'上锁', 'done_low':'超时',
+                                   'return_blocked':'occupied footprint', 'return_takeover':'模式',
+                                   'return_z_excursion':'等高返航偏离'}
+                assert expected_reason[scenario] in flight['reason'], flight['reason']
+                if scenario in ('countdown_disarm','done_low'):
+                    assert not fixture.goals
+                if scenario == 'countdown_disarm':
+                    assert not fixture.requests and not fixture.takeoff_count
+        print('PASS indoor6',scenario, flush=True)
+    finally:
+        camera.close()
+        fixture.close()
+        fixture.server.action_server.stop()
+        rospy.signal_shutdown('indoor6 isolated scenario complete')
+
+
+if __name__ == '__main__':
+    if '--out' in sys.argv:
+        from integration_indoor4 import main as preview
+        from nav_indoor6 import Indoor6Survey
+
+        def verify(runner, camera, messages, route, fixture, out):
+            assert runner.record['tag_counts']['read_ok'] == 6
+            assert [b['order'] for b in runner.record['batches']] == [[5],[2,1],[4,0],[3]]
+            np.testing.assert_allclose(runner.record['legs'][-1]['goal_map'], [.45,.34,.48], atol=.001)
+            assert runner.record['legs'][-1]['direction'] == RETURN_NAME
+            print('PASS preview return to marked XY at the last observation height', flush=True)
+
+        preview(CornerCamera, Indoor6Survey, load_indoor5_route, verify, 11449)
+    else:
+        main(Path(sys.argv[1]), sys.argv[2])

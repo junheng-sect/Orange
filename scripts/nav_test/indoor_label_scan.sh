@@ -10,7 +10,13 @@ DEFAULT_EV_MODE=odom
 DEFAULT_PREVIEW_RADIUS=0.4
 DEFAULT_PREVIEW_HALF_HEIGHT=0.3
 
-test_desc() { echo "四点识别 AprilTag、逐批扫描 QR、返回右下悬停"; }
+test_desc() {
+  if [[ "$TEST_NAME" == test_indoor6 ]]; then
+    echo "地面解锁后 3 秒自动起飞 0.50 m，四点扫码，等高返航慢降"
+  else
+    echo "四点识别 AprilTag、逐批扫描 QR、返回右下悬停"
+  fi
+}
 test_arg() { return 1; }
 test_preflight() {
   [ "$EV_MODE" = odom ] && [[ "$NAV_CONFIG" -ef "$DEFAULT_NAV_CONFIG" && "$MAP_FRAME" -ef "$DEFAULT_MAP_FRAME" ]] ||
@@ -26,7 +32,9 @@ test_after_fusion() {
     return 1
   fi
   PF_SCAN_CAMERA="$RUN_DIR/${SCAN_VARIANT}_camera.pid"
-  start_child "$PF_SCAN_CAMERA" "$OUT/camera.log" roslaunch "$NT_DIR/${SCAN_VARIANT}_camera.launch" save_dir:="$OUT/barcode"
+  local camera_variant="$SCAN_VARIANT"
+  [[ "$TEST_NAME" != test_indoor6 ]] || camera_variant=indoor5
+  start_child "$PF_SCAN_CAMERA" "$OUT/camera.log" roslaunch "$NT_DIR/${camera_variant}_camera.launch" save_dir:="$OUT/barcode"
   python3 -B "$NT_DIR/nav_${SCAN_VARIANT}.py" --probe-camera --out "$OUT" 2>&1 | tee -a "$LOG"
 }
 
@@ -43,7 +51,11 @@ run_test() {
     [ -z "$answer" ] || return
     flags+=(--preview)
   fi
-  log "${SCAN_NAME}：人工起飞悬停，等设定值预发送后切 OFFBOARD，从当前位置规划到 1 号点"
+  if [[ "$TEST_NAME" == test_indoor6 ]]; then
+    log "test6：$(test_desc)；请保持地面上锁，等待预检完成"
+  else
+    log "${SCAN_NAME}：人工起飞悬停，等设定值预发送后切 OFFBOARD，从当前位置规划到 1 号点"
+  fi
   python3 -B "$NT_DIR/nav_${SCAN_VARIANT}.py" --out "$OUT" "${flags[@]}" > >(trap '' INT; exec tee -a "$LOG") 2>&1
 }
 

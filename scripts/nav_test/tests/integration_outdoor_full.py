@@ -45,6 +45,7 @@ class ScenarioState(nav.FullState):
 
 
 class Fixture:
+    climb_height = 1.
     def __init__(self):
         self.lock = threading.RLock()
         self.closed = False
@@ -207,11 +208,11 @@ class Fixture:
                 if self.climb_timer is not None and self.runner is not None and self.runner.s.phase == 'TAKEOFF':
                     dt = now-self.climb_timer
                     if dt > .10:
-                        self.landed, self.position[2] = 2, .82
+                        self.landed, self.position[2] = 2, self.climb_height - .18
                     if dt > .20:
                         self.takeoff_state = 'DONE'
                     if dt > .60 and self.scenario != 'done_low':
-                        self.position[2] = 1.
+                        self.position[2] = self.climb_height
                     if self.scenario == 'map_reset' and dt > .3:
                         self.translation[0] = .02
                     if self.scenario == 'stale_state':

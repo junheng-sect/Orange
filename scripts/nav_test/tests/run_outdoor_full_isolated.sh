@@ -4,15 +4,17 @@ set -eo pipefail
 source /opt/ros/noetic/setup.bash
 workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../.." && pwd -P)"
 source "$workspace/devel/setup.bash"
-export ROS_MASTER_URI=http://127.0.0.1:11443 ROS_IP=127.0.0.1 PYTHONDONTWRITEBYTECODE=1
+port=11443
+if [[ ${1:-} == --indoor6 ]]; then port=11448; shift; fi
+export ROS_MASTER_URI=http://127.0.0.1:$port ROS_IP=127.0.0.1 PYTHONDONTWRITEBYTECODE=1
 unset ROS_HOSTNAME
 DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 OUT="${1:-$HOME/test_data/nav10_validation/$(date +%Y%m%d_%H%M%S)}"
-python3 - <<'PY'
-import socket
+python3 - "$port" <<'PY'
+import socket, sys
 with socket.socket() as s:
-    if s.connect_ex(('127.0.0.1',11443)) == 0:
-        raise SystemExit('隔离端口11443已占用，拒绝连接已有Master')
+    if s.connect_ex(('127.0.0.1',int(sys.argv[1]))) == 0:
+        raise SystemExit('隔离端口已占用，拒绝连接已有Master')
 PY
 mkdir -p "$OUT"
 export ROS_LOG_DIR="$OUT/roslogs"
@@ -31,7 +33,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-setsid roscore -p 11443 >"$OUT/master.log" 2>&1 & PID=$!
+setsid roscore -p "$port" >"$OUT/master.log" 2>&1 & PID=$!
 sleep .1
 START="$(awk '{print $22}' "/proc/$PID/stat")"
 ready=0
@@ -41,6 +43,16 @@ for _ in $(seq 50); do
   sleep .2
 done
 [ "$ready" -eq 1 ] || { echo '隔离Master未就绪' >&2; exit 1; }
+if [[ $port == 11448 ]]; then
+  rosparam load "$DIR/../indoor_fly_nav.yaml" /drone_nav
+  shift || true
+  cases=(normal countdown_disarm done_low startup_armed miss_qr empty_final return_blocked return_takeover return_z_excursion land_no_disarm)
+  if (( $# )); then cases=("$@"); fi
+  for scenario in "${cases[@]}"; do
+    python3 -B -u "$DIR/integration_indoor6.py" "$OUT/$scenario" "$scenario" 2>&1 | tee -a "$OUT/integration.log"
+  done
+  exit 0
+fi
 rosparam load "$DIR/../outdoor_nav_yaw45.yaml" /drone_nav
 # Only mocks are started, no roslaunch navigation/fusion/MAVROS or arming service.
 python3 -B -u "$DIR/integration_outdoor_full.py" --out "$OUT" 2>&1 | tee "$OUT/integration.log"

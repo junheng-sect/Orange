@@ -132,6 +132,10 @@ def build(scripts, maps):
                       mapId=indoor_map, automatic=False, fixed=True,
                       route='四点观察，按固定纸面朝向逐批扫码；停距 0.80 m，控制点地图限高 1.70 m',
                       finish='返回右下悬停，飞手接管降落', points=points, stops=stops))
+    tasks.append(dict(id='test_indoor6', label='test6', title='自动起降四点扫码',
+                      mapId=indoor_map, automatic=True, fixed=True,
+                      route='地面人工解锁 3 秒后自动起飞 0.50 m，执行 test5 四点巡检',
+                      finish='从右下等高返回本次起飞点上方，慢降至着地上锁', points=points, stops=stops))
     tasks.insert(11, dict(id="test12", label="test12", title="手飞定位与录包",
                           mapId=MAPS["outdoor"], automatic=False, fixed=False, manual=True,
                           points=[], stops=[], route="全程遥控手飞，实时显示已飞轨迹",

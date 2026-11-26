@@ -348,7 +348,7 @@ nt_bringup() {
     fi
   fi
   local runtime_config="$OUT/navigation.resolved.yaml"
-  if ! python3 - "$NAV_CONFIG" "$MAP" "$PREVIEW" "$runtime_config" 2>&1 <<'PY' | tee -a "$LOG"; then finish 1 force; fi
+  if ! python3 - "$NAV_CONFIG" "$MAP" "$PREVIEW" "$runtime_config" "$TEST_NAME" 2>&1 <<'PY' | tee -a "$LOG"; then finish 1 force; fi
 import os, sys, yaml
 with open(sys.argv[1]) as stream:
     document = yaml.safe_load(stream)
@@ -358,6 +358,8 @@ if os.path.expanduser(c.get('map_id', '')) != sys.argv[2]:
 if sys.argv[3] == '0' and c.get('deployment_verified') is not True:
     sys.exit('导航配置 deployment_verified 不是 true，真实输出会被网关拒绝（只预览加 --preview）')
 c['map_id'] = sys.argv[2]
+if sys.argv[5] == 'test_indoor6':
+    c['takeoff_height'] = 0.50
 with open(sys.argv[4], 'w') as stream:
     yaml.safe_dump(document, stream, allow_unicode=True)
 print('导航配置：三维限速 %.2f m/s、%.2f m/s²，竖直 %s，转向 %s°/s，目标范围 %s ~ %s（drone_odom）' % (c['max_vel'], c['max_acc'], '%.2f m/s、%.2f m/s²' % (c['max_vel_z'], c.get('max_acc_z', -1)) if 'max_vel_z' in c else '同水平', c.get('yaw_rate_deg', 10), c['bounds_min'], c['bounds_max']))
@@ -462,7 +464,7 @@ PY
   local _nav_args=(config:="$runtime_config" enable_output:=true max_vel:="$_max_vel" max_acc:="$_max_acc" max_vel_z:="$_max_vel_z" max_acc_z:="$_max_acc_z")
   [ "$PREVIEW" -eq 1 ] && _nav_args=(config:="$runtime_config" enable_output:=false radius:="$PREVIEW_RADIUS" half_height:="$PREVIEW_HALF_HEIGHT" max_vel:="$_max_vel" max_acc:="$_max_acc" max_vel_z:="$_max_vel_z" max_acc_z:="$_max_acc_z")
   _nav_args+=(prior_grid_file:="$_prior_file" prior_map_sha256:="$_prior_map_sha")
-  [[ "$TEST_NAME" != test_indoor4 && "$TEST_NAME" != test_indoor5 ]] || _nav_args+=(allow_short_goals:=true)
+  [[ "$TEST_NAME" != test_indoor[456] ]] || _nav_args+=(allow_short_goals:=true)
   [ "$TEST_NAME" != test_indoor3_3 ] || _nav_args+=(allow_short_goals:=true)
   start_child "$PF_NAV" "$OUT/nav.log" roslaunch drone_navigation navigation.launch "${_nav_args[@]}"
   cat >"$RUN_DIR/wait_nav.py" <<'PY'

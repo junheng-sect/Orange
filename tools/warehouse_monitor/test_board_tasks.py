@@ -15,12 +15,25 @@ class IndoorDispatchTests(unittest.TestCase):
             frame.parent.mkdir(parents=True)
             frame.touch()
             with patch.object(board_tasks, 'SCRIPTS', scripts):
-                for task_id in ('test_indoor4', 'test_indoor5'):
+                for task_id in ('test_indoor4', 'test_indoor5', 'test_indoor6'):
                     args = board_tasks.script_command({'id': task_id, 'mapId': 'indoor'})
                     self.assertEqual(args[0], str(scripts / f'nav_{task_id}.sh'))
                     self.assertEqual(args[args.index('--map-frame') + 1], str(frame))
                     self.assertEqual(args[args.index('--nav-config') + 1],
                                      str(scripts / 'nav_test/indoor_fly_nav.yaml'))
+
+    def test_indoor6_scan_return_and_landing_progress(self):
+        task = {"id": "test_indoor6", "automatic": True}
+        health = {"ground": False, "armed": True, "mode": "OFFBOARD"}
+        progress = board_tasks.Progress()
+        progress.collect(['[12:00:00] test_indoor6 阶段：ROUTE',
+                          '[12:00:01] INDOOR6 {"phase":"等高返回起飞点","route":{"points":[],"ids":[]}}'])
+        self.assertIn("等高返回起飞点", progress.stage(task, health, True)[1])
+        progress.collect(['[12:00:02] test_indoor6 阶段：LANDING'])
+        self.assertIn("慢降", progress.stage(task, health, True)[1])
+        self.assertIsNone(progress.scan)
+        progress.collect(['[12:00:03] test_indoor6 阶段：DONE'])
+        self.assertEqual(progress.stage(task, health, True)[0], "action_done")
 
     def test_damper_is_optional_and_survives_dispatch(self):
         import json

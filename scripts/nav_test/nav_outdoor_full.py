@@ -439,6 +439,9 @@ class FullRunner(GlobalRunner):
             self.deadline = None
             self.current = None
 
+    def expected_takeoff_map_z(self):
+        return 1.
+
     def ground_geometry(self):
         p, a, speed = self.s.pose()
         r, t = self.reference
@@ -481,7 +484,7 @@ class FullRunner(GlobalRunner):
         self.yaw_map = np.radians([p[3] for p in self.route])
         self.yaws = np.array([heading(r.T, a) for a in self.yaw_map])
         targets, names = self.preflight_targets()
-        expected = p + np.array([0., 0., 1.])
+        expected = p + np.array([0., 0., self.cfg['takeoff_height']])
         check_goal_bounds(np.vstack([expected, targets]), self.cfg,
                           ['预计起飞终点'] + list(names))
         self.preflight_map(np.vstack([expected, targets]), ['预计起飞终点'] + list(names), p)
@@ -652,7 +655,8 @@ class FullRunner(GlobalRunner):
             map_z = float((self.reference[0] @ p[0] + self.reference[1])[2])
             ok = (self.s.get('gateway_status', 'takeoff') == 'DONE' and
                   self.fc.landed == ExtendedState.LANDED_STATE_IN_AIR and
-                  abs(h - 1.) <= .10 and abs(map_z - 1.) <= .10 and p[2] <= .1)
+                  abs(h - self.cfg['takeoff_height']) <= .10 and
+                  abs(map_z - self.expected_takeoff_map_z()) <= .10 and p[2] <= .1)
             stable_at = (now if stable_at is None else stable_at) if ok else None
             if stable_at is not None and now - stable_at >= STABLE_SECONDS:
                 check_goal_bounds([p[0]], self.cfg, ['实测起飞终点'])
