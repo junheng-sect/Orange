@@ -5,12 +5,15 @@
 # 放在哪台机器上都不影响数据路径。
 # 用法：tools/car_web/serve.sh [端口]
 set -e
-cd "$(dirname -- "$(realpath -e -- "$0")")"
 PORT=${1:-8080}
-# 关掉浏览器缓存，改完页面刷新就生效。
-exec python3 - "$PORT" <<'EOF'
+# 关掉浏览器缓存，改完页面刷新就生效。用 Python 解析脚本真实目录，兼容 macOS/Linux 及符号链接调用。
+exec python3 - "$0" "$PORT" <<'EOF'
 import http.server
+import os
+from pathlib import Path
 import sys
+
+os.chdir(Path(sys.argv[1]).resolve(strict=True).parent)
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -19,5 +22,5 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().end_headers()
 
 
-http.server.ThreadingHTTPServer(('0.0.0.0', int(sys.argv[1])), Handler).serve_forever()
+http.server.ThreadingHTTPServer(('0.0.0.0', int(sys.argv[2])), Handler).serve_forever()
 EOF

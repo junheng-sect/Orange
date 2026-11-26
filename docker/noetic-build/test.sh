@@ -41,4 +41,5 @@ check python3 scripts/nav_test/tests/test_indoor3_4_video.py --dual
 for suite in test_dll_drift.py test_ywl_monitor.py test_board_tasks.py; do
     check python3 -m unittest discover -s tools/warehouse_monitor -p "$suite"
 done
+check python3 -m unittest discover -s tools/car_web -p 'test_*.py'
 exit "$status"
