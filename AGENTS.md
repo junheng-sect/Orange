@@ -5,7 +5,7 @@
 
 ## 多端角色与平台分工
 
-- **板端（Orange Pi 5 Max）**：RK3588，Ubuntu 20.04.6 LTS，ROS Noetic（`desktop-full`）+ `catkin-tools`（`catkin build` 可用，ROS 位于 `/opt/ros/noetic`），工作空间 `~/orange`。板端是唯一的实机算法编译、录包、建图与实机定位/飞行验证端；ROS 核心固定在 dummy 网卡 `ros0`。
+- **板端（Orange Pi 5 Max）**：RK3588，Ubuntu 20.04.6 LTS，ROS Noetic（`desktop-full`）+ `catkin-tools`（`catkin build` 可用，ROS 位于 `/opt/ros/noetic`），工作空间 `~/catkin_ws`。板端是唯一的实机算法编译、录包、建图与实机定位/飞行验证端；ROS 核心固定在 dummy 网卡 `ros0`。
 - **Ubuntu 开发机**：用于底层 RViz 调试（`tools/ego_rviz`、`tools/ego_map_demo`）及原生 ROS 编译/测试。
 - **macOS 开发机**：用于代码编辑、Git 协作、离线分析与 `tools/warehouse_monitor` 网页监控（通过 SSH 隧道连接板端，无需配置 ROS 主机路由）。
 
