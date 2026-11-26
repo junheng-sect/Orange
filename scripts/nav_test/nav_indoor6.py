@@ -72,6 +72,8 @@ class Indoor6Flight(FullRunner):
         self.names = tuple(point['name'] for point in args.route['points'])
         self.holds = (args.route['hold_s'],) * len(self.route)
         super().__init__(copy(args), cfg, state, buf, prepare, check, client, fc, *services)
+        # The relative-height tolerance can be reached while still climbing into the odom goal envelope.
+        self.takeoff_min_odom_z = self.lo[2] + float(cfg.get('goal_boundary_margin', 0.))
         self.survey = Indoor6Survey(args, cfg, state, buf, self.prepare, self.scan_check, client)
         self.survey.flight = self
         self.check_service = check
@@ -138,7 +140,8 @@ class Indoor6Flight(FullRunner):
         self.survey.ground_map = r @ p + t
         self.survey.reference = self.reference
         self.flight.update(home_odom=p.tolist(), home_map=self.survey.ground_map.tolist(),
-                           ground_fcu_z=self.ground_z, takeoff_height=self.cfg['takeoff_height'])
+                           ground_fcu_z=self.ground_z, takeoff_height=self.cfg['takeoff_height'],
+                           takeoff_min_odom_z=self.takeoff_min_odom_z)
         self.save()
 
     def expected_takeoff_map_z(self):

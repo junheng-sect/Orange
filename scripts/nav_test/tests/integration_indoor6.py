@@ -1,6 +1,7 @@
 """One indoor6 scenario per process on the loopback-only, hardware-free test master."""
 import os
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,25 @@ from nav_indoor6 import RETURN_NAME, Indoor6Flight, load_indoor5_route
 class IndoorFixture(Fixture):
     climb_height = .5
     map_yaw = 0.
+    final_clear_wall = None
+
+    def publish(self):
+        if self.scenario in ('clearance_recovers', 'clearance_low'):
+            if self.climb_timer is None:
+                self.position[2] = -.073
+            elif self.runner.s.phase == 'TAKEOFF':
+                elapsed = time.monotonic() - self.climb_timer
+                # Relative climb already within 0.50 +/- 0.10 m, odom floor still unmet.
+                z = .386
+                if self.scenario == 'clearance_recovers':
+                    if 2.8 <= elapsed < 3.8:
+                        z = .410
+                    elif elapsed >= 4.6:
+                        z = .425
+                        if self.final_clear_wall is None:
+                            self.final_clear_wall = time.time()
+                self.position[2] = z
+        super().publish()
 
     @property
     def p(self):
@@ -94,7 +114,7 @@ def main(out, scenario):
             super().__init__(*a, **kw)
             fixture.runner = self
     try:
-        with patch.object(rospy, 'init_node'), patch.object(nav,'TAKEOFF_TIMEOUT', 5. if scenario=='done_low' else 20.), \
+        with patch.object(rospy, 'init_node'), patch.object(nav,'TAKEOFF_TIMEOUT', 5. if scenario == 'done_low' else nav.TAKEOFF_TIMEOUT), \
                 patch.object(nav,'LAND_TIMEOUT', 8. if scenario=='land_no_disarm' else 40.):
             try:
                 code = nav.run_full(args, Runner, 'test_indoor6')
@@ -106,7 +126,7 @@ def main(out, scenario):
         else:
             flight = json.loads(next(out.glob('flight_*.json')).read_text())
             record = json.loads(next(out.glob('goal_*.json')).read_text())
-            success = scenario in ('normal','miss_qr','empty_final')
+            success = scenario in ('normal','miss_qr','empty_final','clearance_recovers')
             assert (code == 0) == success, (scenario,flight.get('reason'))
             assert (flight['end']=='SUCCEEDED') == success
             assert (record['end']=='SUCCEEDED') == success
@@ -115,8 +135,14 @@ def main(out, scenario):
                 assert record['legs'][-1]['direction'] == RETURN_NAME
                 np.testing.assert_allclose(fixture.goals[-1], [.36,.20,.48], atol=1e-6)
                 assert len(record['batches']) == 4
-                assert record['tag_counts']['read_ok'] == (6 if scenario=='normal' else 5), record['tag_counts']
-                assert flight['takeoff_stable']['fc_position'][2] == .5
+                assert record['tag_counts']['read_ok'] == (5 if scenario in ('miss_qr', 'empty_final') else 6), record['tag_counts']
+                if scenario == 'clearance_recovers':
+                    assert flight['takeoff_stable']['odom_position'][2] == .425
+                    assert flight['takeoff_min_odom_z'] == .4
+                    assert flight['takeoff_stable_ns'] / 1e9 - fixture.final_clear_wall >= nav.STABLE_SECONDS
+                    assert fixture.takeoff_count == 1
+                else:
+                    assert flight['takeoff_stable']['fc_position'][2] == .5
                 assert flight['return_error_m'] < .01
                 assert flight['return_max_z_error_m'] < .01
                 assert flight['takeoff_stable_ns'] > 0
@@ -128,11 +154,17 @@ def main(out, scenario):
             else:
                 assert fixture.land_count == 0
                 expected_reason = {'countdown_disarm':'上锁', 'done_low':'超时',
+                                   'clearance_low':'z=0.386 m，最低 0.400 m',
                                    'return_blocked':'occupied footprint', 'return_takeover':'模式',
                                    'return_z_excursion':'等高返航偏离'}
                 assert expected_reason[scenario] in flight['reason'], flight['reason']
-                if scenario in ('countdown_disarm','done_low'):
+                if scenario in ('countdown_disarm','done_low','clearance_low'):
                     assert not fixture.goals
+                if scenario == 'clearance_low':
+                    assert '超时' in flight['reason'] and fixture.takeoff_count == 1
+                    assert flight['phases'][-1]['phase'] == 'TAKEOFF'
+                    request = next(call for call in flight['services'] if call['service'] == 'takeoff')
+                    assert nav.TAKEOFF_TIMEOUT - .1 <= flight['end_wall'] - request['wall'] < nav.TAKEOFF_TIMEOUT + 1.
                 if scenario == 'countdown_disarm':
                     assert not fixture.requests and not fixture.takeoff_count
         print('PASS indoor6',scenario, flush=True)

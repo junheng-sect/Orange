@@ -212,6 +212,7 @@ class FullRunner(GlobalRunner):
     test_name = 'test10'
     route_name = '完整室外综合测试'
     record_prefix = 'test10'
+    takeoff_min_odom_z = -math.inf
     route = ROUTE
     holds = HOLDS
     names = NAMES
@@ -388,6 +389,12 @@ class FullRunner(GlobalRunner):
         if self.stage_deadline is not None and time.monotonic() >= self.stage_deadline:
             if self.s.phase in ('LAND_REQUEST', 'LANDING'):
                 raise Stopped(self.land_timeout_reason())
+            if self.s.phase == 'TAKEOFF' and math.isfinite(self.takeoff_min_odom_z):
+                pose = self.s.pose()
+                if pose is None:
+                    raise Stopped('/drone_nav/odom 断流')
+                raise Stopped('起飞 %g s 超时：未连续停稳 %g s，drone_odom z=%.3f m，最低 %.3f m' %
+                              (TAKEOFF_TIMEOUT, STABLE_SECONDS, pose[0][2], self.takeoff_min_odom_z))
             raise Stopped(self.s.phase + ' 阶段等待超时')
         if self.deadline is not None and time.monotonic() >= self.deadline:
             raise Stopped('单段任务超时（%g s）' % self.leg_timeout)
@@ -641,8 +648,7 @@ class FullRunner(GlobalRunner):
         self.guard()
         if not self.fc.on_ground():
             raise Stopped('发起飞请求前不在地面')
-        start = time.monotonic()
-        self.stage_deadline = start + TAKEOFF_TIMEOUT
+        self.stage_deadline = time.monotonic() + TAKEOFF_TIMEOUT
         reply = self.takeoff()
         if not reply.success:
             raise Stopped('takeoff 被拒：' + reply.message)
@@ -655,6 +661,7 @@ class FullRunner(GlobalRunner):
             map_z = float((self.reference[0] @ p[0] + self.reference[1])[2])
             ok = (self.s.get('gateway_status', 'takeoff') == 'DONE' and
                   self.fc.landed == ExtendedState.LANDED_STATE_IN_AIR and
+                  p[0][2] >= self.takeoff_min_odom_z and
                   abs(h - self.cfg['takeoff_height']) <= .10 and
                   abs(map_z - self.expected_takeoff_map_z()) <= .10 and p[2] <= .1)
             stable_at = (now if stable_at is None else stable_at) if ok else None
@@ -664,8 +671,6 @@ class FullRunner(GlobalRunner):
                 self.save()
                 self.stage_deadline = None
                 return
-            if now - start >= TAKEOFF_TIMEOUT:
-                raise Stopped('起飞高度/速度未连续稳定2 s（起飞20 s超时）')
             time.sleep(.05)
 
     def fly_route(self):

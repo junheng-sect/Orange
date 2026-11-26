@@ -46,7 +46,7 @@ done
 if [[ $port == 11448 ]]; then
   rosparam load "$DIR/../indoor_fly_nav.yaml" /drone_nav
   shift || true
-  cases=(normal countdown_disarm done_low startup_armed miss_qr empty_final return_blocked return_takeover return_z_excursion land_no_disarm)
+  cases=(normal countdown_disarm done_low clearance_low clearance_recovers startup_armed miss_qr empty_final return_blocked return_takeover return_z_excursion land_no_disarm)
   if (( $# )); then cases=("$@"); fi
   for scenario in "${cases[@]}"; do
     python3 -B -u "$DIR/integration_indoor6.py" "$OUT/$scenario" "$scenario" 2>&1 | tee -a "$OUT/integration.log"
