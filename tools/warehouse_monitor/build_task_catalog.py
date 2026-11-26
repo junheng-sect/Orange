@@ -118,6 +118,11 @@ def build(scripts, maps):
                       mapId=indoor_map, automatic=False, fixed=False, manual=True, points=[], stops=[],
                       route='室内定位后遥控手飞，通道 6 同步录 bag 和 OV13855 无损灰度视频',
                       finish='落地上锁，关通道 6，OV13855 录像封存后收尾'))
+    tasks.append(dict(id='test_indoor3_5', label='test3_5', title='四点减振对照',
+                      mapId=indoor_map, automatic=False, fixed=True, points=points,
+                      stops=[dict(stop, seconds=5.) for stop in stops],
+                      route='左下 → 左上 → 右上 → 右下，通道 6 全程录像，每点采三张全分辨率图',
+                      finish='右下保持，飞手接管降落上锁，关通道 6 后封存'))
     tasks.append(dict(id='test_indoor4', label='test4', title='货架标签分批扫码',
                       mapId=indoor_map, automatic=False, fixed=True,
                       route='左下 → 左上 → 右上 → 右下，各点识别后扫描新标签',

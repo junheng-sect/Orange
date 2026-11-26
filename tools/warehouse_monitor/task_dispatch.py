@@ -33,6 +33,13 @@ def task_for(data, task_id, map_key):
     raise ValueError("任务与地图版本不匹配")
 
 
+def check_damper(body):
+    if 'damperDeg' in body:
+        value = body['damperDeg']
+        if body.get('taskId') != 'test_indoor3_5' or type(value) is not int or not 0 <= value <= 100:
+            raise ValueError('减振球硬度应为 0 至 100 的整数，可留空')
+
+
 class Dispatch:
     def __init__(self, data, cache, host, ssh, stopped, remote_root=DEFAULT_ROOT):
         self.remote_root = remote_root
@@ -71,10 +78,11 @@ class Dispatch:
                         board=self.board, online=self.online, enabled=True)
 
     def submit(self, body):
-        if not isinstance(body, dict) or set(body) != {"id", "taskId", "mapKey", "confirmAuto"}:
+        if not isinstance(body, dict) or set(body) - {"damperDeg"} != {"id", "taskId", "mapKey", "confirmAuto"}:
             raise ValueError("任务请求字段无效")
         if not isinstance(body["id"], str) or not REQUEST_ID.fullmatch(body["id"]):
             raise ValueError("请求 ID 无效")
+        check_damper(body)
         task = task_for(self.data, body["taskId"], body["mapKey"])
         if type(body["confirmAuto"]) is not bool or (task["automatic"] and not body["confirmAuto"]):
             raise ValueError("请确认地面解锁后自动起飞")
@@ -85,7 +93,7 @@ class Dispatch:
             raise ValueError("电脑缓存与任务绑定的 PCD 不匹配，请同步该地图")
         with self.lock:
             if self.request and self.request["id"] == body["id"]:
-                if any(self.request[key] != val for key, val in body.items()):
+                if self.request.get("damperDeg") != body.get("damperDeg") or any(self.request.get(key) != val for key, val in body.items()):
                     raise TaskConflict("请求 ID 已用于另一任务")
                 return
             if (self.request and self.request["state"] not in TERMINAL) or (
@@ -161,6 +169,8 @@ class Dispatch:
                 verb = "submit"
                 request.update(sent=True, boot=response["boot"])
                 payload = {key: request[key] for key in ("id", "taskId", "mapKey", "confirmAuto", "boot")}
+                if "damperDeg" in request:
+                    payload["damperDeg"] = request["damperDeg"]
                 payload["remaining"] = math.ceil(request["deadline"] - time.monotonic())
             else:
                 return

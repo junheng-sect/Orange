@@ -1,5 +1,6 @@
 <launch>
+  <arg name="full" default="false"/>
   <include file="$(find ov13855_cam)/launch/ov13855.launch">
-    <arg name="full" value="false"/>
+    <arg name="full" value="$(arg full)"/>
   </include>
 </launch>

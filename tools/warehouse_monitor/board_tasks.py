@@ -14,7 +14,7 @@ import sys
 from threading import Lock, Thread
 import time
 
-from task_dispatch import REQUEST_ID, TERMINAL, TTL, catalog, task_for
+from task_dispatch import REQUEST_ID, TERMINAL, TTL, catalog, check_damper, task_for
 
 ROOT = Path(__file__).resolve().parent
 HOME = Path.home()
@@ -103,7 +103,8 @@ def snapshot(request_id, error=None):
 
 def submit(body):
     expected = {"id", "taskId", "mapKey", "confirmAuto", "remaining", "boot"}
-    if set(body) != expected or type(body["remaining"]) is not int or not 0 < body["remaining"] <= TTL:
+    check_damper(body)
+    if set(body) - {"damperDeg"} != expected or type(body["remaining"]) is not int or not 0 < body["remaining"] <= TTL:
         raise ValueError("下发请求无效或已过期")
     request_id = body["id"]
     task = task_for(catalog(ROOT), body["taskId"], body["mapKey"])
@@ -111,7 +112,7 @@ def submit(body):
         raise ValueError("请确认自动起飞任务")
     previous = get_record(request_id)
     if previous:
-        if "taskId" in previous and any(previous[key] != body[key] for key in ("taskId", "mapKey", "confirmAuto")):
+        if "taskId" in previous and any(previous.get(key) != body.get(key) for key in ("taskId", "mapKey", "confirmAuto", "damperDeg")):
             raise ValueError("请求 ID 已用于另一任务")
         return
     if active_record():
@@ -122,6 +123,8 @@ def submit(body):
                  confirmAuto=body["confirmAuto"], boot=BOOT, state="waiting_fcu",
                  message="板端已收到任务，等待飞控连接", deadline=time.monotonic() + body["remaining"],
                  safeGround=False)
+    if "damperDeg" in body:
+        value["damperDeg"] = body["damperDeg"]
     save(value)
     write(STATE / "current.json", dict(id=request_id, boot=BOOT))
     command = ENV + " && exec " + shlex.join(["python3", "-B", str(Path(__file__).resolve()), "run", request_id])
@@ -185,7 +188,7 @@ def fingerprint(path):
     return digest.hexdigest()
 
 
-def script_command(task):
+def script_command(task, damper_deg=None):
     if task["id"] == "test12_ywl":
         return [str(SCRIPTS / "nav_test12.sh"), "--ywl"]
     command = [str(SCRIPTS / ("nav_" + task["id"] + ".sh"))]
@@ -194,6 +197,9 @@ def script_command(task):
                     "--nav-config", str(SCRIPTS / "nav_test/indoor_fly_nav.yaml"),
                     "--map-frame", str(SCRIPTS.parent / "src/localization/car_bridge/config/map_frame_indoor_fly.yaml"),
                     "--ev-mode", "odom"]
+    if damper_deg is not None:
+        check_damper(dict(taskId=task["id"], damperDeg=damper_deg))
+        command += ["--damper-deg", str(damper_deg)]
     return command
 
 
@@ -435,7 +441,7 @@ class Progress:
             elif health["stream"] and self.runner_started and health["armed"] and health["landed"] == 2:
                 if task["id"] == "test_indoor3_3":
                     return "wait_offboard", "将 Tag 1 放入 OV13855 视野，切入 OFFBOARD 开始一轮扫码"
-                if task["id"] in {"test_indoor3", "test_indoor3_1", "test_indoor3_2", "test_indoor4", "test_indoor5"}:
+                if task["id"] in {"test_indoor3", "test_indoor3_1", "test_indoor3_2", "test_indoor3_5", "test_indoor4", "test_indoor5"}:
                     return "wait_offboard", "设定值已预发送，切 OFFBOARD 后从当前位置规划到 1 号点"
                 return "wait_offboard", "设定值已预发送，可用遥控器切 OFFBOARD"
             elif (health["ready"] and health["estimate"] and self.runner_started
@@ -500,7 +506,7 @@ def supervise(request_id):
         save(value)
         env = dict(os.environ, WAREHOUSE_TASK_ID=request_id, PYTHONUNBUFFERED="1")
         env.pop("NAV_TEST_IN_TMUX", None)
-        child = subprocess.Popen(script_command(task), cwd=SCRIPTS, env=env, stdin=subprocess.DEVNULL,
+        child = subprocess.Popen(script_command(task, value.get("damperDeg")), cwd=SCRIPTS, env=env, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, errors="replace", start_new_session=True)
     progress = Progress()

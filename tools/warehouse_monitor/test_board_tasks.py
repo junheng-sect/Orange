@@ -21,3 +21,37 @@ class IndoorDispatchTests(unittest.TestCase):
                     self.assertEqual(args[args.index('--map-frame') + 1], str(frame))
                     self.assertEqual(args[args.index('--nav-config') + 1],
                                      str(scripts / 'nav_test/indoor_fly_nav.yaml'))
+
+    def test_damper_is_optional_and_survives_dispatch(self):
+        import json
+        from threading import Event
+        from task_dispatch import Dispatch
+        task = dict(id='test_indoor3_5', mapId='indoor', automatic=False)
+        catalog = dict(tasks=[task],maps={'indoor':dict(key='shelf',sha256='test')})
+        for extra in ({},{'damperDeg':20}):
+            with tempfile.TemporaryDirectory() as tmp:
+                cache = Path(tmp)
+                (cache/'display').mkdir()
+                (cache/'display/shelf.bin').touch()
+                (cache/'display/shelf.json').write_text(json.dumps(dict(sha256='test')))
+                q=Dispatch(catalog,cache,'orange',[],Event(),'~/catkin_ws')
+                req=dict(id='a'*32,taskId=task['id'],mapKey='shelf',confirmAuto=False,**extra)
+                q.submit(req)
+                with patch.object(q,'remote',return_value=dict(boot='fixture',active=None,request=None)) as remote:
+                    q.tick()
+                payload=remote.call_args.args[1]
+                self.assertEqual({k:v for k,v in payload.items() if k=='damperDeg'},extra)
+                with patch.object(board_tasks,'catalog',return_value=catalog), patch.object(board_tasks,'BOOT','fixture'), \
+                     patch.object(board_tasks,'get_record',return_value=None), patch.object(board_tasks,'active_record',return_value=None), \
+                     patch.object(board_tasks,'session_exists',return_value=False), patch.object(board_tasks,'write'), \
+                     patch.object(board_tasks,'tmux') as tmux, patch.object(board_tasks,'save') as save:
+                    tmux.return_value.returncode=0
+                    board_tasks.submit(payload)
+                    args=board_tasks.script_command(task,save.call_args.args[0].get('damperDeg'))
+                if extra:
+                    self.assertEqual(args[-2:],['--damper-deg','20'])
+                else:
+                    self.assertNotIn('--damper-deg',args)
+                for invalid in (True,-1,101,'20'):
+                    with self.assertRaises(ValueError):
+                        q.submit(dict(req,damperDeg=invalid))

@@ -146,6 +146,7 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
     const closes = task ? closesRoute(task.points) : false;
     const stops = task ? stopLabels(task, closes) : new Map();
     byId("task-details").hidden = !task;
+    byId("task-damper-row").hidden = task?.id !== "test_indoor3_5";
     if (task) {
       byId("task-trigger").textContent = task.manual ? "全程遥控手飞"
         : task.automatic
@@ -307,6 +308,7 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
       if (verb === "submit") {
         pinMap();
         nextId = null;
+        byId("task-damper").value = "";
       }
     } catch (error) {
       report(error.message);
@@ -324,7 +326,10 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
 
   function payload(task, confirmAuto) {
     nextId ??= randomId();
-    return { id: nextId, taskId: task.id, mapKey: map.key, confirmAuto };
+    const body = { id: nextId, taskId: task.id, mapKey: map.key, confirmAuto };
+    const input = byId("task-damper");
+    if (task.id === "test_indoor3_5" && input.value !== "") body.damperDeg = input.valueAsNumber;
+    return body;
   }
 
   function watchingFlight() {
@@ -332,7 +337,9 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
       && status.board.active.state !== "waiting_fcu";
   }
 
+  byId("task-damper").addEventListener("input", () => { nextId = null; });
   selector.addEventListener("change", () => {
+    byId("task-damper").value = "";
     nextId = null;
     report();
     paintDetails();
@@ -340,6 +347,7 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
   byId("task-confirm").addEventListener("click", () => {
     const task = selected();
     if (!task) return;
+    if (task.id === "test_indoor3_5" && !byId("task-damper").reportValidity()) return;
     const body = payload(task, task.automatic);
     if (task.automatic) {
       confirmation = body;

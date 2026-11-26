@@ -404,3 +404,13 @@ test5 的 EGO 三维规划上限为 0.40 m/s、0.40 m/s²，执行器和网关�
 通道 6 录制 `test_indoor5_*.bag`。任务 JSON 含每张观测的角点与拟合误差、各批次的候选高度和访问顺序、到达航段、实际 QR 正文，以及 `tag_counts` 的发现、通过预检、到达、读对数量。普通未读到会继续下一张；飞手切出 OFFBOARD 后结束本圈。
 
 在私有 master 上，`scripts/nav_test/tests/run_indoor4_isolated.sh --indoor5` 验证六签任务与实发 action，`scripts/nav_test/tests/run_indoor5_replay.sh <历史实验目录> <回放输出目录>` 可复核 11 月 20 日 16:49 室内 test4 的四张照片和三张扫码命中原图。
+
+## 室内 test3_5 四点减振对照
+
+在板端工作空间根目录运行 `./scripts/nav_test_indoor3_5.sh --damper-deg 20`。手持预览加 `--preview`。网页选择“室内 test3_5 · 四点减振对照”也可填写硬度；留空记录为“未标注”。等室内重定位、相机和录像器就绪，起飞前拨下 Channel 6。人工起飞悬停后切 OFFBOARD，依次经过左下、左上、右上、右下，右下保持，由飞手接管、落地上锁，再关 Channel 6、等封存、收尾。一趟的实际时长由航线执行和遥控录制区间决定。
+
+沿用 `indoor3_route.yaml` 的四点、航向和限高，任务规划速度和加速度各为 0.40，单位分别为 m/s 和 m/s²。全程写 1280×960、15 fps 无损灰度 MKV、逐帧时间戳和定位 bag。每段按导航里程计源时间跟踪末次持续进入半径 0.15 m 的时刻 t0，确认停稳后保留该次进入的采样。t0 后 2、3、4 秒各选一张最接近的 4224×3136 原图；100 ms 内无有效帧标缺失。各点目标、确认时间、离开时间、照片及实测里程计写入目标记录；第四点的接管以 bag 中 OFFBOARD 切出为准。提前关通道或重开会分段保存，未配对的照片有空帧号。
+
+按正常 `import-flight-experiment --list --date YYYY-MM-DD` 和 `--run YYYY-MM-DD/实验ID` 导入。在装有 Python 3、OpenCV contrib、NumPy 和 FFmpeg 的电脑上运行 `python3 tools/score_indoor3_5.py "$RUN" "$OUT"`，其中 RUN 为含 manifest.json 的归档目录，OUT 为分析目录。输出逐帧目标与光流 CSV、12 张原图的独立结果、原速回放和中文报告。同一 OpenCV 字典和解码器用于各硬度。纸边测量定位于左纸边及顶部胶带，背景对比度不足时缺测；保留检测帧，短时漏检最多按光流追踪 0.25 秒，另在整帧尝试读出正确 QR。刹停为 [t0, t0+1.5 s)，稳态为 [t0+1.5 s, t0+5 s)。分母包含未检出预期标签的有效帧，分别列出缺录、里程计超差与无法估计的余振。连续三帧的横竖边缘宽度和光流抖动均恢复至该点稳态 P95 内，才报告恢复时间。
+
+隔离地面验收使用 `scripts/nav_test/tests/run_indoor3_1_isolated.sh "$NEW_EVIDENCE_DIR" --mode damper_ground`，须占用空闲的真实 OV13855；使用单独 master、模拟 RC 和无飞控输出的网关。结果清单保留“地面相机+模拟航线”标记。合成相机测试可选 `damper` 或 `damper_stop`。

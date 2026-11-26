@@ -1171,7 +1171,9 @@ namespace ego_planner
         break;
       }
     }
-    if (t > planner_manager_->global_data_.global_duration_) // Last global point
+    // The loop also exhausts when the final sample lands exactly on the duration.
+    // In that case retaining the previous waypoint can make a new leg appear shorter than 0.2 m.
+    if (t >= planner_manager_->global_data_.global_duration_)
     {
       local_target_pt_ = end_pt_;
       planner_manager_->global_data_.last_progress_time_ = planner_manager_->global_data_.global_duration_;

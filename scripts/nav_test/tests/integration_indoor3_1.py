@@ -89,7 +89,7 @@ class Camera:
             self.usb_images = rospy.Publisher('/usb_cam/image_raw', Image, queue_size=1)
             # Padded rows exercise mono8 step handling and distinguish this stream.
             self.usb_pixels = (bytes([101]) * 1280 + bytes(4)) * 800
-        self.images = rospy.Publisher('/ov13855_full/image_raw', Image, queue_size=1)
+        self.images = None if mode == 'damper_ground' else rospy.Publisher('/ov13855_full/image_raw', Image, queue_size=1)
         self.pixels = bytes(4224 * 3136)
         self.tag_timer = rospy.Timer(rospy.Duration(.08), self.publish_tags)
         self.image_timer = rospy.Timer(rospy.Duration(.2), self.publish_image)
@@ -103,7 +103,7 @@ class Camera:
         if nearest == 1 and distance[nearest] < .04:
             if self.mode == 'dropout':
                 return
-            if self.mode == 'stop' and self.runner and self.runner.record and not self.interrupted:
+            if self.mode in ('stop','damper_stop') and self.runner and self.runner.record and not self.interrupted:
                 self.runner.s.stop('synthetic pilot interruption')
                 self.interrupted = True
         if self.usb and not (self.mode == 'dual_dropout' and nearest == 1 and distance[nearest] < .04):
@@ -120,7 +120,7 @@ class Camera:
             if not missing:
                 self.usb_images.publish(Image(header=Header(frame_id=self.usb_frame, stamp=rospy.Time.now()),
                                               width=1280, height=800, step=1284, encoding='mono8', data=self.usb_pixels))
-        if self.images.get_num_connections():
+        if self.mode != 'damper_ground' and self.images.get_num_connections():
             self.images.publish(Image(header=Header(frame_id=FRAME, stamp=rospy.Time.now()),
                                       width=4224, height=3136, step=4224, encoding='mono8', data=self.pixels))
 
@@ -211,7 +211,7 @@ def main():
     assert os.environ.get('ROS_MASTER_URI') == 'http://127.0.0.1:11447'
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', required=True, type=Path)
-    parser.add_argument('--mode', choices=('full', 'dropout', 'stop', 'photo', 'dual', 'dual_dropout', 'dual_missing_photo'), default='full')
+    parser.add_argument('--mode', choices=('full', 'dropout', 'stop', 'photo', 'dual', 'dual_dropout', 'dual_missing_photo', 'damper','damper_stop','damper_ground'), default='full')
     args = parser.parse_args()
     test_rows()
     rospy.init_node('indoor3_1_isolated')
@@ -236,16 +236,45 @@ def main():
         runner_class = Indoor3Runner if args.mode == 'photo' else SurveyRunner
         if args.mode.startswith('dual'):
             runner_class = DualSurveyRunner
+        if args.mode.startswith('damper'):
+            from nav_indoor3_5 import DamperRunner, Samples
+            from damper_fixture import Switch, verify_route
+            runner_class = DamperRunner
+            run_args.hold = 5.
+            tracker = Samples()
+            for i, distance in enumerate((.13,.17,.14,.10)):
+                tracker.observe(1_000_000_000+i*100_000_000,distance,0.,0.)
+            assert tracker.entry == 1_200_000_000
+            if args.mode == 'damper_ground':
+                switch = Switch()
         runner = runner_class(run_args, rospy.get_param('/drone_nav/config'), state, buf, prepare, check, client)
         camera.runner = runner
         deadline = time.monotonic() + 30
         while runner.inputs_problem() or not prepare().success or not check(path_of([flight.p, route['points'][0]['xyz']])).valid:
             assert time.monotonic() < deadline, 'inputs/observed free grid not ready'
             time.sleep(.1)
+        if args.mode == 'damper_ground':
+            time.sleep(.7)
+            switch.set(True)
         ok = runner.preview()
-        assert ok == (args.mode in ('full', 'photo', 'dual')), runner.record
+        assert ok == (args.mode in ('full', 'photo', 'dual','damper','damper_ground')), runner.record
         record = json.loads(Path(runner.record_path).read_text())
-        if args.mode == 'photo':
+        if args.mode.startswith('damper'):
+            verify_route(args.out, record, args.mode == 'damper_stop')
+            if args.mode == 'damper_ground':
+                assert len(switch.events)==1
+                # The preview flight ends; feed a manual takeover and keep CH6 high.
+                flight.close()
+                flight = None
+                from mavros_msgs.msg import State
+                state_pub = rospy.Publisher('/mavros/state',State,queue_size=4)
+                for _ in range(15):
+                    state_pub.publish(State(header=Header(stamp=rospy.Time.now()),connected=True,armed=True,mode='POSCTL'))
+                    time.sleep(.1)
+                assert len(switch.events)==1
+                switch.set(False)
+                switch.timer.shutdown()
+        elif args.mode == 'photo':
             assert record['test'] == 'test_indoor3' and record['end'] == 'SUCCEEDED'
             assert len(record['legs']) == 4 and not (args.out / 'apriltag_observations.csv').exists()
             for leg in record['legs']:
@@ -259,7 +288,8 @@ def main():
                        for topic, _ in rosgraph.Master(rospy.get_name()).getSystemState()[0])
     finally:
         camera.close()
-        flight.close()
+        if flight is not None:
+            flight.close()
         rospy.signal_shutdown('test complete')
 
 

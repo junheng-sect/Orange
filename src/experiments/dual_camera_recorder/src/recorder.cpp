@@ -163,6 +163,7 @@ public:
 class Recorder {
     ros::NodeHandle nh,priv{"~"};
     fs::path directory;
+    std::regex allowed;
     int camera_count = 2;
     std::unique_ptr<Worker> workers[2];
     ros::Subscriber images[2],events,status;
@@ -192,7 +193,6 @@ class Recorder {
         auto pos=msg->data.find(' ');
         if (pos==std::string::npos) return;
         auto action=msg->data.substr(0,pos); fs::path bag(msg->data.substr(pos+1));
-        static const std::regex allowed("test_indoor3_4_[0-9]{6,}\\.bag");
         if (bag.parent_path()!=directory || !std::regex_match(bag.filename().string(),allowed)) return;
         if (action=="OPEN" && bag.string()!=last_path) {
             close("新包开始前未收到上一包 CLOSED",true);
@@ -259,6 +259,10 @@ public:
         std::string dir;
         if (!priv.getParam("directory",dir)) throw std::runtime_error("missing ~directory");
         directory=fs::canonical(dir);
+        const auto prefix = priv.param<std::string>("bag_prefix", "test_indoor3_4");
+        if (prefix != "test_indoor3_4" && prefix != "test_indoor3_5")
+            throw std::runtime_error("unknown recording profile");
+        allowed = std::regex(prefix + R"(_[0-9]{6,}\.bag)");
         camera_count = priv.param("ov13855_only", false) ? 1 : 2;
         ready_pub=priv.advertise<std_msgs::Bool>("ready",1,true);
         state_pub=priv.advertise<std_msgs::String>("status",1,true);

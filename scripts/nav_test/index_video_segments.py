@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Index finalized test3-4 segments for import-flight-experiment after ground cleanup."""
+"""Index finalized test3-4 and test3-5 segments for import-flight-experiment after ground cleanup."""
 import argparse
 import csv
 import json
@@ -15,7 +15,7 @@ def index(directory, root):
     cameras = profile.read_text().split() if profile.exists() else ['ov13855', 'ov9281']
     if cameras not in (['ov13855'], ['ov13855', 'ov9281']):
         raise ValueError('无法识别录像相机清单：' + str(cameras))
-    for bag in sorted(directory.glob('test_indoor3_4_*.bag')):
+    for bag in sorted(directory.glob('test_indoor3_[45]_*.bag')):
         stem = bag.stem
         expected = [directory / (stem + '_' + camera + '.mkv') for camera in cameras]
         expected.extend(directory / (stem + suffix) for suffix in ('_frames.csv', '_events.csv'))
@@ -36,11 +36,18 @@ def index(directory, root):
             files.append(describe(profile))
         # Session logs may be shared by several bags. Index them after the task has stopped.
         for pattern in ('*.log', 'drone_reloc_*.json', 'dll_observer.json', 'dll_*.yaml'):
-            files.extend(describe(path) for path in sorted(directory.glob(pattern)) if path.is_file())
+            files.extend(describe(path) for path in sorted(directory.glob(pattern)) if path.is_file()
+                         and not (stem.startswith('test_indoor3_5_') and path.name == 'nav_test.log'))
         dest = root / run / 'manifest.json'
         dest.parent.mkdir(parents=True, exist_ok=True)
         record = dict(run_id=run, status='missing_ulog', window=window, pairing={}, files=files,
                       video=dict(enabled_cameras=cameras, complete=complete, final_event=terminal, missing=missing, timing_gaps=timing_gaps))
+        if stem.startswith('test_indoor3_5_'):
+            from damper_archive import read_takeovers, supplement
+            info, extras = supplement(bag, describe, read_takeovers(bag))
+            record['video']['damper_test'] = info
+            names = {item['name'] for item in extras}
+            record['files'] = [item for item in files if item['name'] not in names]+extras
         if dest.exists():
             previous = json.loads(dest.read_text())
             old_bag = next(item for item in previous['files'] if item['name'] == bag.name)

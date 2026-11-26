@@ -15,13 +15,13 @@ import time
 import numpy as np
 
 
-def run(folder, dual):
+def run(folder, dual, profile='test_indoor3_4'):
     scripts = Path(__file__).resolve().parents[2]
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
     os.environ.update(ROS_MASTER_URI='http://127.0.0.1:' + str(port), ROS_IP='127.0.0.1',
-                      ROS_HOSTNAME='127.0.0.1', RC_BAG_PREFIX='test_indoor3_4', RC_BAG_DIR=str(folder))
+                      ROS_HOSTNAME='127.0.0.1', RC_BAG_PREFIX=profile, RC_BAG_DIR=str(folder))
     import rosgraph
     import rospy
     from geometry_msgs.msg import PoseStamped
@@ -58,7 +58,7 @@ def run(folder, dual):
             time.sleep(.1)
         rospy.init_node('test34_fixture', disable_signals=True)
         video = start('video', 'rosrun', 'dual_camera_recorder', 'dual_camera_recorder_node',
-                      '_directory:=' + str(folder), '_ov13855_only:=' + ('false' if dual else 'true'))
+                      '_directory:=' + str(folder), '_bag_prefix:='+profile, '_ov13855_only:=' + ('false' if dual else 'true'))
         bag = start('bag', str(scripts / 'rc_record/start_rc_record.sh'), '_rc_topic:=/fixture/ch6')
         rc = rospy.Publisher('/fixture/ch6', RCIn, queue_size=5)
         pose = rospy.Publisher('/mavros/local_position/pose', PoseStamped, queue_size=4)
@@ -155,7 +155,8 @@ def run(folder, dual):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--dual', action='store_true', help='Exercise the original two-camera recorder mode')
+    parser.add_argument('--profile', choices=('test_indoor3_4','test_indoor3_5'), default='test_indoor3_4')
     args = parser.parse_args()
     folder = Path(tempfile.mkdtemp(prefix='test34-boundaries.'))
     print(folder, flush=True)
-    run(folder, args.dual)
+    run(folder, args.dual, args.profile)
