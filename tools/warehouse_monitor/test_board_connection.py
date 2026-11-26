@@ -9,11 +9,33 @@ from unittest.mock import patch
 
 import board_connection
 import desktop
-from camera_view import Camera
+from camera_view import Camera, REMOTE
 from task_dispatch import Dispatch
 
 
 class BoardConnectionTests(unittest.TestCase):
+    def test_camera_bootstrap_on_split_and_merged_workspaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for directory in ('devel', 'scripts', 'tools/warehouse_monitor'):
+                (root / directory).mkdir(parents=True)
+            (root / 'setup-noetic.bash').write_text('export CAMERA_TEST_ENV=noetic\n')
+            (root / 'devel/setup.bash').write_text('export CAMERA_TEST_ENV+=-workspace\n')
+            (root / 'tools/warehouse_monitor/camera_sender.py').write_text(
+                'import os\nprint(os.environ["CAMERA_TEST_ENV"])\n')
+            command = REMOTE.replace('/opt/ros/noetic/setup.bash', './setup-noetic.bash')
+            helper = root / 'scripts/ros_net.sh'
+            for script, expected, code in ((None, 'noetic-workspace', 0),
+                                           ('export CAMERA_TEST_ENV+=-network', 'noetic-workspace-network', 0),
+                                           ('return 1', '', 1)):
+                with self.subTest(script=script):
+                    if script is not None:
+                        helper.write_text(script + '\n')
+                    result = subprocess.run(['bash', '-c', command], cwd=root,
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, code, result.stderr)
+                    self.assertEqual(result.stdout.strip(), expected)
+
     def test_settings_precedence(self):
         with tempfile.TemporaryDirectory() as tmp, patch.dict(os.environ, {}, clear=True):
             env = Path(tmp) / '.env'
@@ -67,4 +89,4 @@ class BoardConnectionTests(unittest.TestCase):
                         with patch('camera_view.REMOTE', 'pwd -P'):
                             command = Camera(ssh, 'orange', Event(), root).command
                             result = subprocess.check_output(command, text=True)
-                        self.assertEqual(result.strip(), str(workspace))
+                        self.assertEqual(result.strip(), str(workspace.resolve()))

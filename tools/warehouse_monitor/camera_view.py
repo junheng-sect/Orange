@@ -12,8 +12,14 @@ import time
 from board_connection import DEFAULT_ROOT, in_checkout
 
 HEADER = struct.Struct("!cQI")
-REMOTE = ("source /opt/ros/noetic/setup.bash && source devel/setup.bash && "
-          "source scripts/ros_net.sh && exec python3 -B tools/warehouse_monitor/camera_sender.py")
+REMOTE = """set -e
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+# Split workspaces use the existing ROS environment for board-local camera access.
+if [[ -e scripts/ros_net.sh ]]; then
+    source scripts/ros_net.sh
+fi
+exec python3 -B tools/warehouse_monitor/camera_sender.py"""
 MODES = {"auto", "raw", "task", "local"}
 
 
