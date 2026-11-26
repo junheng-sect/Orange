@@ -1,5 +1,7 @@
 # 仓库无人机巡检
 
+在当前 Orange 检出中执行 `export ORANGE_ROOT="$(git rev-parse --show-toplevel)"`，下文命令以此定位仓库。
+
 网页、地图缓存和巡检点库运行在打开浏览器的电脑。实时监看时，该电脑通过 SSH 直接连接 Orange Pi，板端从现有 ROS 节点读取数据。浏览器和板端遥测端口均只监听环回地址，三维视图需要 WebGL 2。
 
 ## macOS 直连部署
@@ -16,17 +18,17 @@ python3 -m pip install -r requirements.txt
 
 已有仓库时，在 `orange` 分支执行 `git pull --ff-only origin orange`，再进工具目录。
 
-连接板端所在的局域网。Xiaomi 网络上的板端地址为 `192.168.31.32`，以下以它为例。若 Mac 已经配置好 `ssh orange`，可把下面的目标换成 `orange`。首次连接核对板端 SSH 主机指纹，在线模式和地图同步需能通过 `BatchMode=yes` 登录。
+首次连接使用 SSH 别名 `orange` 核对板端指纹。在线监控和地图同步使用公钥登录。桌面端按 `--host`、`ORANGE_SSH_HOST`、`orange` 的顺序选主机。`ORANGE_REMOTE_ROOT` 默认为板端的 `~/orange`，也支持远端绝对路径或相对于远端家目录的路径。两个变量均可写在当前 Orange 检出根目录的私有 `.env`，进程环境优先。地图来自远端登录账户的 `~/test_data/mapping`。
 
 ```bash
-ssh -o BatchMode=yes orangepi@192.168.31.32 true
-./warehouse-monitor --host orangepi@192.168.31.32 --sync 20261021_110311_indoor
-./warehouse-monitor --host orangepi@192.168.31.32
+ssh -o BatchMode=yes orange true
+./warehouse-monitor --host orange --sync 20261021_110311_indoor
+./warehouse-monitor --host orange
 ```
 
 打开 [Mac 的 127.0.0.1:8765](http://127.0.0.1:8765/)，保持启动终端打开，Ctrl+C 退出。同步的地图 ID 应与板端当前使用的地图目录一致。Mac 会单独保存地图缓存和巡检点。离线试用可运行 `./warehouse-monitor --offline`，此时无需连接 Orange Pi。
 
-Mac 的飞控状态通过同一条 SSH 隧道读取。默认使用板端环回端口 `8767`，与 Ubuntu 的 `8765` 区分；Mac 浏览器仍打开本机 `8765`。需要其他端口时使用 `--board-port`。板端需部署同一版本的 `tools/warehouse_monitor`，并保留现有的 `mid360s_ws/docker/ros-noetic-rviz/local_view/scripts/drone_status.py`，其只读飞控检查由板端监看进程复用。
+Mac 的飞控状态通过同一条 SSH 隧道读取。默认使用板端环回端口 `8767`，与 Ubuntu 的 `8765` 区分；Mac 浏览器仍打开本机 `8765`。需要其他端口时使用 `--board-port`。板端需部署同一版本的 `tools/warehouse_monitor`，并从同一检出加载 `docker/ros-noetic-rviz/local_view/scripts/drone_status.py`，其只读飞控检查由板端监看进程复用。
 
 ## Ubuntu
 
@@ -82,12 +84,12 @@ npm install --no-save --no-package-lock three@0.180.0 esbuild@0.25.12
 - 室外图 `20261105_114605_outdoor` 提供 test1–12。室内飞扫图 `20261114_101654_indoor_fly_raw_000001` 提供室内 test1–4，采用 `--ev-mode odom`。旧室内图可在折叠的「手工预览」中加载原有点位。
 - 「确认任务，等待上电」将请求保存在电脑服务内，最多等待 15 分钟。板端连接后由 `warehouse-nav` tmux 会话等待飞控，确认地面上锁后启动测试。刷新页面或断开 Wi-Fi 不会结束已启动的任务。电脑服务重启会清除未送达请求，板端重启需要重新下发。
 - 室外 test6、test10、test11 选中后有独立确认。等「等待遥控解锁」再地面解锁，脚本会切 OFFBOARD 并起飞。带导航的手飞起飞任务按网页提示悬停，等设定值预发送后切 OFFBOARD。
-- 室外 test12 全程遥控手飞。原室外重定位确认、FAST-LIO2 与通道 6 录包器就绪后，可拨通道 6，确认录包后静置 20 秒。网页主位姿与已飞轨迹使用 FAST-LIO2 经原重定位对齐到地图的结果。DLL 在旁路匹配先验图，加载、失配和退出只改变对照简表的可用性。落地上锁后关通道 6，确认已封包再点击「结束任务并收尾」。板端可直接执行 `~/mid360s_ws/scripts/nav_test12.sh`，或加 `--no-dll` 使用原手飞录包入口。
-- 室外 **test12 · YWL** 使用同一套手飞和录包流程，地图位姿来自 YWL。板端入口为 `~/mid360s_ws/scripts/nav_test12.sh --ywl`。YWL 失效时网页回到仍有效的 FAST-LIO2 地图位姿并显示原因。
+- 室外 test12 全程遥控手飞。原室外重定位确认、FAST-LIO2 与通道 6 录包器就绪后，可拨通道 6，确认录包后静置 20 秒。网页主位姿与已飞轨迹使用 FAST-LIO2 经原重定位对齐到地图的结果。DLL 在旁路匹配先验图，加载、失配和退出只改变对照简表的可用性。落地上锁后关通道 6，确认已封包再点击「结束任务并收尾」。板端可直接执行 `"$ORANGE_ROOT"/scripts/nav_test12.sh`，或加 `--no-dll` 使用原手飞录包入口。
+- 室外 **test12 · YWL** 使用同一套手飞和录包流程，地图位姿来自 YWL。板端入口为 `"$ORANGE_ROOT"/scripts/nav_test12.sh --ywl`。YWL 失效时网页回到仍有效的 FAST-LIO2 地图位姿并显示原因。
 - 飞行中以遥控器接管。着地上锁后，结束通道 6 录包，再从网页收尾。板端可用 `tmux attach -t warehouse-nav` 查看运行输出，`Ctrl+B D` 分离。日志在板端 `~/test_data/nav_test`，网页启动的目录名称带有请求 ID 前八位。
 - 室内 test3 由飞手起飞悬停，设定值预发送后切 OFFBOARD，从当前位置规划到货架左下拍照点。到点后对准货架，按左下、左上、右上、右下拍摄，每点保存一张全分辨率 PNG 和时间戳、位姿。任务只跑一圈，照片和目标记录在同一板端日志目录。现场确认机体及顶部结构后方可实飞。
-- 室内 **test3_1 · 四点 AprilTag 识别** 沿用 test3 航线，每点稳住 1 s 后拍一张全图，并在 2 s 窗口统计 tag36h11。每点每个 ID 在 `apriltag_observations.csv` 占一行，保留图像时间戳、命中帧数及代表帧的机体位姿。终点显示 0–5 的覆盖数、缺失和额外 ID。板端入口 `~/mid360s_ws/scripts/nav_test_indoor3_1.sh`，支持 `--preview`。
-- 室内 test4 沿用四个拍照点。每个观察点识别标签后，按本批最短访问顺序到各标签前方 0.8 m（相机光心）读取 QR，最后返回右下悬停。任务栏显示当前标签和读取结果，图上青绿色编号为本批扫码顺序。板端也可运行 `~/mid360s_ws/scripts/nav_test_indoor4.sh`。
+- 室内 **test3_1 · 四点 AprilTag 识别** 沿用 test3 航线，每点稳住 1 s 后拍一张全图，并在 2 s 窗口统计 tag36h11。每点每个 ID 在 `apriltag_observations.csv` 占一行，保留图像时间戳、命中帧数及代表帧的机体位姿。终点显示 0–5 的覆盖数、缺失和额外 ID。板端入口 `"$ORANGE_ROOT"/scripts/nav_test_indoor3_1.sh`，支持 `--preview`。
+- 室内 test4 沿用四个拍照点。每个观察点识别标签后，按本批最短访问顺序到各标签前方 0.8 m（相机光心）读取 QR，最后返回右下悬停。任务栏显示当前标签和读取结果，图上青绿色编号为本批扫码顺序。板端也可运行 `"$ORANGE_ROOT"/scripts/nav_test_indoor4.sh`。
 - 室内 test5 用标签四角和固定纸面朝向拟合中心；观察点和扫码点地图航向 −89.5°，光心停距 0.80 m，机体地图限高 1.70 m。
 - `tasks.json` 由板端 `python3 build_task_catalog.py` 导出，包含真实纳秒时间戳和 PCD SHA-256。修改预设任务或重建任务绑定的地图后，重新导出目录并同步电脑地图缓存。任务的计划航点、EGO 实时轨迹分别绘制。
 
@@ -99,8 +101,8 @@ npm install --no-save --no-package-lock three@0.180.0 esbuild@0.25.12
 在板端用实际封包路径导出，第二个参数指定新目录。
 
 ```bash
-source ~/mid360s_ws/devel/setup.bash
-python3 ~/orange/tools/warehouse_monitor/export_dll_drift.py "$bag" "${bag%.bag}_drift"
+source "$ORANGE_ROOT"/devel/setup.bash
+python3 "$ORANGE_ROOT"/tools/warehouse_monitor/export_dll_drift.py "$bag" "${bag%.bag}_drift"
 ```
 
 `drift.csv` 保留每个局部里程计帧的时间、有效性、原因和两路位置。差值仅在 TRACKING、校正年龄小于 1.5 秒、原定位与 TF 新鲜并有同帧位姿和校正时填写。`summary.json` 记录配对比例、不可用区间、水平差与绝对高度差/航向差的中位数、P95 和最大值。这些值量度相对先验地图的偏离。存在同源裁图清单时，导出器也用原始静止点云做多初值 ICP，单列各算法相对参考的位置误差；可用 `--icp-map 裁图目录` 指定随包地图。缺少参考或配准失效会在报告中说明。

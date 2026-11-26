@@ -20,6 +20,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, build_opener
 
+from board_connection import DEFAULT_ROOT, in_checkout, remote_path, settings
 from camera_view import Camera, MODES
 from map_cloud import display_map
 from inspection import Conflict, Inspection
@@ -28,9 +29,9 @@ from task_dispatch import Dispatch, TaskConflict, catalog
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_CACHE = Path.home() / ".cache/warehouse-monitor"
-RVIZ_MAPS = Path.home() / ".local/share/ego-swarm-rviz/maps"
-REMOTE_MONITOR = "/home/orangepi/orange/tools/warehouse_monitor/serve.sh"
-REMOTE_MAPS = "/home/orangepi/test_data/mapping"
+RVIZ_MAPS = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "ego-swarm-rviz/maps"
+REMOTE_MONITOR = "./tools/warehouse_monitor/serve.sh"
+REMOTE_MAPS = "test_data/mapping"
 MAP_ID = re.compile(r"[A-Za-z0-9_-]{1,160}")
 MAP_KEY = re.compile(r"([A-Za-z0-9_-]{1,160})-(\d{1,24})-(\d{1,15})")
 SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
@@ -44,7 +45,7 @@ STATIC = {
 
 
 def read_identity(host, map_id):
-    path = shlex.quote(f"{REMOTE_MAPS}/{map_id}/map_world.pcd")
+    path = remote_path(f"{REMOTE_MAPS}/{map_id}/map_world.pcd")
     command = (
         "python3 -c " + shlex.quote(
             "import os,sys; s=os.stat(sys.argv[1]); print(s.st_mtime_ns, s.st_size)"
@@ -90,7 +91,7 @@ def sync_map(cache, host, map_id):
             source = path
             break
     if source is None:
-        remote = shlex.quote(f"{REMOTE_MAPS}/{map_id}/{local.name}")
+        remote = remote_path(f"{REMOTE_MAPS}/{map_id}/{local.name}")
         with temporary_path(folder) as temp:
             with temp.open("wb") as file:
                 subprocess.run([*SSH, host, "cat -- " + remote], stdout=file, check=True, timeout=150)
@@ -114,7 +115,8 @@ def sync_map(cache, host, map_id):
 
 
 class Telemetry:
-    def __init__(self, host, local_port, board_port, stopped, board_status=False):
+    def __init__(self, host, local_port, board_port, stopped, board_status=False, remote_root=DEFAULT_ROOT):
+        self.remote_root = remote_root
         self.host, self.local_port, self.board_port = host, local_port, board_port
         self.stopped = stopped
         self.board_status = board_status
@@ -136,7 +138,7 @@ class Telemetry:
                 self.stopped.wait(.25)
                 continue
             try:
-                with tunnel(self.host, self.local_port, self.board_port, self.board_status) as connection:
+                with tunnel(self.host, self.local_port, self.board_port, self.board_status, self.remote_root) as connection:
                     while self.wanted() and connection.poll() is None and not self.stopped.wait(.25):
                         pass
             except (OSError, subprocess.SubprocessError) as error:
@@ -331,11 +333,12 @@ def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=No
 
 
 @contextmanager
-def tunnel(host, local_port, board_port, board_status=False):
+def tunnel(host, local_port, board_port, board_status=False, remote_root=DEFAULT_ROOT):
     forward = f"127.0.0.1:{local_port}:127.0.0.1:{board_port}"
     command = f"exec env PYTHONDONTWRITEBYTECODE=1 {REMOTE_MONITOR} --port {board_port} --telemetry-only --stop-on-stdin-close"
     if board_status:
         command += " --board-status"
+    command = in_checkout(remote_root, command)
     with subprocess.Popen([*SSH, "-T", "-o", "ExitOnForwardFailure=yes", "-o", "ServerAliveInterval=3",
                            "-o", "ServerAliveCountMax=2", "-L", forward, host, command],
                           stdin=subprocess.PIPE, start_new_session=True) as connection:
@@ -357,7 +360,9 @@ def tunnel(host, local_port, board_port, board_status=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="orange")
+    config = settings(ROOT.parents[1] / ".env")
+    remote_root = config["ORANGE_REMOTE_ROOT"]
+    parser.add_argument("--host", default=config["ORANGE_SSH_HOST"])
     parser.add_argument("--cache", type=Path, default=DEFAULT_CACHE)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--tunnel-port", type=int, default=8766)
@@ -388,9 +393,9 @@ def main():
     signal.signal(signal.SIGINT, stop)
     signal.signal(signal.SIGTERM, stop)
     upstream = None if args.offline else f"http://127.0.0.1:{args.tunnel_port}"
-    telemetry = None if args.offline else Telemetry(args.host, args.tunnel_port, args.board_port, stopped, args.board_status)
-    dispatch = None if args.offline else Dispatch(catalog(ROOT), args.cache, args.host, SSH, stopped)
-    camera = None if args.offline else Camera(SSH, args.host, stopped)
+    telemetry = None if args.offline else Telemetry(args.host, args.tunnel_port, args.board_port, stopped, args.board_status, remote_root)
+    dispatch = None if args.offline else Dispatch(catalog(ROOT), args.cache, args.host, SSH, stopped, remote_root)
+    camera = None if args.offline else Camera(SSH, args.host, stopped, remote_root)
     with serve(args.port, args.cache, upstream, telemetry, args.board_status, dispatch, camera) as http:
         with (telemetry.running() if telemetry else nullcontext()), (dispatch.running() if dispatch else nullcontext()):
             http.timeout = .35

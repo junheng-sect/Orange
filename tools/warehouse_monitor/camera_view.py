@@ -3,14 +3,23 @@ import collections
 import json
 import os
 import select
+import shlex
 import struct
 import subprocess
 import threading
 import time
 
+from board_connection import DEFAULT_ROOT, in_checkout
+
 HEADER = struct.Struct("!cQI")
-REMOTE = ("source /opt/ros/noetic/setup.bash && source ~/orange/devel/setup.bash && "
-          "source ~/mid360s_ws/scripts/ros_net.sh && exec python3 -B ~/orange/tools/warehouse_monitor/camera_sender.py")
+REMOTE = """set -e
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+# Split workspaces use the existing ROS environment for board-local camera access.
+if [[ -e scripts/ros_net.sh ]]; then
+    source scripts/ros_net.sh
+fi
+exec python3 -B tools/warehouse_monitor/camera_sender.py"""
 MODES = {"auto", "raw", "task", "local"}
 
 
@@ -91,8 +100,9 @@ class LocalDetector:
 
 
 class Camera:
-    def __init__(self, ssh, host, stopped):
-        self.command = [*ssh, "-T", "-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=2", host, REMOTE]
+    def __init__(self, ssh, host, stopped, remote_root=DEFAULT_ROOT):
+        command = in_checkout(remote_root, "exec bash -c " + shlex.quote(REMOTE))
+        self.command = [*ssh, "-T", "-o", "ServerAliveInterval=2", "-o", "ServerAliveCountMax=2", host, command]
         self.stopped = stopped
         self.cv = threading.Condition()
         self.viewers = {}

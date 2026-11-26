@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
-SHARED="${EGO_RVIZ_SHARED:-/home/zjh/mid360s_ws/docker/ros-noetic-rviz}"
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/ego-swarm-rviz"
+SHARED="${EGO_RVIZ_SHARED:-$ROOT/../../docker/ros-noetic-rviz}"
 CONTAINER=rviz_ego_swarm
 EGO_IMAGE=ego-swarm-rviz:noetic
 mode=show
 odom=/drone_nav/odom
 master_override=""
 ip_override=""
-map_file="$ROOT/maps/current/map_world.pcd"
+map_file="$DATA/maps/current/map_world.pcd"
 map_required=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -33,10 +34,10 @@ fi
 # Reuse network/display checks only; all layouts, HOME, logs and the container
 # are separate from the user's existing FAST-LIO / relocalization view.
 source "$SHARED/scripts/common.sh"
-CONFIG_DIR="$ROOT"
+CONFIG_DIR="$DATA"
 IMAGE_TAG="$EGO_IMAGE"
 CONTAINER_NAME="$CONTAINER"
-mkdir -p "$ROOT/home/.rviz" "$ROOT/runtime" "$ROOT/logs"
+mkdir -p "$DATA/home/.rviz" "$DATA/runtime" "$DATA/logs"
 master="${master_override:-$(resolve_ros_master)}"
 host="$(printf '%s' "$master" | sed -E 's#^[a-z]+://([^:/]+).*#\1#')"
 if [ "$host" = "$BOARD_CORE_IP" ]; then ensure_core_route "$DEFAULT_BOARD_IP"; fi
@@ -69,7 +70,7 @@ if [ -n "$map_file" ]; then
     log "保存地图=$map_file；固定坐标系=drone_map"
   elif [ "$map_required" -eq 1 ]; then die "地图文件不存在：$map_file"; fi
 fi
-[ -f "$ROOT/home/.rviz/$layout" ] || cp "$ROOT/rviz/$layout" "$ROOT/home/.rviz/$layout"
+[ -f "$DATA/home/.rviz/$layout" ] || cp "$ROOT/rviz/$layout" "$DATA/home/.rviz/$layout"
 if docker container inspect "$CONTAINER" >/dev/null 2>&1; then docker rm "$CONTAINER" >/dev/null; fi
 log "ROS_MASTER_URI=$master ROS_IP=$ros_ip，模型输入=$odom"
 docker run -d --name "$CONTAINER" --network host --ipc=host --gpus all \
@@ -77,8 +78,8 @@ docker run -d --name "$CONTAINER" --network host --ipc=host --gpus all \
   -e DISPLAY="$DISPLAY" -e QT_X11_NO_MITSHM=1 -e DISABLE_ROS1_EOL_WARNINGS=1 \
   -e NVIDIA_VISIBLE_DEVICES=all -e NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display \
   -e ROS_MASTER_URI="$master" -e ROS_IP="$ros_ip" -e XAUTHORITY=/tmp/.docker.xauth \
-  -v /tmp/.X11-unix:/tmp/.X11-unix:rw -v "$ROOT/runtime/.docker.xauth:/tmp/.docker.xauth:ro" \
-  -v "$ROOT/home:/home/ros" -v "$ROOT/logs:/logs" \
+  -v /tmp/.X11-unix:/tmp/.X11-unix:rw -v "$DATA/runtime/.docker.xauth:/tmp/.docker.xauth:ro" \
+  -v "$DATA/home:/home/ros" -v "$DATA/logs:/logs" \
   "${map_mount[@]}" \
   "$EGO_IMAGE" roslaunch /opt/ego-display/launch/real_display.launch "odom:=$odom" "config:=/home/ros/.rviz/$layout" "map_file:=$container_map"
 printf '%s\n' 'EGO-Swarm 独立窗口已启动；停止：ego-rviz --stop'

@@ -1,0 +1,9 @@
+<package format="2">
+  <name>dual_camera_recorder</name><version>0.1.0</version>
+  <description>Channel 6 synchronized lossless grayscale video recording.</description>
+  <maintainer email="junhengsect+1647307223@qq.com">junhengsect</maintainer><license>BSD</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>roscpp</depend><depend>sensor_msgs</depend><depend>std_msgs</depend><depend>boost</depend>
+  <depend>libavcodec-dev</depend><depend>libavformat-dev</depend><depend>libavutil-dev</depend>
+  <test_depend>ffmpeg</test_depend>
+</package>

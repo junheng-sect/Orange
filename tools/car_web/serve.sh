@@ -5,7 +5,7 @@
 # 放在哪台机器上都不影响数据路径。
 # 用法：tools/car_web/serve.sh [端口]
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname -- "$(realpath -e -- "$0")")"
 PORT=${1:-8080}
 # 关掉浏览器缓存，改完页面刷新就生效。
 exec python3 - "$PORT" <<'EOF'

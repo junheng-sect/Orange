@@ -3,12 +3,12 @@
 // 阶段 1：只读显示。阶段 2：停止、暂停/继续、点地图设目标、按点位导航、摇杆；
 // 发目标前先用 /get_plan_movebase 规划（不动车），再按车身轮廓做碰撞检查，确认后才发。
 // 阶段 3：手动重定位（拖出初值，网页里用激光和地图局部匹配微调，再调 /set_relocation）、回充（/autocharge）。
-// 车的地址：Xiaomi 网固定 192.168.31.231，chuangxiangG209 网固定 192.168.8.231，车热点 10.7.5.88。
-// 没给 ?ws= 时三个同时试，用最先连上的那个，断线重连时重新挑；?ws=ws://<地址>:9090 手动指定。
-
+// config.local.js supplies only the endpoints intended for this browser.
 const WS_URLS = (() => {
-  const url = new URLSearchParams(location.search).get('ws');
-  return url ? [url] : ['ws://192.168.31.231:9090', 'ws://192.168.8.231:9090', 'ws://10.7.5.88:9090'];
+  const explicit = new URLSearchParams(location.search).get('ws');
+  if (explicit) return [explicit];
+  const configured = window.CAR_ROSBRIDGE_URLS;
+  return Array.isArray(configured) && configured.length ? configured : ['ws://spirit.local:9090'];
 })();
 // 一轮里都没连上就全部关掉重来：本机代理会接管不在本网段的地址，握手可能一直挂着不失败。
 const WS_TRY_MS = 5000;

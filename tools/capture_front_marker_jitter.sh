@@ -5,7 +5,8 @@ set -euo pipefail
 # The timeout sends SIGINT so rosbag can close the bag cleanly.
 
 DURATION_SEC="${1:-60}"
-BASE_DIR="${2:-/home/vslam/seeker/logs/front_marker_jitter}"
+workspace="$(cd -- "$(dirname -- "$(realpath -e -- "$0")")/.." && pwd -P)"
+BASE_DIR="${2:-$workspace/logs/front_marker_jitter}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 OUT_DIR="${BASE_DIR}/${STAMP}"
 mkdir -p "${OUT_DIR}"

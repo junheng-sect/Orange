@@ -7,15 +7,13 @@
 
 ## Apple Silicon Mac
 
-Ubuntu 原 `ego-rviz` / `scripts/run.sh`、`Dockerfile` 和检查脚本保持原样。
+Ubuntu 使用 `ego-rviz` / `scripts/run.sh`。
 Mac 使用新的 `ego-rviz-mac` / `scripts/run_mac.sh`，构建使用 `Dockerfile.macos`。
 
-先安装 Docker Desktop 4.34+，启用 host networking，并构建 mid360s_ws 的 Mac 显示镜像：
+先安装 Docker Desktop 4.34+，启用 host networking，并从 Orange 根目录构建 Mac 显示镜像：
 
 ```bash
-cd /Users/tom/Projects/mid360s_ws
 ./docker/ros-noetic-rviz/scripts/build_image_mac.sh
-cd /Users/tom/Projects/Orange
 ./tools/ego_rviz/scripts/build_image_mac.sh
 ./tools/ego_rviz/scripts/run_mac.sh
 ./tools/ego_rviz/scripts/run_mac.sh --no-map
@@ -31,19 +29,18 @@ Mac 镜像为 `ego-swarm-rviz:noetic-arm64-web`，显示组件在容器内构建
 Mac 私人布局仅首次调整窗口尺寸，保留后续保存结果。关闭 RViz 窗口或 `--stop` 会停止全部辅助服务；
 关闭浏览器标签页不会停止容器。
 
-脚本自动查找同级或家目录中的 mid360s_ws；也可以设置
-`EGO_RVIZ_SHARED=/路径/mid360s_ws/docker/ros-noetic-rviz`，或设置 `MID360S_WS=/路径/mid360s_ws`。
+共享脚本默认来自本检出的 `docker/ros-noetic-rviz/`。单独安装时用 `EGO_RVIZ_SHARED` 指定该目录。
 `--master`／`--ros-master`、`--ros-ip`、`--web-port`、`--name` 可覆盖默认值。
 `--no-open` 可仅启动显示容器，不自动打开浏览器。
 `--check` 会按 `--odom` 指定的话题实际接收数据并检查 TF，缺少必需数据返回非零。
 启动前的本机双向 TCP 探测不连接板端；板端回调与性能仍须在同网时实测。
 `--dry-run` 不操作 Docker、路由或个人文件。
-本机验证记录在 [mid360s_ws/MAC_VALIDATION.md](../../../mid360s_ws/docker/ros-noetic-rviz/MAC_VALIDATION.md)。
+本机验证记录在 [Mac 验证记录](../../docker/ros-noetic-rviz/MAC_VALIDATION.md)。
 截至 2026-11-09，Mac 尚无原始地图缓存；默认打开实时视图。
 拿到原始 PCD 后使用 `ego-rviz-mac --map /本机/地图目录`，不需要在板端新增进程。
 
 本机 `ego-rviz-mac` 已链接到 `scripts/run_mac.sh`，支持相同的 Mac 参数。
-Mac 复用 `mid360s_ws` 的 `common_mac.sh` 和 `display_runtime_mac.sh`，只读取共用目录的
+Mac 复用同一检出的 `common_mac.sh` 和 `display_runtime_mac.sh`，只读取共用目录的
 `local.mac.env`；Ubuntu 仍使用原 `common.sh` / `local.env`。原 `ego-rviz` 名称不作为 Mac 入口。
 
 ## Ubuntu 使用
@@ -91,12 +88,13 @@ ego-rviz --stop
 
 ## 构建及安装
 
-源码保存在板端 `/home/orangepi/orange/tools/ego_rviz`。本机安装包由该目录同步，
+Ubuntu 快捷入口指向本仓库的 `tools/ego_rviz/scripts/run.sh`，地图、布局和日志位于 `${XDG_DATA_HOME:-$HOME/.local/share}/ego-swarm-rviz`。
+
 独立 Docker 镜像只构建显示组件，不构建本机独立 ROS 仓库，也不启动规划/控制节点。
 
 ```bash
-docker build -t ego-swarm-rviz:noetic ~/.local/share/ego-swarm-rviz
+docker build -t ego-swarm-rviz:noetic tools/ego_rviz
 ```
 
-启动脚本只复用已有 `mid360s_ws/docker/ros-noetic-rviz/scripts/common.sh` 的网络、
+启动脚本只复用已有 `docker/ros-noetic-rviz/scripts/common.sh` 的网络、
 GPU与X11检查；不读取或融合它的 RViz 布局。

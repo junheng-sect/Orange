@@ -18,13 +18,15 @@ from task_dispatch import REQUEST_ID, TERMINAL, TTL, catalog, task_for
 
 ROOT = Path(__file__).resolve().parent
 HOME = Path.home()
-SCRIPTS = HOME / "mid360s_ws/scripts"
+WORKSPACE = ROOT.parents[1]
+SCRIPTS = WORKSPACE / "scripts"
 MAPS = HOME / "test_data/mapping"
 BOOT = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
 STATE = HOME / ".cache/warehouse-monitor/board-tasks" / BOOT
 SESSION = "warehouse-nav"
 ENV = ("source /opt/ros/noetic/setup.bash && "
-       "source /home/orangepi/mid360s_ws/scripts/ros_net.sh")
+       f"source {shlex.quote(str(WORKSPACE / 'devel/setup.bash'))} && "
+       f"source {shlex.quote(str(SCRIPTS / 'ros_net.sh'))}")
 CONFLICT_NODES = {"/drone_reloc", "/car_bridge", "/waypoint_manager", "/offboard_gateway",
                   "/trajectory_executor", "/laserMapping", "/gravity_bridge",
                   "/ywl_localization", "/ywl_init_adapter", "/fastlio_dll"}
@@ -124,7 +126,7 @@ def submit(body):
     write(STATE / "current.json", dict(id=request_id, boot=BOOT))
     command = ENV + " && exec " + shlex.join(["python3", "-B", str(Path(__file__).resolve()), "run", request_id])
     try:
-        result = tmux("new-session", "-d", "-s", SESSION, command, capture_output=True, text=True)
+        result = tmux("new-session", "-d", "-s", SESSION, "bash", "-c", command, capture_output=True, text=True)
         if result.returncode:
             raise ValueError(result.stderr.strip() or "无法创建板端任务会话")
     except (OSError, subprocess.SubprocessError, ValueError) as error:
@@ -190,7 +192,7 @@ def script_command(task):
     if task["id"].startswith("test_indoor"):
         command += ["--map", str(MAPS / task["mapId"]),
                     "--nav-config", str(SCRIPTS / "nav_test/indoor_fly_nav.yaml"),
-                    "--map-frame", str(SCRIPTS.parent / "src/car_bridge/config/map_frame_indoor_fly.yaml"),
+                    "--map-frame", str(SCRIPTS.parent / "src/localization/car_bridge/config/map_frame_indoor_fly.yaml"),
                     "--ev-mode", "odom"]
     return command
 
