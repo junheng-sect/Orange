@@ -14,7 +14,11 @@
   <header>
     <div><h1>仓库无人机 · 巡检</h1><p class="subtitle">实时监看与预设任务</p></div>
     <label class="map-select" hidden>显示地图
-      <select id="display-map"><option value="">跟随定位</option></select>
+      <select id="display-map">
+        <option value="20261114_101654_indoor_fly_raw_000001">室内图</option>
+        <option value="20261105_114605_outdoor">室外图</option>
+        <option value="20261126_204546_indoor_outdoor_clean_air">室内+室外图</option>
+      </select>
     </label>
   </header>
   <div class="status-bar" aria-label="数据状态">
@@ -37,6 +41,8 @@
       <div id="map-layers" class="map-layers" aria-label="地图显示图层" role="group" hidden>
         <strong>地图图层</strong>
         <div class="layers">
+          <label hidden><input type="checkbox" data-layer="indoor" checked>室内</label>
+          <label hidden><input type="checkbox" data-layer="outdoor" checked>室外</label>
           <label><input type="checkbox" data-layer="floor" checked>地面</label>
           <label><input type="checkbox" data-layer="structure" checked><span id="structure-layer-name">环境结构</span></label>
           <label><input type="checkbox" data-layer="rear">后方树木与高处点云</label>

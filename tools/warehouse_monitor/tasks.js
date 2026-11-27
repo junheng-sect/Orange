@@ -80,7 +80,7 @@ function drawRelative(canvas, task) {
   ctx.fillText(side ? "侧视 · 向右为前方 · 向上为升高" : "俯视 · 向右为机头前方", 12, 114);
 }
 
-export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) {
+export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
   const selector = byId("task-choice");
   const dialog = byId("task-auto-dialog");
   const overlay = new Group();
@@ -306,7 +306,6 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry, pinMap }) 
       if (!response.ok) throw Error(result.error ?? "任务请求失败");
       accept(result);
       if (verb === "submit") {
-        pinMap();
         nextId = null;
         byId("task-damper").value = "";
       }

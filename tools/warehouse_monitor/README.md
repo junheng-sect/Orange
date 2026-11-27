@@ -22,7 +22,7 @@ python3 -m pip install -r requirements.txt
 
 ```bash
 ssh -o BatchMode=yes orange true
-./warehouse-monitor --host orange --sync 20261021_110311_indoor
+./warehouse-monitor --host orange --sync 20261114_101654_indoor_fly_raw_000001 20261105_114605_outdoor 20261126_204546_indoor_outdoor_clean_air
 ./warehouse-monitor --host orange
 ```
 
@@ -37,6 +37,10 @@ Mac 的飞控状态通过同一条 SSH 隧道读取。默认使用板端环回�
 可见页面停在「实时监看」时才启用板端只读遥测。最后一次有效轮询满 15 秒后关闭隧道。断线时页面保留，可继续使用本地地图和巡检功能。定位、地图 TF 与数据时间检查通过后，才叠加位姿、点云和航线。
 
 三维视图用左键拖动旋转、Shift + 左键拖动平移、滚轮缩放。
+
+「显示地图」默认选中室内图（11 月 14 日独立飞扫图），也可选室外图（11 月 5 日）或室内+室外图（11 月 26 日清理空中孤立点版）。每项使用该地图 ID 在本机缓存中的最新版本。
+
+联合图可分别勾选「室内」「室外」，并叠加「地面」「环境结构」筛选。在全图或正上方视角只保留室内时，视图会缩放到起点房间。室内范围来自该次点云中实测的墙面、门口、地板和顶棚，边界附近按 `mixed_map_rooms.json` 的包围盒近似划分。
 
 ## OV13855 相机
 
@@ -65,10 +69,10 @@ Mac 的飞控状态通过同一条 SSH 隧道读取。默认使用板端环回�
 地图重建或页面提示「电脑未缓存当前地图版本」时，在电脑上运行：
 
 ```bash
-warehouse-monitor --sync 20261021_110311_indoor
+warehouse-monitor --sync 20261114_101654_indoor_fly_raw_000001
 ```
 
-参数是板端 `~/test_data/mapping` 下的地图目录名。已有对应的 `ego-rviz` 本机缓存时，工具校验 SHA-256 后直接复用。缺少匹配的 PCD 时，从板端同步一次。电脑端完成分层降采样，缓存放在 `~/.cache/warehouse-monitor`。监看自动按版本选图，等到缓存更新后自动重试。
+参数是板端 `~/test_data/mapping` 下的地图目录名。已有对应的 `ego-rviz` 本机缓存时，工具校验 SHA-256 后直接复用。缺少匹配的 PCD 时，从板端同步一次。电脑端完成分层降采样，缓存放在 `~/.cache/warehouse-monitor`。同步后刷新网页即可加载新版本。
 
 - 白色机头箭头随姿态更新，优先读取 `/drone_nav/odom`。青色是监看期间的已飞轨迹。
 - 紫色是 `/drone_nav/cloud` 的显示采样。橙色是采样后的 EGO B 样条，支持普通目标与连续航段。

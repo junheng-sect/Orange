@@ -9,13 +9,17 @@ import { droneModel, makeCloud, wideLine } from "./scene_parts.js";
 import { createInspection } from "./inspection.js";
 import { createTasks } from "./tasks.js";
 import { startDroneStatus } from "./drone-status.js";
+import mixedMapRooms from "./mixed_map_rooms.json";
 
 const indoorMap = "20261114_101654_indoor_fly_raw_000001";
 const previousIndoorMap = "20261021_110311_indoor";
 const outdoorMap = "20261105_114605_outdoor";
 const byId = id => document.getElementById(id);
+const mapSelector = byId("display-map");
 const viewport = byId("viewport");
 const toggles = [...document.querySelectorAll("[data-layer]")];
+const indoorToggle = document.querySelector('[data-layer="indoor"]');
+const outdoorToggle = document.querySelector('[data-layer="outdoor"]');
 const views = [...document.querySelectorAll("[data-view]")];
 const pos = new Vector3();
 const orient = new Quaternion();
@@ -50,8 +54,8 @@ let lastResponse = 0;
 let pending = false;
 let inspection;
 let tasks;
-let catalog = [];
-let manualMap = "";
+let catalog = null;
+let boardOnly = false;
 let offline = false;
 let telemetryTimer;
 let telemetryRequest;
@@ -87,7 +91,8 @@ function addLayers(map) {
     }
     if (map) {
       for (const [name, points] of Object.entries(map.layers)) {
-        const layer = makeCloud(points, ...styles[name]);
+        const [kind] = name.split(".");
+        const layer = makeCloud(points, ...styles[kind]);
         layer.name = name;
         rig.layers.add(layer);
       }
@@ -97,15 +102,21 @@ function addLayers(map) {
 }
 
 function updateLayers() {
-  let points = 0;
+  const entries = Object.entries(loadedMap?.layers ?? {});
+  const available = new Set(entries.filter(([, coords]) => coords.length).flatMap(([name]) => name.split(".")));
+  const checked = new Set();
   for (const input of toggles) {
     const name = input.dataset.layer;
-    const geometry = loadedMap?.layers[name];
-    input.disabled = !geometry?.length;
+    input.disabled = !available.has(name);
     input.parentElement.hidden = input.disabled;
-    if (input.checked) points += (geometry?.length ?? 0) / 3;
+    if (input.checked) checked.add(name);
+  }
+  let points = 0;
+  for (const [name, coords] of entries) {
+    const show = name.split(".").every(label => checked.has(label));
+    if (show) points += coords.length / 3;
     const object = rig?.layers.getObjectByName(name);
-    if (object) object.visible = input.checked;
+    if (object) object.visible = show;
   }
   byId("map-layers").hidden = !loadedMap;
   byId("structure-layer-name").textContent = loadedMap?.id === outdoorMap ? "室外结构"
@@ -183,7 +194,9 @@ function setView(mode, fitMap = false) {
   views.forEach(button => button.setAttribute("aria-pressed", String(button.dataset.view === mode)));
   if (!rig) return;
   const { camera, controls, drone } = rig;
-  const bounds = loadedMap?.bounds;
+  const room = mixedMapRooms[loadedMap?.id];
+  const indoorOnly = room && indoorToggle.checked && !outdoorToggle.checked;
+  const bounds = indoorOnly ? room.bounds : loadedMap?.bounds;
   const target = bounds
     ? new Vector3(...bounds[0]).lerp(new Vector3(...bounds[1]), .5) : new Vector3();
   const extent = bounds ? new Vector3(...bounds[1]).sub(new Vector3(...bounds[0])) : new Vector3(5, 4, 3);
@@ -266,28 +279,26 @@ function asFloats(encoded) {
   return new Float32Array(buffer.buffer);
 }
 
-function splitOutdoorStructure(points) {
-  const isRear = index => points[index] < 0 && points[index + 2] > .30;
-  let rearLength = 0;
+function partitionPoints(points, matches) {
+  const mask = new Uint8Array(points.length / 3);
+  let split = 0;
   for (let i = 0; i < points.length; i += 3) {
-    if (isRear(i)) rearLength += 3;
-  }
-  const rear = new Float32Array(rearLength);
-  const structure = new Float32Array(points.length - rearLength);
-  let rearIndex = 0;
-  let structureIndex = 0;
-  for (let i = 0; i < points.length; i += 3) {
-    if (isRear(i)) {
-      rear[rearIndex++] = points[i];
-      rear[rearIndex++] = points[i + 1];
-      rear[rearIndex++] = points[i + 2];
-    } else {
-      structure[structureIndex++] = points[i];
-      structure[structureIndex++] = points[i + 1];
-      structure[structureIndex++] = points[i + 2];
+    if (matches(points[i], points[i + 1], points[i + 2])) {
+      mask[i / 3] = 1;
+      split += 3;
     }
   }
-  return { structure, rear };
+  const packed = new Float32Array(points.length);
+  let yes = 0, no = split;
+  for (let i = 0; i < points.length; i += 3) {
+    const offset = mask[i / 3] ? yes : no;
+    packed[offset] = points[i];
+    packed[offset + 1] = points[i + 1];
+    packed[offset + 2] = points[i + 2];
+    if (mask[i / 3]) yes += 3;
+    else no += 3;
+  }
+  return [packed.subarray(0, split), packed.subarray(split)];
 }
 
 function decodeMap(buffer, id) {
@@ -301,8 +312,17 @@ function decodeMap(buffer, id) {
     offset += count * 3;
   }
   if (offset !== coordinates.length) throw new Error("地图点数不符");
+  const room = mixedMapRooms[id];
+  if (room) {
+    const [lo, hi] = room.bounds;
+    const inside = (x, y, z) => x >= lo[0] && x <= hi[0] && y >= lo[1] && y <= hi[1] && z >= lo[2] && z <= hi[2];
+    for (const [kind, points] of Object.entries(layers)) {
+      [layers[kind + ".indoor"], layers[kind + ".outdoor"]] = partitionPoints(points, inside);
+      delete layers[kind];
+    }
+  }
   if (id === outdoorMap && layers.structure) {
-    Object.assign(layers, splitOutdoorStructure(layers.structure));
+    [layers.rear, layers.structure] = partitionPoints(layers.structure, (x, y, z) => x < 0 && z > .30);
   }
   return { ...metadata, layers };
 }
@@ -338,15 +358,10 @@ async function loadMap(key, id) {
   }
 }
 
-function defaultIndoorMap() {
-  return catalog.find(map => map.id === indoorMap)
-    ?? catalog.find(map => map.id === previousIndoorMap);
-}
-
 function syncMap() {
-  const manual = catalog.find(map => map.key === manualMap);
-  const localized = lastResult?.mapKey ? { key: lastResult.mapKey, id: lastResult.mapId } : null;
-  const selected = manual ?? localized ?? defaultIndoorMap();
+  const selected = boardOnly && lastResult?.mapKey
+    ? { key: lastResult.mapKey, id: lastResult.mapId }
+    : catalog?.find(map => map.id === mapSelector.value);
   const key = selected?.key ?? null;
   const id = selected?.id;
   if (key !== wantedMap) {
@@ -368,32 +383,32 @@ function syncMap() {
 async function loadCatalog() {
   try {
     const response = await fetch("/maps");
-    if (!response.ok) return;
+    if (response.status === 404) {
+      boardOnly = true;
+      mapError = "";
+      syncMap();
+      return;
+    }
+    if (!response.ok) throw new Error(`地图列表读取失败（HTTP ${response.status}）`);
+    // /maps lists the newest cached version of each ID first.
     catalog = await response.json();
-    byId("display-map").parentElement.hidden = false;
+    mapError = "";
+    const options = [...mapSelector.options];
+    for (const option of options) {
+      option.disabled = !catalog.some(map => map.id === option.value);
+    }
+    if (!mapSelector.selectedOptions[0] || mapSelector.selectedOptions[0].disabled) {
+      mapSelector.value = options.find(option => !option.disabled)?.value ?? "";
+    }
+    mapSelector.parentElement.hidden = false;
     byId("tab-inspection").hidden = false;
-    const selector = byId("display-map");
-    const previous = selector.value;
-    selector.length = 1;
-    for (const map of catalog) {
-      const date = new Date(Number(map.version) / 1e6);
-      const label = map.id + " · " + date.toLocaleString("zh-CN", { hour12: false });
-      selector.add(new Option(label, map.key));
-    }
-    selector.value = previous;
-    if (catalog.some(map => map.id === indoorMap)) {
-      selector.options[0].textContent = "跟随定位（默认室内飞扫图）";
-    }
-    if (offline && !selector.value && catalog.length) {
-      selector.value = (defaultIndoorMap() ?? catalog[0]).key;
-      manualMap = selector.value;
-      byId("tab-inspection").click();
-    }
+    if (offline) byId("tab-inspection").click();
     syncMap();
-    paintStatus();
-  } catch {
-    // Board-only fallback still follows the map supplied by telemetry.
+  } catch (error) {
+    mapError = error.message;
+    setTimeout(loadCatalog, 2500);
   }
+  paintStatus();
 }
 
 function paintStatus() {
@@ -411,16 +426,16 @@ function paintStatus() {
   byId("plan-status").textContent = online && planId
     ? `规划 · ${pending ? "机头对齐候选" : "执行器当前轨迹"}`
     : `规划 · ${online && result?.executor ? result.executor : "等待"}`;
-  const usingCache = loadedMap && (offline || result?.localMap || catalog.some(map => map.key === loadedMap.key));
+  const usingCache = loadedMap && (offline || result?.localMap || catalog?.some(map => map.key === loadedMap.key));
   byId("map-status").textContent = result?.mapError || (loadedMap ? (usingCache ? "地图 · 本机缓存" : "地图 · Orange Pi") : mapError);
   const notice = byId("notice");
-  notice.textContent = (offline || manualMap || !watching() || !result?.mapKey) && loadedMap ? ""
-    : (offline || manualMap || !result?.mapKey) && wantedMap ? mapError || "正在加载地图"
+  notice.textContent = mapError || (catalog && !wantedMap ? "本机尚未缓存这三张地图"
+    : wantedMap && !loadedMap ? "正在加载地图"
+    : loadedMap && (!watching() || loadedMap.key !== result?.mapKey) ? ""
     : !online && watching() ? "等待 Orange Pi"
     : !result?.mapKey ? result?.mapError || "等待定位地图"
-      : !loadedMap ? mapError || "正在加载地图"
-        : !result.aligned ? "等待重定位对齐"
-          : !pose ? "等待位姿" : "";
+    : !result.aligned ? "等待重定位对齐"
+    : !pose ? "等待位姿" : "");
   notice.hidden = !notice.textContent;
   const showPose = visible() && pose;
   byId("phase").textContent = !showPose ? "等待地图与定位对齐"
@@ -490,9 +505,8 @@ async function poll() {
     if (telemetryRequest !== controller) return;
     if (result.offline) {
       offline = true;
-      syncMap();
+      if (catalog) byId("tab-inspection").click();
       paintStatus();
-      void loadCatalog();
       return;
     }
     consume(result);
@@ -530,14 +544,8 @@ inspection = createInspection({
   rig, viewport, focusRoute, redraw: () => { dirty = true; }, setView: mode => setView(mode, true),
   currentPose: () => visible() && pose ? { position: pos.toArray(), yaw: Math.atan2(forward.y, forward.x) * 180 / Math.PI } : null,
 });
-tasks = createTasks({ rig, focusRoute, redraw: () => { dirty = true; }, syncTelemetry,
-  pinMap: () => {
-    manualMap = loadedMap?.key ?? "";
-    byId("display-map").value = manualMap;
-  },
-});
-byId("display-map").addEventListener("change", event => {
-  manualMap = event.target.value;
+tasks = createTasks({ rig, focusRoute, redraw: () => { dirty = true; }, syncTelemetry });
+mapSelector.addEventListener("change", () => {
   syncMap();
   paintStatus();
 });
@@ -545,7 +553,10 @@ setView("room");
 updateLayers();
 void loadCatalog();
 views.forEach(button => button.addEventListener("click", () => setView(button.dataset.view)));
-toggles.forEach(input => input.addEventListener("change", updateLayers));
+toggles.forEach(input => input.addEventListener("change", () => {
+  updateLayers();
+  if ((input === indoorToggle || input === outdoorToggle) && view !== "close") setView(view, true);
+}));
 for (const id of ["live-cloud", "planned", "traveled"]) {
   byId(id).addEventListener("change", applyVisibility);
 }

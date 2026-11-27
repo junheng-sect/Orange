@@ -1,4 +1,7 @@
 """Build browser display layers from a map selected by the relocalizer."""
+import json
+from pathlib import Path
+
 import numpy as np
 
 
@@ -7,6 +10,7 @@ INDOOR_TEST_ROOM_MAPS = {
     "20261021_110311_indoor",
     "20261114_101654_indoor_fly_raw_000001",
 }
+MIXED_MAP_ROOMS = json.loads(Path(__file__).with_name("mixed_map_rooms.json").read_text())
 
 
 def read_pcd(path):
@@ -71,12 +75,26 @@ def display_map(path):
         bounds = [[-4.25, -2.05, -.24], [2.55, 1.85, 2.68]]
     else:
         # Only a display heuristic. Navigation keeps using its own original map.
-        ground = np.percentile(cloud[:, 2], 10) + .22
-        low = cloud[:, 2] <= ground
+        outside = cloud
+        room = MIXED_MAP_ROOMS.get(path.parent.name)
+        if room:
+            lower, upper = room["bounds"]
+            inside = np.all((cloud >= lower) & (cloud <= upper), axis=1)
+            outside = cloud[~inside]
+        ground = np.percentile(outside[:, 2], 10) + .22 if len(outside) else 0
+        low = outside[:, 2] <= ground
         layers = {
-            "floor": sample(cloud[low], [.30, .30, .16], 26000),
-            "structure": sample(cloud[~low], [.12, .12, .10], 105000),
+            "floor": sample(outside[low], [.30, .30, .16], 26000),
+            "structure": sample(outside[~low], [.12, .12, .10], 105000),
         }
+        if room:
+            # Preserve room detail independently of the much larger outdoor cloud.
+            indoor = cloud[inside]
+            floor = indoor[:, 2] <= room["floorMaxZ"]
+            for name, points, size, limit in (
+                    ("floor", indoor[floor], [.10, .10, .06], 16000),
+                    ("structure", indoor[~floor], [.05, .05, .05], 80000)):
+                layers[name] = np.concatenate((layers[name], sample(points, size, limit)))
         bounds = np.percentile(cloud, [.5, 99.5], axis=0).tolist()
     metadata = dict(bounds=bounds, counts={key: len(pts) for key, pts in layers.items()})
     raw = b"".join(np.asarray(pts, dtype="<f4").tobytes() for pts in layers.values())
