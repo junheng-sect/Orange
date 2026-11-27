@@ -25,6 +25,54 @@ flowchart LR
 - **视觉巡检**　OV13855 的一路图像用于估计 AprilTag 位姿，另一路全分辨率图像用于读码。OV9281 可提供前视 ArUco 图像。`front_marker_control` 使用标记位姿做相对跟踪，室内 test4/test5 通过相机读码服务读取货架标签。[相机驱动](src/drivers/ov13855_cam/README.md) · [相机读码](src/perception/barcode_reader_camera/README.md)
 - **板端与地面端**　板端的 roscore 和 MAVROS 由常驻服务提供，定位、采集和巡检入口位于 `scripts/`。Ubuntu 或 macOS 可通过 SSH 查看仓库监控，RViz 通过 Docker 显示地图、点云与轨迹。板端的网络与设备参数按本机配置填写。[板端配置](AGENTS.md#入口与本机配置) · [仓库监控](tools/warehouse_monitor/README.md) · [EGO RViz](tools/ego_rviz/README.md)
 
+## 使用流程：从建图到巡检
+
+完成板端编译与网络配置后，典型的单机先验地图巡检按以下四步进行：
+
+### 1. 采集与离线建图（板端）
+
+在板端启动建图工具，等待终端提示 FAST-LIO2 初始化完成后，手持或飞行覆盖作业区域并回到起点按 `Ctrl+C`。程序会自动停止录包，离线运行 Voxel-SLAM（含回环与全局 BA）、去人并拼图，在 `~/test_data/mapping/<时间>_<名称>/` 下生成 `map_world.pcd`、`meta.json` 和 `preview.png`。[建图说明](src/localization/drone_mapping/README.md)
+
+```bash
+source /opt/ros/noetic/setup.bash && source devel/setup.bash
+rosrun drone_mapping build_map --name warehouse      # 实机采集并自动离线建图
+# 若已有飞扫录制的 raw.bag，也可直接离线重建：
+rosrun drone_mapping build_map --bag raw.bag
+```
+
+### 2. 同步地图、标点与编写任务（电脑端）
+
+在 macOS 或 Ubuntu 电脑端同步板端地图并打开仓库监控网页（`http://127.0.0.1:8765/`），在三维点云上完成标点与静态路线预览：[仓库监控](tools/warehouse_monitor/README.md)
+
+```bash
+tools/warehouse_monitor/warehouse-monitor --host orange --sync <地图目录名>
+tools/warehouse_monitor/warehouse-monitor --host orange
+```
+
+1. 在网页「巡检点与路线」中点选地图上的观察点 XY、填写高度 Z、机头朝向（`yaw_deg`）和停留时间，点击「生成路线」检查静态净空与连通性。
+2. 将确认好的航点整理为巡检任务 YAML（示例见 [indoor_shelf.yaml](src/navigation/drone_inspection/missions/indoor_shelf.yaml)），填写地图路径、PCD SHA-256、重定位配置，以及各航点动作（`pass` 通行、`hover` 悬停、`scan_shelf` 货架扫码）。[任务配置说明](src/navigation/drone_inspection/README.md)
+
+### 3. 校验配置与预览演练（板端）
+
+实飞前先在板端做配置干跑与规划预览。`--dry-run` 校验地图指纹、栅格和重定位参数；`--preview` 启动真实定位、感知与 EGO 规划，但网关关闭飞控输出，确认重定位与规划轨迹无误后再实飞：
+
+```bash
+rosrun drone_inspection run_mission --mission missions/<任务>.yaml --dry-run
+rosrun drone_inspection run_mission --mission missions/<任务>.yaml --preview
+```
+
+### 4. 下发任务、实机巡检与归档（板端 + 电脑端）
+
+现场确认场地安全、设备静止完成一次重定位（建立 `drone_map → drone_odom` 变换）后，可在电脑端网页「预设任务」下发任务，或在板端直接启动：
+
+```bash
+rosrun drone_inspection run_mission --mission missions/<任务>.yaml
+```
+
+- 按任务配置的地面解锁起飞或手飞悬停切入 OFFBOARD 后，无人机沿 EGO 规划轨迹依次执行通行、悬停与货架读码动作，全程可随时由遥控器接管。
+- 电脑端网页实时显示三维先验图、当前位姿、EGO 轨迹、OV13855 相机画面与读码结果。
+- 着地上锁并收尾后，bag、解析后的任务配置、状态与扫码结果自动保存在板端 `~/test_data/nav_test/`。
+
 ## 编译与测试
 
 ### Ubuntu 开发机与 CI
@@ -44,7 +92,7 @@ docker run --rm --pull=never --network none \
   'scripts/build.sh -j2 -p1 --no-status && docker/noetic-build/test.sh'
 ```
 
-GitHub Actions 在 push 和 pull request 时使用 Ubuntu amd64 runner，执行同一组构建与测试命令。测试入口运行 catkin 注册的单测和 `rostest`，用 `catkin_test_results build` 检查结果，再执行定位、导航、监控、合成录包和录像回归。CI 验收默认包在 amd64 上的离线行为，ARM64 和实机验收在板端进行。[工作流](.github/workflows/noetic.yml) · [测试入口](docker/noetic-build/test.sh) · [依赖版本与构建说明](docker/noetic-build/README.md)
+GitHub Actions 仅通过 `workflow_dispatch` 手动触发，使用 Ubuntu amd64 runner 执行同一组构建与测试命令。测试入口运行 catkin 注册的单测和 `rostest`，用 `catkin_test_results build` 检查结果，再执行定位、导航、监控、合成录包和录像回归。CI 验收默认包在 amd64 上的离线行为，ARM64 和实机验收在板端进行。[工作流](.github/workflows/noetic.yml) · [测试入口](docker/noetic-build/test.sh) · [依赖版本与构建说明](docker/noetic-build/README.md)
 
 ### 已配置 Noetic 的板端
 
