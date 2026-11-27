@@ -3,12 +3,13 @@ import csv
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 import json
+import os
 from pathlib import Path
 import re
 import select
 import sys
 
-RUN_ID = re.compile(r"[0-9]{8}_[0-9]{6}_test_indoor[456](?:-[A-Za-z0-9_-]+)?")
+RUN_ID = re.compile(r"[0-9]{8}_[0-9]{6}_(?:test_indoor[456]|mission_[a-z][a-z0-9_]{0,47})(?:-[A-Za-z0-9_-]+)?")
 TERMINAL = {"SUCCEEDED", "ABORTED", "INTERRUPTED"}
 
 
@@ -121,12 +122,34 @@ def scan_rows(folder, goal, end):
     return list(rows.values())
 
 
+def mission_detail(folder):
+    source = folder
+    if not (source / "mission_state.json").is_file():
+        marker = folder / ".inspection_live"
+        if marker.is_file() and not marker.is_symlink():
+            live = Path(marker.read_text().strip()).resolve()
+            if (live.name == "task" and live.parent.parent == Path("/dev/shm")
+                    and live.parent.name.startswith("nav_test_logs.") and live.is_dir()
+                    and live.stat().st_uid == os.getuid()):
+                source = live
+    state, scans = (load_file(source / name) for name in ("mission_state.json", "scan_results.json"))
+    if any(r.get("version") != 1 or r.get("run_id") != folder.name for r in (state, scans)):
+        raise ValueError("任务记录版本或运行 ID 不匹配")
+    rows = scan_rows(folder, scans, state["end"])
+    return dict(id=folder.name, state=state["end"], reason=state.get("reason"), rows=rows,
+                discovered=scans["tag_counts"].get("discovered", len(rows)),
+                success=sum(row["status"] == "success" for row in rows),
+                failed=sum(row["status"] == "failed" for row in rows))
+
+
 def run_detail(root, run_id):
     if not RUN_ID.fullmatch(run_id):
         raise ValueError("无效实验")
     folder = root / run_id
     if folder.is_symlink() or not folder.is_dir():
         raise FileNotFoundError(run_id)
+    if run_id[16:].startswith("mission_"):
+        return mission_detail(folder)
     task = run_id[16:].split("-")[0]
     goals = sorted(folder.glob("goal_" + task + "_*.json"))
     flights = sorted(folder.glob("flight_" + task + "_*.json"))

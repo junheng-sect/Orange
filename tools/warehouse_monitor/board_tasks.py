@@ -2,7 +2,6 @@
 """Board RPC and tmux supervisor for the preset navigation scripts."""
 from contextlib import contextmanager
 import fcntl
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -14,6 +13,7 @@ import sys
 from threading import Lock, Thread
 import time
 
+from board_connection import fingerprint
 from task_dispatch import REQUEST_ID, TERMINAL, TTL, catalog, check_damper, task_for
 
 ROOT = Path(__file__).resolve().parent
@@ -137,7 +137,7 @@ def submit(body):
     if set(body) - {"damperDeg"} != expected or type(body["remaining"]) is not int or not 0 < body["remaining"] <= TTL:
         raise ValueError("下发请求无效或已过期")
     request_id = body["id"]
-    task = task_for(catalog(ROOT), body["taskId"], body["mapKey"])
+    task = task_for(catalog(ROOT, board=True), body["taskId"], body["mapKey"])
     if type(body["confirmAuto"]) is not bool or (task["automatic"] and not body["confirmAuto"]):
         raise ValueError("请确认自动起飞任务")
     previous = get_record(request_id)
@@ -216,15 +216,9 @@ def rpc(verb, body):
         return snapshot(request_id)
 
 
-def fingerprint(path):
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
 def script_command(task, damper_deg=None):
+    if task.get("mission"):
+        return ["rosrun", "drone_inspection", "run_mission", "--mission", "missions/" + task["mission"]]
     if task["id"] == "test12_ywl":
         return [str(SCRIPTS / "nav_test12.sh"), "--ywl"]
     command = [str(SCRIPTS / ("nav_" + task["id"] + ".sh"))]
@@ -240,6 +234,17 @@ def script_command(task, damper_deg=None):
 
 
 def check_map(data, task):
+    if task.get("mission"):
+        import yaml
+        preset = WORKSPACE / "src/navigation/drone_inspection/missions" / task["mission"]
+        if fingerprint(preset) != task["missionSha256"]:
+            raise ValueError("任务 YAML 版本已改变")
+        folder = (preset.parent / Path(yaml.safe_load(preset.read_text())["map"]["dir"]).expanduser()).resolve()
+        info = (folder / "map_world.pcd").stat()
+        if (f"{folder.name}-{info.st_mtime_ns}-{info.st_size}" != task["mapKey"]
+                or fingerprint(folder / "map_world.pcd") != task["mapSha256"]):
+            raise ValueError("巡检任务地图版本已改变")
+        return
     expected = data["maps"][task["mapId"]]
     path = MAPS / task["mapId"] / "map_world.pcd"
     info = path.stat()
@@ -357,6 +362,7 @@ class Progress:
         self.tag_coverage = ""
         self.phase = ""
         self.runner_started = False
+        self.mission_state = None
         self.takeoff_ready = False
         self.finished = None
         self.stop_refused = False
@@ -373,6 +379,22 @@ class Progress:
             if not line or line.startswith("----"):
                 continue
             with self.lock:
+                if line.startswith("INSPECTION_EVENT "):
+                    try:
+                        event = json.loads(line.partition(" ")[2])
+                        if event["version"] != 1:
+                            continue
+                        self.mission_state = event
+                        self.phase = event["phase"]
+                        self.scan = (dict(event, phase=event["action"]) if event.get("action")
+                                     and "discovered" in event and event["phase"] == "ROUTE" else None)
+                        summary = " · ".join(str(v) for v in (event.get("observation"),
+                            event.get("action") or event["phase"], event.get("reason")) if v)
+                        self.note = summary
+                        append_log(self.logs, summary)
+                        continue
+                    except (ValueError, KeyError, TypeError):
+                        pass
                 if " INDOOR4 " in line or " INDOOR5 " in line or " INDOOR6 " in line:
                     try:
                         scan = json.loads(line.split(" INDOOR", 1)[1].split(" ", 1)[1])
@@ -429,6 +451,14 @@ class Progress:
     def stage(self, task, health, has_flown):
         with self.lock:
             phase, note, finished = self.phase, self.note, self.finished
+            if task.get("mission") and self.mission_state:
+                event = self.mission_state
+                if event["end"] != "RUNNING":
+                    return "action_done", event.get("reason") or "巡检动作已结束，等待地面收尾"
+                if event["phase"] == "WAIT_ARM" and health["ready"] and health["ground"]:
+                    return "wait_arm", f"地面预检通过，遥控解锁后 {task['delay']:g} s 自动起飞"
+                if event["phase"] not in ("BRINGUP", "PREFLIGHT", "WAIT_ARM"):
+                    return "running", event.get("action") or event["phase"]
             if task["id"] == "test_indoor3_4":
                 display = self.video_state or self.note or "等待 OV13855 和室内定位"
                 if has_flown and health["ground"]:
@@ -520,7 +550,7 @@ def supervise(request_id):
         value = get_record(request_id)
     if not value or value["state"] != "waiting_fcu":
         return
-    data = catalog(ROOT)
+    data = catalog(ROOT, board=True)
     task = task_for(data, value["taskId"], value["mapKey"])
     rospy.init_node("warehouse_task", anonymous=True, disable_signals=True)
     flight = FlightStatus(rospy)
@@ -561,6 +591,8 @@ def supervise(request_id):
         pre_logs = list(value["logs"])
         save(value)
         env = dict(os.environ, WAREHOUSE_TASK_ID=request_id, PYTHONUNBUFFERED="1")
+        if task.get("mission"):
+            env["WAREHOUSE_MISSION_SHA256"] = task["missionSha256"]
         env.pop("NAV_TEST_IN_TMUX", None)
         child = subprocess.Popen(script_command(task, value.get("damperDeg")), cwd=SCRIPTS, env=env, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -579,6 +611,7 @@ def supervise(request_id):
             message = "飞控状态中断，等待新的飞控数据"
         with progress.lock:
             scan = progress.scan
+            mission_state = progress.mission_state
             if task["id"] in {"test_indoor3_1", "test_indoor3_2"} and progress.tag_coverage and progress.tag_coverage not in message:
                 message += " · " + progress.tag_coverage
             if progress.stop_refused:
@@ -610,9 +643,11 @@ def supervise(request_id):
                          mode=health["mode"], armed=health["armed"], landed=health["landed"],
                          safeGround=health["ground"], healthAt=time.monotonic(),
                          logs=(pre_logs + script_logs)[-MAX_LOGS:])
-            if task["id"] in {"test_indoor4", "test_indoor5", "test_indoor6"} and scan is not None:
+            if task.get("mission") and mission_state:
+                value["missionState"] = mission_state
+            if (task.get("mission") or task["id"] in {"test_indoor4", "test_indoor5", "test_indoor6"}) and scan is not None:
                 value["scan"] = scan
-            elif task["id"] == "test_indoor6":
+            elif task.get("mission") or task["id"] == "test_indoor6":
                 value.pop("scan", None)
             save(value)
         time.sleep(.5)
@@ -624,6 +659,10 @@ def supervise(request_id):
             f"任务脚本退出（{child.returncode}）：" + (progress.note or value["message"]))
         with progress.lock:
             combined = (pre_logs + list(progress.logs))[-MAX_LOGS:]
+        result = progress.mission_state if task.get("mission") else None
+        if result and result["end"] in {"ABORTED", "INTERRUPTED"}:
+            final_message = (result.get("reason") or result["end"]) + (" · 已收尾" if cleaned else " · 收尾异常")
+            cleaned = False
         append_log(combined, final_message, "ok" if cleaned else "error")
         value.update(state="done" if cleaned else "failed", safeGround=False,
                      message=final_message, logs=combined)

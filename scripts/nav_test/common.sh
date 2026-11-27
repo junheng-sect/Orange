@@ -44,7 +44,7 @@ nt_help() {
 log()  { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 ok()   { printf '[%s] [ OK ] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 warn() { printf '[%s] [WARN] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG"; }
-err()  { printf '[%s] [FAIL] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG" >&2; }
+err()  { NT_LAST_ERROR="$*"; printf '[%s] [FAIL] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG" >&2; }
 hr()   { printf '%s\n' "----------------------------------------------------------------" | tee -a "$LOG"; }
 
 # The task owns both sets of logs. A nested fusion writes here and the parent archives
@@ -54,6 +54,7 @@ nt_open_logs() {
   NT_LOG_DIR="$ORANGE_NAV_LOG_ROOT/task"
   export ORANGE_NAV_LOG_ROOT ROS_LOG_DIR="$NT_LOG_DIR/ros_log"
   mkdir -p -- "$ROS_LOG_DIR" || return 1
+  if [ "${NT_TMP_TASK_LOG:-0}" = 1 ]; then LOG="$NT_LOG_DIR/nav_test.log"; fi
   log "实时子进程日志：$NT_LOG_DIR（收尾归档至 $OUT）"
 }
 
@@ -110,7 +111,7 @@ SHUTTING_DOWN=0
 finish() { # finish <退出码> [force]：信号触发时飞机还解锁着就不收尾；启动失败、链路掉了用 force
   local _code="$1"
   [ "$SHUTTING_DOWN" -eq 1 ] && return
-  if [ "${2:-}" != force ] && [ -n "${WAREHOUSE_TASK_ID:-}" ]; then
+  if [ "${2:-}" != force ] && { [ -n "${WAREHOUSE_TASK_ID:-}" ] || [ "${NT_GROUND_CLEANUP:-0}" = 1 ]; }; then
     local _fcu _ext
     _fcu="$(timeout 3 rostopic echo -n1 /mavros/state 2>/dev/null)"
     _ext="$(timeout 3 rostopic echo -n1 /mavros/extended_state 2>/dev/null)"
@@ -146,6 +147,7 @@ finish() { # finish <退出码> [force]：信号触发时飞机还解锁着就�
   stop_child "$PF_RELOC" "重定位节点" INT 10 || _cleanup_ok=0
   stop_child "$PF_FUSION" "定位链路 fusion.sh（录包收尾、恢复对时）" TERM 60 || _cleanup_ok=0
   if (( _cleanup_ok )) && nt_archive_logs; then
+    if [ "${NT_TMP_TASK_LOG:-0}" = 1 ]; then LOG="$OUT/nav_test.log"; fi
     rm -rf "$RUN_DIR"
   else
     warn "日志暂未归档：$ORANGE_NAV_LOG_ROOT（进程身份文件：$RUN_DIR）"
@@ -180,7 +182,7 @@ nt_ego_limits() {
 import math, sys, yaml
 with open(sys.argv[1]) as stream:
     cfg = yaml.safe_load(stream)['config']
-overrides = cfg.get('planner_limits_by_task', {}).get(sys.argv[2], {})
+overrides = cfg.get('planner_limits', cfg.get('planner_limits_by_task', {}).get(sys.argv[2], {}))
 limits = []
 for key in ('max_vel', 'max_acc'):
     hard = cfg[key]
@@ -268,6 +270,7 @@ nav_test_main() {
   flock -n 199 || { echo "已有导航测试运行，请先收尾" >&2; exit 1; }
   OUT="$HOME/test_data/nav_test/$(date +%Y%m%d_%H%M%S)_$TEST_NAME"
   if [ -n "${WAREHOUSE_TASK_ID:-}" ]; then OUT="$OUT-${WAREHOUSE_TASK_ID:0:8}"; fi
+  if [ -n "${NT_RUN_SUFFIX:-}" ]; then OUT="$OUT-$NT_RUN_SUFFIX"; fi
   mkdir -p "$OUT"
   LOG="$OUT/nav_test.log"
   nt_open_logs || exit 1
@@ -282,6 +285,7 @@ nav_test_main() {
   fi
   trap 'finish 129' HUP
 
+  if declare -F test_setup_runtime >/dev/null; then test_setup_runtime || { finish 1 force; }; fi
   nt_bringup
   if (( NT_DLL )); then
     log "定位已就绪，异步启动 DLL 旁路（日志 $NT_LOG_DIR/dll.log）"
@@ -318,7 +322,7 @@ nt_bringup() {
   log "外部定位送飞控：$([ "$EV_MODE" = odom ] && echo 'odom（位姿 + 速度）' || echo 'pose（只发位姿）')"
   [ "$PREVIEW" -eq 1 ] && warn "只预览：导航不发飞控（enable_output=false），膨胀 ${PREVIEW_RADIUS} / ${PREVIEW_HALF_HEIGHT} m"
   local _f
-  for _f in "$ROS_SETUP" "$WS_SETUP" "$MAP/map_world.pcd" "$MAP/meta.json" "$RELOC_CONFIG" "$MAP_FRAME" "$NAV_CONFIG" \
+  for _f in "$ROS_SETUP" "$WS_SETUP" "$MAP/map_world.pcd" "$MAP/meta.json" "$RELOC_CONFIG" ${MAP_FRAME:+"$MAP_FRAME"} "$NAV_CONFIG" \
             "$DIR/fusion.sh" "$NT_DIR/nav_forward.py"; do
     [ -f "$_f" ] || { err "缺少 $_f"; finish 1 force; }
   done
@@ -426,7 +430,7 @@ PY
 
   hr; log "步骤 3/4：重定位 + world map（第一个窗口算 6～12 s，第二个窗口确认 1～3 s）。继续别动"
   start_child "$PF_RELOC" "$NT_LOG_DIR/reloc.log" rosrun drone_relocalization relocalize --map "$MAP" --config "$RELOC_CONFIG" --save "$OUT"
-  start_child "$PF_CAR" "$NT_LOG_DIR/car_bridge.log" roslaunch car_bridge car_bridge.launch drone_map:="$MAP" frames:="$MAP_FRAME"
+  if [ -n "$MAP_FRAME" ]; then start_child "$PF_CAR" "$NT_LOG_DIR/car_bridge.log" roslaunch car_bridge car_bridge.launch drone_map:="$MAP" frames:="$MAP_FRAME"; fi
   cat >"$RUN_DIR/wait_reloc.py" <<'PY'
 import json, math, os, sys, time
 import rospy
@@ -489,6 +493,7 @@ PY
   _nav_args+=(prior_grid_file:="$_prior_file" prior_map_sha256:="$_prior_map_sha")
   [[ "$TEST_NAME" != test_indoor[456] ]] || _nav_args+=(allow_short_goals:=true)
   [ "$TEST_NAME" != test_indoor3_3 ] || _nav_args+=(allow_short_goals:=true)
+  if declare -F test_navigation_args >/dev/null; then test_navigation_args; fi
   start_child "$PF_NAV" "$NT_LOG_DIR/nav.log" roslaunch drone_navigation navigation.launch "${_nav_args[@]}"
   cat >"$RUN_DIR/wait_nav.py" <<'PY'
 import json, os, sys, time

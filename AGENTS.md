@@ -11,13 +11,13 @@
 
 ## 仓库结构
 
-工作空间共有 33 个 ROS 包，默认发现 27 个。目录名保留上游写法，ROS 包名取自各自的 `package.xml`。
+工作空间共有 34 个 ROS 包，默认发现 28 个。目录名保留上游写法，ROS 包名取自各自的 `package.xml`。
 
 | 源码目录 | 包目录 |
 |---|---|
 | `src/drivers/` | `livox_ros_driver2`、`ov13855_cam`、`ov9281_usb_cam`、`barcode_reader_serial`、`tether_winch_control` |
 | `src/localization/` | `FAST_LIO`（包名 `fast_lio`）、`LiDAR_IMU_Init`（包名 `lidar_imu_init`）、`fastlio_gravity_bridge`、`fastlio_dll`、`ywl_localization`、`voxel_slam`、`drone_mapping`、`drone_relocalization`、`car_bridge` |
-| `src/navigation/` | `drone_navigation`、`front_marker_control`、`ego_swarm/` 下的 6 个包（`bspline_opt`、`path_searching`、`plan_env`、`plan_manage`〔包名 `ego_planner`〕、`quadrotor_msgs`、`traj_utils`） |
+| `src/navigation/` | `drone_navigation`、`drone_inspection`、`front_marker_control`、`ego_swarm/` 下的 6 个包（`bspline_opt`、`path_searching`、`plan_env`、`plan_manage`〔包名 `ego_planner`〕、`quadrotor_msgs`、`traj_utils`） |
 | `src/perception/` | `front_marker_vision`、`ov13855_apriltag_vision`、`barcode_reader_camera`、`barcode_rc_trigger`、`barcode_arrival_trigger` |
 | `src/visualization/` | `orange_visualization` |
 | `src/experiments/` | `camera_calibration_pkg`、`mid360s_calib`、`dual_camera_recorder`、`vz_chirp_control`、`vz_step_control` |

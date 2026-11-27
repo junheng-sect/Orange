@@ -406,6 +406,7 @@ class SquareRunner:
                     cancel_error = '；取消请求异常：' + str(failure)
                 self.active = False
             why = ('Ctrl+C，停止本圈' if isinstance(error, KeyboardInterrupt) else str(error)) + cancel_error
+            self.abort_reason = why
             if self.record:
                 self.record.update(end='INTERRUPTED' if isinstance(error, KeyboardInterrupt) else 'ABORTED', reason=why)
                 if self.record['legs'] and self.record['legs'][-1]['end'] == 'RUNNING':
@@ -462,10 +463,13 @@ class SquareRunner:
             last_note = note
             time.sleep(.05)
 
+    def prepare_preview(self):
+        return self.prepare()
+
     def preview(self):
         if self.s.get('gateway_status', 'real_output') is not False:
             raise Stopped('预览要求网关 real_output=false，不允许真实输出')
-        response = self.prepare()
+        response = self.prepare_preview()
         if not response.success:
             raise Stopped('预览 prepare 被拒：' + hint(response.message))
         until = time.monotonic() + 5.0

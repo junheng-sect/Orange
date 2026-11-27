@@ -6,6 +6,8 @@ workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../
 source "$workspace/devel/setup.bash"
 port=11443
 if [[ ${1:-} == --indoor6 ]]; then port=11448; shift; fi
+if [[ ${1:-} == --inspection ]]; then port=11450; shift; fi
+if [[ ${1:-} == --inspection-modes ]]; then port=11451; shift; fi
 export ROS_MASTER_URI=http://127.0.0.1:$port ROS_IP=127.0.0.1 PYTHONDONTWRITEBYTECODE=1
 unset ROS_HOSTNAME
 DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
@@ -43,13 +45,24 @@ for _ in $(seq 50); do
   sleep .2
 done
 [ "$ready" -eq 1 ] || { echo '隔离Master未就绪' >&2; exit 1; }
-if [[ $port == 11448 ]]; then
+if [[ $port == 11451 ]]; then
+  rosparam load "$DIR/../indoor_fly_nav.yaml" /drone_nav
+  shift || true
+  cases=(path_preview plain_pass manual_hover multi_yaw planner_loss)
+  if (( $# )); then cases=("$@"); fi
+  for scenario in "${cases[@]}"; do
+    python3 -B -u "$DIR/integration_inspection_modes.py" "$OUT/$scenario" "$scenario" 2>&1 | tee -a "$OUT/integration.log"
+  done
+  exit 0
+fi
+if [[ $port == 11448 || $port == 11450 ]]; then
   rosparam load "$DIR/../indoor_fly_nav.yaml" /drone_nav
   shift || true
   cases=(normal countdown_disarm done_low clearance_low clearance_recovers startup_armed miss_qr empty_final return_blocked return_takeover return_z_excursion land_no_disarm)
+  if [[ $port == 11450 ]]; then cases+=(auto_hold); fi
   if (( $# )); then cases=("$@"); fi
   for scenario in "${cases[@]}"; do
-    python3 -B -u "$DIR/integration_indoor6.py" "$OUT/$scenario" "$scenario" 2>&1 | tee -a "$OUT/integration.log"
+    python3 -B -u "$DIR/integration_indoor6.py" "$OUT/$scenario" "$scenario" "$port" 2>&1 | tee -a "$OUT/integration.log"
   done
   exit 0
 fi

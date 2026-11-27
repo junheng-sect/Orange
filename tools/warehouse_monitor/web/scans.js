@@ -16,8 +16,8 @@
   const cache = new Map();
 
   function title(id) {
-    const [date, time, , task] = id.split("_");
-    const name = task.split("-")[0].replace("indoor", "test");
+    const [date, time] = id.split("_");
+    const name = id.slice(16).split("-")[0].replace(/^test_indoor/, "test").replace(/^mission_/, "");
     return date.slice(0, 4) + "-" + date.slice(4, 6) + "-" + date.slice(6) + " " +
       time.slice(0, 2) + ":" + time.slice(2, 4) + ":" + time.slice(4) + " · " + name;
   }

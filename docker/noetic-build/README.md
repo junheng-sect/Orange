@@ -26,7 +26,7 @@ docker run --rm --pull=never --network none --cap-drop=ALL \
 
 ## 验收范围
 
-默认发现 27 个包。catkin 在干净构建中另生成内部包 `catkin_tools_prebuild`。六个已有 `CATKIN_IGNORE` 的包保持按需启用。
+默认发现 28 个包。catkin 在干净构建中另生成内部包 `catkin_tools_prebuild`。六个已有 `CATKIN_IGNORE` 的包保持按需启用。
 
 测试入口运行 `catkin test` 和 `catkin_test_results build`，并补跑未注册的定位、导航与板端监控单元测试、RC 录包和单/双相机合成录像测试。需要真实地图、飞行 bag、摄像头、雷达、PX4 或 RK3588 专有插件的实机验收另行进行。电脑端监控使用 Python 3.11+，其路径与 SSH 模拟测试可在 Ubuntu 开发机运行：
 

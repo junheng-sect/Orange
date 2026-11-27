@@ -1,0 +1,33 @@
+name: indoor_shelf
+title: 室内货架四点巡检
+map:
+  dir: ~/test_data/mapping/20261114_101654_indoor_fly_raw_000001
+  sha256: 6935f02bebc51734a2ffd9c47a9b114932528bfd911df162160b6baf8b914c52
+  reloc_config: package://drone_relocalization/config/indoor.yaml
+  map_frame: package://car_bridge/config/map_frame_indoor_fly.yaml
+  ev_mode: odom
+flight:
+  auto_takeoff: true
+  takeoff_height: 0.50
+  takeoff_delay_s: 3.0
+  return_home: true
+  auto_land: true
+  max_vel: 0.50
+  max_acc: 0.50
+  planner_max_vel: 0.40
+  planner_max_acc: 0.40
+  max_vel_z: 0.30
+  max_acc_z: 0.30
+  max_control_z: 1.70
+  bounds_min: [-3.0, -3.0, 0.1]
+  bounds_max: [3.0, 3.0, 2.5]
+waypoints:
+  - {name: 左下, xyz: [0.623, -0.039, 0.480], yaw_deg: -89.5, action: scan_shelf, hold_s: 3.0}
+  - {name: 左上, xyz: [0.624, -0.035, 1.230], yaw_deg: -89.5, action: scan_shelf, hold_s: 3.0}
+  - {name: 右上, xyz: [-0.276, -0.042, 1.230], yaw_deg: -89.5, action: scan_shelf, hold_s: 3.0}
+  - {name: 右下, xyz: [-0.277, -0.046, 0.480], yaw_deg: -89.5, action: scan_shelf, hold_s: 3.0}
+recording:
+  save_frames: 'off'
+  capture_waypoints: false
+  record_nav_cloud: false
+  dll_observer: false

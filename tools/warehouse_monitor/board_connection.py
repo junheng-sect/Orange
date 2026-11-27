@@ -1,4 +1,5 @@
 """SSH paths are interpreted on the board, independently of the desktop checkout."""
+import hashlib
 import os
 import shlex
 
@@ -34,3 +35,11 @@ def remote_path(path):
 
 def in_checkout(root, command):
     return "cd " + remote_path(root) + " && " + command
+
+
+def fingerprint(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()

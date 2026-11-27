@@ -225,7 +225,7 @@ export function createTasks({ rig, focusRoute, redraw }) {
       if (child.isCSS2DObject) child.element.remove();
       overlay.remove(child);
     }
-    const shown = Boolean(rig && task?.fixed && data.maps[map?.id]?.key === map?.key);
+    const shown = Boolean(rig && task?.fixed && matchesMap(task));
     document.querySelector(".task-key").hidden = !shown;
     if (shown) {
       overlay.add(wideLine(task.points.flat(), { color: purple, linewidth: 3 }));
@@ -267,7 +267,7 @@ export function createTasks({ rig, focusRoute, redraw }) {
         : "遥控定点起飞，悬停后手动切 OFFBOARD";
       byId("task-route").textContent = task.route;
       byId("task-finish").textContent = task.finish;
-      byId("task-focus").hidden = !task.fixed || !rig || data.maps[map?.id]?.key !== map?.key;
+      byId("task-focus").hidden = !task.fixed || !rig || !matchesMap(task);
       const diagram = byId("task-diagram");
       diagram.hidden = task.fixed || !task.points.length;
       if (!diagram.hidden) drawRelative(diagram, task);
@@ -283,16 +283,20 @@ export function createTasks({ rig, focusRoute, redraw }) {
     paintStatus();
   }
 
+  function matchesMap(task) {
+    return Boolean(map && task && task.mapId === map.id && (task.mapKey ?? data.maps[task.mapId]?.key) === map.key);
+  }
+
   function populate() {
     const previous = selector.value;
     selector.length = 1;
-    for (const task of data.tasks.filter(task => task.mapId === map?.id)) {
+    for (const task of data.tasks.filter(matchesMap)) {
       selector.add(new Option(`${task.label} · ${task.title}`, task.id));
     }
     selector.value = previous;
     if (selector.selectedIndex < 0) selector.selectedIndex = 0;
     const empty = byId("task-empty");
-    const stale = data.maps[map?.id] && data.maps[map.id].key !== map.key;
+    const stale = selector.length === 1 && data.maps[map?.id] && data.maps[map.id].key !== map.key;
     empty.hidden = selector.length > 1 && !stale;
     empty.textContent = stale ? "任务绑定了这张地图的另一版本，请同步对应地图。"
       : map ? "这张地图没有预设任务。" : "先选择并加载地图。";
@@ -302,8 +306,7 @@ export function createTasks({ rig, focusRoute, redraw }) {
 
   function paintScan(active) {
     const scan = active?.scan;
-    const route = data.maps[map?.id]?.key === map?.key &&
-      active?.mapKey === map?.key ? scan?.route : null;
+    const route = active?.mapKey === map?.key ? scan?.route : null;
     const key = JSON.stringify(route || null);
     if (key === scanKey) return;
     scanKey = key;
@@ -340,7 +343,7 @@ export function createTasks({ rig, focusRoute, redraw }) {
     paintScan(active);
     const outstanding = Boolean(active || (request && !terminal.has(request.state)));
     byId("task-confirm").disabled = busy || !status?.enabled || !selected()
-      || data.maps[map?.id]?.key !== map?.key || outstanding;
+      || !matchesMap(selected()) || outstanding;
     byId("task-confirm").textContent = status?.enabled === false
       ? "离线预览" : "确认任务，等待上电";
 
@@ -360,7 +363,7 @@ export function createTasks({ rig, focusRoute, redraw }) {
 
     const task = data.tasks.find(item => item.id === current.taskId);
     const taskLabel = task
-      ? `${task.id.startsWith("test_indoor") ? "室内" : "室外"} ${task.label} · ${task.title}`
+      ? (task.mission ? task.title : `${task.id.startsWith("test_indoor") ? "室内" : "室外"} ${task.label} · ${task.title}`)
       : "当前任务";
     labelEl.textContent = taskLabel;
     const phaseText = (labels[current.state] ?? current.state)
@@ -494,6 +497,7 @@ export function createTasks({ rig, focusRoute, redraw }) {
     const body = payload(task, task.automatic);
     if (task.automatic) {
       confirmation = body;
+      byId("task-delay").textContent = String(task.delay ?? 3);
       dialog.returnValue = "cancel";
       dialog.showModal();
     } else {

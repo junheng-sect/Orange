@@ -261,6 +261,7 @@ def reject_occupied(fixture, runner, splines):
 
 
 def decode_cancel(runner, camera):
+    scanner = getattr(runner, 'shelf', runner)
     camera.block_decode = True
 
     def lose_localization():
@@ -270,12 +271,12 @@ def decode_cancel(runner, camera):
     thread = threading.Thread(target=lose_localization, daemon=True)
     thread.start()
     try:
-        runner.decode_once(('tag36h11', 1))
+        scanner.decode_once(('tag36h11', 1))
         raise AssertionError('decode survived navigation loss')
     except Stopped as error:
         assert 'synthetic localization loss' in str(error)
     assert camera.cancelled.wait(2.), 'decode service did not receive cancellation'
-    assert runner.vision.target is None
+    assert scanner.vision.target is None
     thread.join(timeout=1.)
     print('PASS navigation loss cancels active decode and clears target', flush=True)
 

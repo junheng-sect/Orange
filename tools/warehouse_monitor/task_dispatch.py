@@ -35,15 +35,16 @@ class TaskConflict(ValueError):
     pass
 
 
-def catalog(root):
-    return json.loads((root / "tasks.json").read_text())
+def catalog(root, cache=None, board=False):
+    from mission_presets import extend
+    return extend(json.loads((root / "tasks.json").read_text()), root, cache, board)
 
 
 def task_for(data, task_id, map_key):
     if not isinstance(task_id, str) or not isinstance(map_key, str):
         raise ValueError("任务或地图版本无效")
     for task in data["tasks"]:
-        if task["id"] == task_id and data["maps"][task["mapId"]]["key"] == map_key:
+        if task["id"] == task_id and task.get("mapKey", data["maps"][task["mapId"]]["key"]) == map_key:
             return task
     raise ValueError("任务与地图版本不匹配")
 
@@ -164,7 +165,7 @@ class Dispatch:
         key = body["mapKey"]
         map_file = self.cache / "display" / f"{key}.bin"
         manifest = json.loads(map_file.with_suffix(".json").read_text())
-        if not map_file.is_file() or manifest.get("sha256") != self.data["maps"][task["mapId"]]["sha256"]:
+        if not map_file.is_file() or manifest.get("sha256") != task.get("mapSha256", self.data["maps"][task["mapId"]]["sha256"]):
             raise ValueError("电脑缓存与任务绑定的 PCD 不匹配，请同步该地图")
         with self.lock:
             if self.request and self.request["id"] == body["id"]:

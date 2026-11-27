@@ -2,7 +2,6 @@
 """Serve local maps, Orange Pi telemetry and preset task preparation."""
 import argparse
 from contextlib import closing, contextmanager, nullcontext
-import hashlib
 from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -20,7 +19,7 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import ProxyHandler, build_opener
 
-from board_connection import DEFAULT_ROOT, in_checkout, remote_path, settings
+from board_connection import DEFAULT_ROOT, fingerprint, in_checkout, remote_path, settings
 from camera_view import Camera, MODES
 from map_cloud import display_map
 from scan_connection import ScanConnection
@@ -61,11 +60,6 @@ def read_identity(host, map_id):
     if not re.fullmatch(r"[a-f0-9]{64}", digest):
         raise ValueError("板端 PCD 校验值无效")
     return f"{map_id}-{mtime}-{size}", digest
-
-
-def fingerprint(path):
-    with path.open("rb") as file:
-        return hashlib.file_digest(file, "sha256").hexdigest()
 
 
 @contextmanager
@@ -159,7 +153,7 @@ class Telemetry:
 
 def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=None, camera=None, scans=None):
     inspection = Inspection(cache, RVIZ_MAPS, MAP_KEY, fingerprint, temporary_path)
-    tasks = dispatch.data if dispatch else catalog(ROOT)
+    tasks = dispatch.data if dispatch else catalog(ROOT, cache)
 
     class Handler(BaseHTTPRequestHandler):
         def reply(self, payload, kind, code=200):
@@ -415,7 +409,7 @@ def main():
     signal.signal(signal.SIGTERM, stop)
     upstream = None if args.offline else f"http://127.0.0.1:{args.tunnel_port}"
     telemetry = None if args.offline else Telemetry(args.host, args.tunnel_port, args.board_port, stopped, args.board_status, remote_root)
-    dispatch = None if args.offline else Dispatch(catalog(ROOT), args.cache, args.host, SSH, stopped, remote_root)
+    dispatch = None if args.offline else Dispatch(catalog(ROOT, args.cache), args.cache, args.host, SSH, stopped, remote_root)
     camera = None if args.offline else Camera(SSH, args.host, stopped, remote_root)
     scans = None if args.offline else ScanConnection(SSH, args.host)
     with (closing(scans) if scans else nullcontext()), serve(

@@ -45,6 +45,8 @@ class ScenarioState(nav.FullState):
 
 
 class Fixture:
+    ground_level = 0.
+    real_output = True
     climb_height = 1.
     def __init__(self):
         self.lock = threading.RLock()
@@ -220,8 +222,8 @@ class Fixture:
                 if self.inject_timer is not None and now-self.inject_timer>.12:
                     self.mode, self.input_state = 'OFFBOARD', 'READY'
                 if self.land_timer is not None:
-                    self.position[2] = max(0., self.land_z0-.1*(now-self.land_timer))
-                    if self.position[2] <= 0.:
+                    self.position[2] = max(self.ground_level, self.land_z0-.1*(now-self.land_timer))
+                    if self.position[2] <= self.ground_level:
                         self.land_state, self.landed = 'TOUCHED', 1
                         if self.scenario != 'land_no_disarm' and now-self.land_timer > 10.4:
                             self.armed = False
@@ -252,12 +254,14 @@ class Fixture:
         for k in ('attitude_status_flag', 'velocity_horiz_status_flag', 'velocity_vert_status_flag',
                   'pos_horiz_rel_status_flag', 'pos_vert_abs_status_flag'):
             setattr(e, k, True)
-        e.const_pos_mode_status_flag = self.landed == 1
+        # Clear the resting flag before the mock announces liftoff on the independent
+        # extended-state topic. ROS does not order callbacks across those topics.
+        e.const_pos_mode_status_flag = self.landed == 1 and (self.climb_timer is None or self.land_timer is not None)
         self.publishers['/mavros/estimator_status'].publish(e)
         for topic, d in (
             ('/drone_nav/input_status', dict(state=self.input_state, reason='mock fault')),
-            ('/drone_nav/executor_status', dict(state=self.exec_state)),
-            ('/drone_nav/gateway_status', dict(state=self.gw, reason=self.reason, real_output=True,
+            ('/drone_nav/executor_status', dict(state=self.exec_state, reason=getattr(self, 'exec_reason', ''))),
+            ('/drone_nav/gateway_status', dict(state=self.gw, reason=self.reason, real_output=self.real_output,
                                               takeoff=self.takeoff_state, land=self.land_state)),
             ('/drone_reloc/status', dict(state='LOCALIZED', valid=True)),
             ('/drone_reloc/result', dict(confirmed=True, map=self.map_id))):

@@ -758,7 +758,10 @@ class FullRunner(GlobalRunner):
             self.land_once()
             self.flight['end'] = 'SUCCEEDED'
             self.phase('DONE')
-            say(self.test_name + ' 完整成功：已确认着地且上锁。先停止通道6录包，再拿飞机，最后 Ctrl+C')
+            if self.fc.on_ground() and not self.s.fcu.armed:
+                say(self.test_name + ' 完整成功：已确认着地且上锁。先停止通道6录包，再拿飞机，最后 Ctrl+C')
+            else:
+                say(self.test_name + ' 航线完成，终点保持，请飞手接管降落')
             return True
         except BaseException as e:
             cancel_error = ''

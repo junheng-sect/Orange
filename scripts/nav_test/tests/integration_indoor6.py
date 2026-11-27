@@ -18,6 +18,11 @@ class IndoorFixture(Fixture):
     map_yaw = 0.
     final_clear_wall = None
 
+    @property
+    def ground_level(self):
+        # The synthetic FCU must touch the same floor that it sampled before liftoff.
+        return -.073 if self.scenario in ('clearance_recovers', 'clearance_low') else 0.
+
     def publish(self):
         if self.scenario in ('clearance_recovers', 'clearance_low'):
             if self.climb_timer is None:
@@ -91,8 +96,10 @@ class Camera(CornerCamera):
         super().publish(ev)
 
 
-def main(out, scenario):
-    assert os.environ['ROS_MASTER_URI'] == 'http://127.0.0.1:11448'
+def main(out, scenario, port=11448):
+    assert port in (11448, 11450) and os.environ['ROS_MASTER_URI'] == 'http://127.0.0.1:%d' % port
+    inspection = port == 11450
+    runner_type = Indoor6Flight
     route = load_indoor5_route()
     rospy.init_node('indoor6_fixture')
     fixture = IndoorFixture()
@@ -102,6 +109,8 @@ def main(out, scenario):
     cfg = rospy.get_param('/drone_nav/config')
     cfg.update(takeoff_height=.5, allow_short_goals=True, map_id=fixture.map_id)
     rospy.set_param('/drone_nav/config', cfg)
+    if inspection:
+        Camera.target_topic = '/drone_inspection/target_tag_pose'
     camera = Camera(fixture, cfg, route['points'])
     out.mkdir(parents=True)
     args = SimpleNamespace(preview=False, out=str(out), route=route, points=[(*p['xyz'], route['yaw_deg']) for p in route['points']],
@@ -109,7 +118,22 @@ def main(out, scenario):
     # run_full owns init_node in production. Here ROS is initialized by the fixture.
     import json
     from unittest.mock import patch
-    class Runner(Indoor6Flight):
+    if inspection:
+        from drone_inspection.lifecycle import FlightLifecycle
+        from drone_inspection.config import load
+        from drone_inspection.records import Records
+        from drone_inspection.runtime import arguments
+        import rospkg
+        share = Path(rospkg.RosPack().get_path('drone_inspection'))
+        mission = load(share / 'missions/indoor_shelf.yaml')
+        mission['navigation'] = {k: cfg[k] for k in ('map_id', 'takeoff_height', 'allow_short_goals')}
+        if scenario == 'auto_hold':
+            mission['flight'].update(auto_land=False, return_home=False)
+            mission['waypoints'] = [dict(name='交接点', xyz=[.8,.2,.7], yaw_deg=30., hold_s=.1, action='hover')]
+        args = arguments(mission, out, out, Records(out, out.name, mission), False)
+        runner_type = FlightLifecycle
+
+    class Runner(runner_type):
         def __init__(self, *a, **kw):
             super().__init__(*a, **kw)
             fixture.runner = self
@@ -121,7 +145,12 @@ def main(out, scenario):
             except nav.Stopped:
                 assert scenario == 'startup_armed'
                 code = 1
-        if scenario == 'startup_armed':
+        if scenario == 'auto_hold':
+            assert inspection and code == 0 and fixture.armed and fixture.landed == 2
+            assert fixture.takeoff_count == 1 and fixture.land_count == 0
+            np.testing.assert_allclose(fixture.goals, [[.8,.2,.7]])
+            assert json.loads((out/'mission_state.json').read_text())['end'] == 'SUCCEEDED'
+        elif scenario == 'startup_armed':
             assert code and not fixture.requests and not fixture.goals
         else:
             flight = json.loads(next(out.glob('flight_*.json')).read_text())
@@ -135,6 +164,8 @@ def main(out, scenario):
                 assert record['legs'][-1]['direction'] == RETURN_NAME
                 np.testing.assert_allclose(fixture.goals[-1], [.36,.20,.48], atol=1e-6)
                 assert len(record['batches']) == 4
+                if scenario == 'normal':
+                    assert [b['order'] for b in record['batches']] == [[5], [2,1], [4,0], [3]]
                 assert record['tag_counts']['read_ok'] == (5 if scenario in ('miss_qr', 'empty_final') else 6), record['tag_counts']
                 if scenario == 'clearance_recovers':
                     assert flight['takeoff_stable']['odom_position'][2] == .425
@@ -189,4 +220,4 @@ if __name__ == '__main__':
 
         preview(CornerCamera, Indoor6Survey, load_indoor5_route, verify, 11449)
     else:
-        main(Path(sys.argv[1]), sys.argv[2])
+        main(Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 11448)

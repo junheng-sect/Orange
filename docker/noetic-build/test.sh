@@ -38,7 +38,7 @@ check python3 -m unittest discover -s scripts/rc_record -p test_recorder_topics.
 check python3 scripts/rc_record/test_raw_bag_recorder_e2e.py
 check python3 scripts/nav_test/tests/test_indoor3_4_video.py
 check python3 scripts/nav_test/tests/test_indoor3_4_video.py --dual
-for suite in test_dll_drift.py test_ywl_monitor.py test_board_tasks.py; do
+for suite in test_dll_drift.py test_ywl_monitor.py test_board_tasks.py test_mission_presets.py test_scan_records.py; do
     check python3 -m unittest discover -s tools/warehouse_monitor -p "$suite"
 done
 check python3 -m unittest discover -s tools/car_web -p 'test_*.py'

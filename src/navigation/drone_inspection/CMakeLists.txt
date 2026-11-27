@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.0.2)
+project(drone_inspection)
+find_package(catkin REQUIRED)
+catkin_python_setup()
+catkin_package()
+install(PROGRAMS scripts/run_mission DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(DIRECTORY config missions launch DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+install(PROGRAMS lib/bringup.sh DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/lib)
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_nosetests(test/test_config.py)
+endif()

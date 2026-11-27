@@ -1,0 +1,9 @@
+# 已核对的机体几何，FLU，单位 m。
+deployment_verified: true
+lever_body: [-0.016, -0.021, -0.053]
+sensor_offset_imu: [-0.011, -0.02329, 0.04412]
+body_half_extent: [0.27, 0.27, 0.15]
+clearance: 0.13
+allow_unknown_above: false
+goal_boundary_margin: 0.30
+yaw_rate_deg: 30

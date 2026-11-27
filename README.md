@@ -1,6 +1,6 @@
 # Orange
 
-Orange 是 Orange Pi 5 Max 上的 ROS 1 Noetic 工作空间，用于仓库无人机的激光惯性定位、先验地图导航和货架扫码。板端连接 MID-360S、相机与 PX4，Ubuntu 开发机通过 Docker 编译和测试。工作空间共有 **33 个 ROS 包，默认编译 27 个，另有 6 个按需启用**。
+Orange 是 Orange Pi 5 Max 上的 ROS 1 Noetic 工作空间，用于仓库无人机的激光惯性定位、先验地图导航和货架扫码。板端连接 MID-360S、相机与 PX4，Ubuntu 开发机通过 Docker 编译和测试。工作空间共有 **34 个 ROS 包，默认编译 28 个，另有 6 个按需启用**。
 
 ## 系统架构
 
@@ -20,6 +20,7 @@ flowchart LR
     nav -->|启用实机输出后| mavros
 ```
 
+- **通用巡检**　`drone_inspection` 从任务 YAML 加载巡检点、机头朝向和扫码动作，支持命令行和网页预设。[任务配置与验收](src/navigation/drone_inspection/README.md)
 - **定位与导航**　`livox_ros_driver2` 提供点云和 IMU。FAST-LIO2 输出 `/Odometry` 和配准点云，重力桥输出 `/fastlio/odom_world`。重定位用先验地图确认一次 `drone_map → drone_odom` 变换，导航据此把地图航点转换到局部规划坐标系。导航默认发布到 `/drone_nav/setpoint_preview`。[建图说明](src/localization/drone_mapping/README.md) · [重定位说明](src/localization/drone_relocalization/README.md) · [导航接口](src/navigation/drone_navigation/README.md)
 - **视觉巡检**　OV13855 的一路图像用于估计 AprilTag 位姿，另一路全分辨率图像用于读码。OV9281 可提供前视 ArUco 图像。`front_marker_control` 使用标记位姿做相对跟踪，室内 test4/test5 通过相机读码服务读取货架标签。[相机驱动](src/drivers/ov13855_cam/README.md) · [相机读码](src/perception/barcode_reader_camera/README.md)
 - **板端与地面端**　板端的 roscore 和 MAVROS 由常驻服务提供，定位、采集和巡检入口位于 `scripts/`。Ubuntu 或 macOS 可通过 SSH 查看仓库监控，RViz 通过 Docker 显示地图、点云与轨迹。板端的网络与设备参数按本机配置填写。[板端配置](AGENTS.md#入口与本机配置) · [仓库监控](tools/warehouse_monitor/README.md) · [EGO RViz](tools/ego_rviz/README.md)
@@ -74,6 +75,7 @@ source devel/setup.bash
 | 定位 | [drone_mapping](src/localization/drone_mapping/) | 默认 | 采集建图 bag，生成地图点云、元数据和预览 |
 | 定位 | [drone_relocalization](src/localization/drone_relocalization/) | 默认 | 静止窗口内执行一次全局重定位，发布地图到里程计的变换 |
 | 定位 | [car_bridge](src/localization/car_bridge/) | 默认 | 从车端 rosbridge 读取位姿，将车、机地图对齐到公共坐标系 |
+| 导航 | [drone_inspection](src/navigation/drone_inspection/) | 默认 | YAML 巡检任务编排、航点动作与运行记录 |
 | 导航 | [drone_navigation](src/navigation/drone_navigation/) | 默认 | 单机航点导航、轨迹预览与 PX4 设定值输出 |
 | 导航 | [front_marker_control](src/navigation/front_marker_control/) | 默认 | 根据前视标记位姿生成机体系速度指令 |
 | 导航 · EGO | [plan_env](src/navigation/ego_swarm/plan_env/) | 默认 | 管理先验与实时占据栅格 |

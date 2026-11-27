@@ -8,6 +8,9 @@ variant=4
 port=11446
 if [[ ${1:-} == --indoor5 ]]; then variant=5; port=11447; shift; fi
 if [[ ${1:-} == --indoor6 ]]; then variant=6; port=11449; shift; fi
+worker="integration_indoor${variant}.py"
+if [[ ${1:-} == --inspection ]]; then worker=integration_mission_preview.py; variant=6; port=11452; shift; fi
+if [[ ${1:-} == --inspection-path ]]; then worker=integration_mission_path.py; variant=6; port=11453; shift; fi
 export ROS_MASTER_URI=http://127.0.0.1:$port ROS_IP=127.0.0.1 PYTHONDONTWRITEBYTECODE=1
 unset ROS_HOSTNAME
 INDOOR_TEST_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
@@ -47,4 +50,4 @@ setsid roslaunch drone_navigation ego.launch radius:=0.4 half_height:=0.3 max_ve
 for node in waypoint_manager trajectory_executor offboard_gateway; do
   setsid rosrun drone_navigation "$node" _enable_output:=false >"$INDOOR_EVIDENCE/$node.log" 2>&1 & INDOOR_PIDS+=("$!")
 done
-python3 -B -u "$INDOOR_TEST_DIR/integration_indoor${variant}.py" --out "$INDOOR_EVIDENCE" "${@:2}" 2>&1 | tee "$INDOOR_EVIDENCE/integration.log"
+python3 -B -u "$INDOOR_TEST_DIR/$worker" --out "$INDOOR_EVIDENCE" "${@:2}" 2>&1 | tee "$INDOOR_EVIDENCE/integration.log"

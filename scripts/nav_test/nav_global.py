@@ -97,11 +97,12 @@ class GlobalRunner(SquareRunner):
     test_name = 'test7'
     route_name = '全局航点（drone_map 绝对坐标）'
     record_prefix = 'test7'
+    validate_points = staticmethod(validate_route)
     goals_in_map = True
 
     def __init__(self, args, cfg, state, buf, prepare, check, client):
         super().__init__(args, cfg, state, buf, prepare, check, client)
-        self.points = validate_route(args.points)
+        self.points = self.validate_points(args.points)
         self.hold_seconds = float(args.hold)
         self.check_segments = bool(args.check_segments)
         if getattr(args, 'record_prefix', ''):
