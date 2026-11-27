@@ -33,14 +33,21 @@
     const data = result?.data;
     const info = byId("scan-info");
     const last = result?.updatedAt ? " · 最近更新 " + clock.format(result.updatedAt * 1000) : "";
-    info.textContent = error ? error + last : data?.reason || "";
+    const message = [data?.reason, error && error + last].filter(Boolean).join(" · ");
+    info.textContent = message;
+    info.title = message;
+    info.dataset.level = ["ABORTED", "INTERRUPTED"].includes(data?.state) ? "bad" : error ? "warn" : "";
     const key = JSON.stringify([id, data]);
     if (shown === key) return;
     shown = key;
     byId("scan-identity").textContent = id ? title(id) + "（北京时间）" : "";
-    byId("scan-state").textContent = data ? statusNames[data.state] || data.state : "";
-    byId("scan-summary").textContent = data ?
-      `发现 ${data.discovered} · 成功 ${data.success} · 失败 ${data.failed}` : "";
+    const state = byId("scan-state");
+    state.textContent = data ? statusNames[data.state] || data.state : "";
+    state.dataset.state = data?.state || "";
+    for (const metric of ["discovered", "success", "failed"]) {
+      byId("scan-" + metric).textContent = data?.[metric] ?? "—";
+    }
+    byId("scan-failed").dataset.nonzero = String(data?.failed > 0);
     const rows = (data?.rows || []).map(row => {
       const el = document.createElement("li");
       const label = row.status === "success" ? (row.frame === 1 ? "首帧读出" :

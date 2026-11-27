@@ -246,6 +246,11 @@ def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=No
                     if status_url is None:
                         self.send_error(503)
                         return
+                    if board_status and telemetry is not None:
+                        if self.headers.get("Sec-Fetch-Site") not in (None, "none", "same-origin"):
+                            self.send_error(403)
+                            return
+                        telemetry.watch()
                     with HTTP.open(status_url + "/status", timeout=.8) as response:
                         self.reply(response.read(), "application/json; charset=utf-8")
                 elif request.path == "/telemetry":

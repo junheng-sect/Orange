@@ -134,9 +134,9 @@ function applyVisibility() {
   if (rig) {
     const active = visible();
     rig.drone.visible = active && Boolean(pose);
-    rig.trail.visible = active && trail.length > 1 && byId("traveled").checked;
-    rig.plan.visible = active && plan.length >= 6 && byId("planned").checked;
-    rig.cloud.visible = active && cloud.length > 0 && byId("live-cloud").checked;
+    rig.trail.visible = active && trail.length > 1;
+    rig.plan.visible = active && plan.length >= 6;
+    rig.cloud.visible = active && cloud.length > 0;
   }
   dirty = true;
 }
@@ -417,7 +417,7 @@ function paintStatus() {
   connection.dataset.online = String(online);
   connection.textContent = offline ? "本机离线预览" : online ? "Orange Pi 已连接" : watching() ? "等待 Orange Pi · 自动重连" : "实时监看已暂停";
   byId("map-id").textContent = result?.mapId ?? "—";
-  byId("loc-status").textContent = offline ? "定位 · 未连接" : !online ? "定位 · 数据中断"
+  byId("loc-status").textContent = offline ? "定位 · 未连接" : !watching() ? "定位 · 已暂停" : !online ? "定位 · 数据中断"
     : result?.aligned ? "定位 · 已对齐"
       : result?.relocation === "LOCALIZED" ? "定位 · 等待地图 TF"
         : `定位 · ${result?.relocation === "WAITING" ? "等待" : result?.relocation || "等待"}`;
@@ -557,9 +557,6 @@ toggles.forEach(input => input.addEventListener("change", () => {
   updateLayers();
   if ((input === indoorToggle || input === outdoorToggle) && view !== "close") setView(view, true);
 }));
-for (const id of ["live-cloud", "planned", "traveled"]) {
-  byId(id).addEventListener("change", applyVisibility);
-}
 requestAnimationFrame(draw);
 startDroneStatus();
 for (const id of ["tab-live", "tab-inspection"]) {
