@@ -32,6 +32,35 @@ CONFLICT_NODES = {"/drone_reloc", "/car_bridge", "/waypoint_manager", "/offboard
                   "/ywl_localization", "/ywl_init_adapter", "/fastlio_dll"}
 
 
+MAX_LOGS = 200
+
+
+def log_time():
+    return time.strftime("%H:%M:%S", time.localtime())
+
+
+def infer_level(text):
+    if any(token in text for token in ("失败", "故障", "异常", "错误", "终止", "被拒", "超时", "退出", "中断", "ERROR", "[ERR]")):
+        return "error"
+    if any(token in text for token in ("取消", "等待", "接管", "WARN", "[WARN]")):
+        return "warn"
+    if any(token in text for token in ("[ OK ]", "就绪", "成功", "已封包", "已收尾", "完成", "通过", "已确认")):
+        return "ok"
+    return "info"
+
+
+def append_log(entries, text, level=None):
+    clean = str(text or "").strip()
+    if not clean:
+        return
+    clean = clean[:430]
+    if entries and entries[-1].get("text") == clean:
+        return
+    entries.append(dict(time=log_time(), text=clean, level=level or infer_level(clean)))
+    if len(entries) > MAX_LOGS:
+        del entries[:-MAX_LOGS]
+
+
 def tmux(*args, **kwargs):
     return subprocess.run(["tmux", *args], timeout=3, **kwargs)
 
@@ -81,6 +110,7 @@ def active_record():
         if session_exists():
             return value
         value.update(state="failed", message="板端任务会话已退出，请检查运行日志")
+        append_log(value.setdefault("logs", []), value["message"], "error")
         save(value)
     return None
 
@@ -122,7 +152,8 @@ def submit(body):
     value = dict(id=request_id, taskId=body["taskId"], mapKey=body["mapKey"],
                  confirmAuto=body["confirmAuto"], boot=BOOT, state="waiting_fcu",
                  message="板端已收到任务，等待飞控连接", deadline=time.monotonic() + body["remaining"],
-                 safeGround=False)
+                 safeGround=False, logs=[])
+    append_log(value["logs"], value["message"], "info")
     if "damperDeg" in body:
         value["damperDeg"] = body["damperDeg"]
     save(value)
@@ -134,6 +165,7 @@ def submit(body):
             raise ValueError(result.stderr.strip() or "无法创建板端任务会话")
     except (OSError, subprocess.SubprocessError, ValueError) as error:
         value.update(state="failed", message=str(error))
+        append_log(value["logs"], value["message"], "error")
         save(value)
 
 
@@ -142,13 +174,16 @@ def control(verb, request_id):
     if verb == "cancel":
         if value is None:
             # A tombstone covers an ambiguous submit response followed by cancel.
-            save(dict(id=request_id, boot=BOOT, state="cancelled", message="任务已取消"))
+            tomb = dict(id=request_id, boot=BOOT, state="cancelled", message="任务已取消", logs=[])
+            append_log(tomb["logs"], tomb["message"], "warn")
+            save(tomb)
             return
         if value["state"] in TERMINAL:
             return
         if value["state"] != "waiting_fcu":
             raise ValueError("导航已开始准备，着地上锁后可收尾")
         value.update(state="cancelled", message="已取消待启动任务")
+        append_log(value.setdefault("logs", []), value["message"], "warn")
     else:
         if value and (value["state"] == "stopping" or value["state"] in TERMINAL):
             return
@@ -157,6 +192,7 @@ def control(verb, request_id):
         if value["state"] == "waiting_fcu":
             raise ValueError("该任务尚未启动，可以取消")
         value["stopRequested"] = True
+        append_log(value.setdefault("logs", []), "收到收尾请求，正在通知任务脚本退出", "warn")
     save(value)
 
 
@@ -328,6 +364,7 @@ class Progress:
         self.manual_ready = False
         self.video_state = ""
         self.recording = ""
+        self.logs = []
 
     def collect(self, stream):
         for line in stream:
@@ -342,9 +379,15 @@ class Progress:
                         if scan["phase"] != "识别标签" and self.scan and "route" not in scan:
                             scan["route"] = self.scan.get("route")
                         self.scan = scan
+                        tag = f" · Tag {scan['tagId']}" if scan.get("tagId") is not None else ""
+                        obs = scan.get("observation") or ""
+                        summary = " · ".join(part for part in (obs, scan.get("phase") or "") if part) + tag
+                        if summary:
+                            append_log(self.logs, summary, "info")
                         continue
                     except (ValueError, KeyError, TypeError):
                         pass
+                append_log(self.logs, line)
                 if "AprilTag 观察 " in line:
                     self.tag_coverage = line[line.index("AprilTag 观察 "):][:250]
                 self.note = line[:430]
@@ -488,6 +531,7 @@ def supervise(request_id):
                 return
             if time.monotonic() >= value["deadline"]:
                 value.update(state="expired", message="等待板端飞控连接超时，请重新确认")
+                append_log(value.setdefault("logs", []), value["message"], "error")
                 save(value)
                 return
         health = flight.snapshot(task)
@@ -507,11 +551,14 @@ def supervise(request_id):
             return
         if time.monotonic() >= value["deadline"]:
             value.update(state="expired", message="任务已过期，请重新确认")
+            append_log(value.setdefault("logs", []), value["message"], "error")
             save(value)
             return
         if not flight.snapshot(task)["ground"]:
             raise ValueError("启动时飞控地面上锁状态已变化")
         value.update(state="preparing", message="开始定位与录包预检" if task.get("manual") else "开始定位与导航预检")
+        append_log(value.setdefault("logs", []), value["message"], "info")
+        pre_logs = list(value["logs"])
         save(value)
         env = dict(os.environ, WAREHOUSE_TASK_ID=request_id, PYTHONUNBUFFERED="1")
         env.pop("NAV_TEST_IN_TMUX", None)
@@ -523,6 +570,7 @@ def supervise(request_id):
     reader.start()
     has_flown = False
     stopping = False
+    last_state_note = None
     while child.poll() is None:
         health = flight.snapshot(task)
         has_flown = has_flown or bool(health["armed"] and health["landed"] == 2)
@@ -536,6 +584,7 @@ def supervise(request_id):
             if progress.stop_refused:
                 stopping = False
                 progress.stop_refused = False
+            script_logs = list(progress.logs)
         with locked():
             value = get_record(request_id)
             if value.pop("stopRequested", False):
@@ -548,10 +597,19 @@ def supervise(request_id):
                             pass
                 else:
                     message = "收尾前飞控状态已变化，等待着地上锁"
-            value.update(state="stopping" if stopping else state,
-                         message="正在收尾与写盘" if stopping else message,
+            next_state = "stopping" if stopping else state
+            next_message = "正在收尾与写盘" if stopping else message
+            if (next_state, next_message) != last_state_note:
+                last_state_note = (next_state, next_message)
+                with progress.lock:
+                    if not progress.logs or progress.logs[-1]["text"] != next_message:
+                        append_log(progress.logs, next_message)
+                    script_logs = list(progress.logs)
+            value.update(state=next_state,
+                         message=next_message,
                          mode=health["mode"], armed=health["armed"], landed=health["landed"],
-                         safeGround=health["ground"], healthAt=time.monotonic())
+                         safeGround=health["ground"], healthAt=time.monotonic(),
+                         logs=(pre_logs + script_logs)[-MAX_LOGS:])
             if task["id"] in {"test_indoor4", "test_indoor5", "test_indoor6"} and scan is not None:
                 value["scan"] = scan
             elif task["id"] == "test_indoor6":
@@ -562,9 +620,13 @@ def supervise(request_id):
     with locked():
         value = get_record(request_id)
         cleaned = progress.clean_exit and child.returncode in (0, 130)
+        final_message = "已收尾，记录已写盘" if cleaned else (
+            f"任务脚本退出（{child.returncode}）：" + (progress.note or value["message"]))
+        with progress.lock:
+            combined = (pre_logs + list(progress.logs))[-MAX_LOGS:]
+        append_log(combined, final_message, "ok" if cleaned else "error")
         value.update(state="done" if cleaned else "failed", safeGround=False,
-                     message="已收尾，记录已写盘" if cleaned else (
-                         f"任务脚本退出（{child.returncode}）：" + (progress.note or value["message"])))
+                     message=final_message, logs=combined)
         save(value)
 
 
@@ -579,6 +641,7 @@ def main():
         with locked():
             value = get_record(data)
             if value and value["state"] not in TERMINAL:
+                append_log(value.setdefault("logs", []), str(error), "error")
                 value.update(state="failed", message=str(error), safeGround=False)
                 save(value)
         raise

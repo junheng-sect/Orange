@@ -6,7 +6,6 @@ import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { droneModel, makeCloud, wideLine } from "./scene_parts.js";
-import { createInspection } from "./inspection.js";
 import { createTasks } from "./tasks.js";
 import { startDroneStatus } from "./drone-status.js";
 import mixedMapRooms from "./mixed_map_rooms.json";
@@ -52,7 +51,6 @@ let lastResult = null;
 let online = false;
 let lastResponse = 0;
 let pending = false;
-let inspection;
 let tasks;
 let catalog = null;
 let boardOnly = false;
@@ -61,8 +59,7 @@ let telemetryTimer;
 let telemetryRequest;
 
 function watching() {
-  return !offline && !document.hidden && (byId("tab-live").getAttribute("aria-pressed") === "true"
-    || tasks?.watchingFlight());
+  return !offline && !document.hidden;
 }
 
 function pauseTelemetry() {
@@ -344,7 +341,6 @@ async function loadMap(key, id) {
     loadedMap = { key, id, ...decoded };
     mapError = "";
     addLayers(loadedMap);
-    inspection?.load(loadedMap);
     tasks?.setMap(loadedMap);
     setView("room");
   } catch (error) {
@@ -371,7 +367,6 @@ function syncMap() {
     loadedMap = null;
     mapError = "";
     retryMapAt = 0;
-    inspection?.load(null);
     tasks?.setMap(null);
     addLayers(null);
   }
@@ -401,8 +396,6 @@ async function loadCatalog() {
       mapSelector.value = options.find(option => !option.disabled)?.value ?? "";
     }
     mapSelector.parentElement.hidden = false;
-    byId("tab-inspection").hidden = false;
-    if (offline) byId("tab-inspection").click();
     syncMap();
   } catch (error) {
     mapError = error.message;
@@ -456,7 +449,6 @@ function paintStatus() {
     byId(["px", "py", "pz", "yaw"][i]).textContent = showPose ? value.toFixed(i === 3 ? 1 : 2) : "—";
   });
   applyVisibility();
-  inspection?.poseChanged();
 }
 
 function consume(result) {
@@ -505,7 +497,6 @@ async function poll() {
     if (telemetryRequest !== controller) return;
     if (result.offline) {
       offline = true;
-      if (catalog) byId("tab-inspection").click();
       paintStatus();
       return;
     }
@@ -540,11 +531,7 @@ try {
   error.hidden = false;
   error.textContent = "三维视图需要 WebGL 2。相机、读码和任务状态仍可查看。";
 }
-inspection = createInspection({
-  rig, viewport, focusRoute, redraw: () => { dirty = true; }, setView: mode => setView(mode, true),
-  currentPose: () => visible() && pose ? { position: pos.toArray(), yaw: Math.atan2(forward.y, forward.x) * 180 / Math.PI } : null,
-});
-tasks = createTasks({ rig, focusRoute, redraw: () => { dirty = true; }, syncTelemetry });
+tasks = createTasks({ rig, focusRoute, redraw: () => { dirty = true; } });
 mapSelector.addEventListener("change", () => {
   syncMap();
   paintStatus();
@@ -559,9 +546,6 @@ toggles.forEach(input => input.addEventListener("change", () => {
 }));
 requestAnimationFrame(draw);
 startDroneStatus();
-for (const id of ["tab-live", "tab-inspection"]) {
-  byId(id).addEventListener("click", syncTelemetry);
-}
 document.addEventListener("visibilitychange", syncTelemetry);
 window.addEventListener("pagehide", pauseTelemetry);
 window.addEventListener("pageshow", syncTelemetry);

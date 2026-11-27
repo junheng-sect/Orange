@@ -13,10 +13,6 @@
 <main>
   <header>
     <h1>仓库无人机 · 巡检</h1>
-    <div class="tabs" role="group" aria-label="工作区">
-      <button id="tab-live" type="button" aria-controls="live-panel" aria-pressed="true">实时监看</button>
-      <button id="tab-inspection" type="button" aria-controls="inspection-panel" hidden aria-pressed="false">预设任务</button>
-    </div>
     <label class="map-select" hidden>显示地图
       <select id="display-map">
         <option value="20261114_101654_indoor_fly_raw_000001">室内图</option>
@@ -39,176 +35,144 @@
     <div id="flight-checks"></div>
   </section>
   <div class="workspace">
-    <section class="scene" aria-label="三维点云">
-      <div class="scene-bar">
-        <h2>地图与飞行轨迹</h2>
-        <div class="group" aria-label="视角">
-          <button data-view="room" type="button" aria-pressed="true">全图</button>
-          <button data-view="close" type="button" aria-pressed="false">无人机近景</button>
-          <button data-view="top" type="button" aria-pressed="false">正上方</button>
+    <div class="col-nav">
+      <section class="scene" aria-label="三维点云">
+        <div class="scene-bar">
+          <h2>地图与飞行轨迹</h2>
+          <div class="group" aria-label="视角">
+            <button data-view="room" type="button" aria-pressed="true">全图</button>
+            <button data-view="close" type="button" aria-pressed="false">无人机近景</button>
+            <button data-view="top" type="button" aria-pressed="false">正上方</button>
+          </div>
         </div>
-      </div>
-      <div id="map-layers" class="map-layers" aria-label="地图显示图层" role="group" hidden>
-        <strong>地图图层</strong>
-        <div class="layers">
-          <label hidden><input type="checkbox" data-layer="indoor" checked>室内</label>
-          <label hidden><input type="checkbox" data-layer="outdoor" checked>室外</label>
-          <label><input type="checkbox" data-layer="floor" checked>地面</label>
-          <label><input type="checkbox" data-layer="structure" checked><span id="structure-layer-name">环境结构</span></label>
-          <label><input type="checkbox" data-layer="rear">后方树木与高处点云</label>
-          <label><input type="checkbox" data-layer="walls" checked>外侧墙</label>
-          <label><input type="checkbox" data-layer="near">近侧墙</label>
-          <label><input type="checkbox" data-layer="roof">顶棚</label>
+        <div id="map-layers" class="map-layers" aria-label="地图显示图层" role="group" hidden>
+          <strong>地图图层</strong>
+          <div class="layers">
+            <label hidden><input type="checkbox" data-layer="indoor" checked>室内</label>
+            <label hidden><input type="checkbox" data-layer="outdoor" checked>室外</label>
+            <label><input type="checkbox" data-layer="floor" checked>地面</label>
+            <label><input type="checkbox" data-layer="structure" checked><span id="structure-layer-name">环境结构</span></label>
+            <label><input type="checkbox" data-layer="rear">后方树木与高处点云</label>
+            <label><input type="checkbox" data-layer="walls" checked>外侧墙</label>
+            <label><input type="checkbox" data-layer="near">近侧墙</label>
+            <label><input type="checkbox" data-layer="roof">顶棚</label>
+          </div>
+          <span id="point-count" class="dim"></span>
         </div>
-        <span id="point-count" class="dim"></span>
-      </div>
-      <div id="viewport" aria-label="可旋转的点云、无人机和轨迹">
-        <div class="scene-help">左键旋转 · Shift + 左键拖动平移 · 滚轮缩放</div>
-        <div id="notice">等待定位地图</div>
-        <div class="legend">
-          <span class="track" title="从监看进程接收位姿开始，保留最近 4,800 个采样点"><i></i>已飞轨迹 · 最近 4,800 点</span>
-          <span class="plan"><i></i>EGO 规划轨迹</span>
-          <span class="task-key" hidden><i></i>任务航线与巡检顺序</span>
-          <span class="preview-key" hidden><i></i>巡检路线预览</span>
-          <span class="live"><i></i>实时点云</span>
-          <span><i></i>机头方向</span>
+        <div id="viewport" aria-label="可旋转的点云、无人机和轨迹">
+          <div class="scene-help">左键旋转 · Shift + 左键拖动平移 · 滚轮缩放</div>
+          <div id="notice">等待定位地图</div>
+          <div class="legend">
+            <span class="track" title="从监看进程接收位姿开始，保留最近 4,800 个采样点"><i></i>已飞轨迹 · 最近 4,800 点</span>
+            <span class="plan"><i></i>EGO 规划轨迹</span>
+            <span class="task-key" hidden><i></i>任务航线与巡检顺序</span>
+            <span class="live"><i></i>实时点云</span>
+            <span><i></i>机头方向</span>
+          </div>
+          <div id="render-error" role="status" hidden></div>
         </div>
-        <div id="pick-help" hidden>单击地图填写 XY · Esc 退出</div>
-        <div id="render-error" role="status" hidden></div>
-      </div>
-    </section>
-    <section id="camera-panel">
-      <div class="pose-title">
-        <h2>OV13855 相机</h2>
-        <select id="camera-mode" aria-label="相机画面模式">
-          <option value="auto">自动 · 任务优先</option><option value="raw">原始画面</option>
-          <option value="task">任务标注</option><option value="local">本地识别</option>
-        </select>
-      </div>
-      <p id="camera-status" role="status"></p>
-      <div class="camera-space">
-        <div class="camera-stage">
-          <span id="camera-placeholder">正在连接相机…</span>
-          <img id="camera-image" hidden alt="OV13855 实时画面">
+      </section>
+      <section id="pose-panel" aria-label="当前位姿">
+        <div class="pose-title">
+          <h2>当前位姿</h2>
+          <span id="phase">等待导航位姿</span>
+          <span class="dim">drone_map</span>
         </div>
-      </div>
-      <div id="camera-events" aria-label="相机识别事件"></div>
-    </section>
-    <section id="scan-panel" aria-labelledby="scan-heading">
-      <div class="pose-title"><h2 id="scan-heading">读码情况</h2><span id="scan-state"></span></div>
-      <select id="scan-run" aria-label="选择扫码实验"><option value="">跟随最新</option></select>
-      <p id="scan-identity"></p>
-      <dl id="scan-summary" aria-label="读码统计">
-        <div><dt>发现</dt><dd id="scan-discovered">—</dd></div>
-        <div><dt>成功</dt><dd id="scan-success">—</dd></div>
-        <div><dt>失败</dt><dd id="scan-failed">—</dd></div>
-      </dl>
-      <ol id="scan-rows" aria-label="逐标签读码结果"></ol>
-      <p id="scan-info" class="dim" role="status"></p>
-    </section>
-    <div id="live-panel">
-      <section>
-        <div class="pose-title"><h2>当前位姿</h2><span class="dim">drone_map</span></div>
-        <p id="phase">等待导航位姿</p>
         <dl class="metrics">
           <div><dt>X / m</dt><dd id="px">—</dd></div>
           <div><dt>Y / m</dt><dd id="py">—</dd></div>
           <div><dt>Z / m</dt><dd id="pz">—</dd></div>
           <div><dt>航向 / °</dt><dd id="yaw">—</dd></div>
         </dl>
-      </section>
-      <section id="dll-comparison" hidden>
-        <div class="pose-title"><h2>DLL 对照差</h2><span class="dim">DLL − FAST-LIO2</span></div>
-        <p id="dll-state" role="status"></p>
-        <dl class="metrics">
-          <div><dt>水平 / cm</dt><dd id="dll-xy">—</dd></div>
-          <div><dt>高度 / cm</dt><dd id="dll-z">—</dd></div>
-          <div><dt>航向 / °</dt><dd id="dll-yaw">—</dd></div>
-        </dl>
+        <div id="dll-comparison" hidden>
+          <div class="pose-title"><h3>DLL 对照差</h3><span id="dll-state" role="status"></span><span class="dim">DLL − FAST-LIO2</span></div>
+          <dl class="metrics">
+            <div><dt>水平 / cm</dt><dd id="dll-xy">—</dd></div>
+            <div><dt>高度 / cm</dt><dd id="dll-z">—</dd></div>
+            <div><dt>航向 / °</dt><dd id="dll-yaw">—</dd></div>
+          </dl>
+        </div>
       </section>
     </div>
-    <div id="inspection-panel" hidden>
-      <section class="task-panel" aria-label="预设任务">
-        <h2><label for="task-choice">预设任务</label></h2>
-        <select id="task-choice"><option value="">选择预设任务</option></select>
-        <p id="task-empty" class="dim"></p>
-        <div id="task-details" hidden>
-          <dl class="task-facts">
-            <div><dt>起飞方式</dt><dd id="task-trigger"></dd></div>
-            <div><dt>路线</dt><dd id="task-route"></dd></div>
-            <div id="task-damper-row" hidden><dt><label for="task-damper">减振球硬度</label></dt><dd><input id="task-damper" type="number" min="0" max="100" step="1" placeholder="未标注"></dd></div>
-            <div><dt>结束动作</dt><dd id="task-finish"></dd></div>
-          </dl>
-          <canvas id="task-diagram" role="img" aria-label="相对任务的飞行示意"></canvas>
-          <ol id="task-stops" aria-label="路线停留点" hidden></ol>
-          <div class="group">
-            <button id="task-focus" type="button">查看航线</button>
-            <button id="task-confirm" type="button" class="primary">确认任务，等待上电</button>
+    <div class="col-vision">
+      <section id="camera-panel">
+        <div class="pose-title">
+          <h2>OV13855 相机</h2>
+          <select id="camera-mode" aria-label="相机画面模式">
+            <option value="auto">自动 · 任务优先</option><option value="raw">原始画面</option>
+            <option value="task">任务标注</option><option value="local">本地识别</option>
+          </select>
+        </div>
+        <p id="camera-status" role="status"></p>
+        <div class="camera-space">
+          <div class="camera-stage">
+            <span id="camera-placeholder">正在连接相机…</span>
+            <img id="camera-image" hidden alt="OV13855 实时画面">
           </div>
         </div>
-        <div id="task-current" hidden>
-          <strong id="task-active-label"></strong>
-          <p id="task-phase" role="status"></p>
-          <p id="task-message" class="dim"></p>
-          <p id="task-finish-hint" class="dim" hidden></p>
-          <div class="group">
+        <div id="camera-events" aria-label="相机识别事件"></div>
+      </section>
+      <section id="scan-panel" aria-labelledby="scan-heading">
+        <div class="pose-title"><h2 id="scan-heading">读码情况</h2><span id="scan-state"></span></div>
+        <select id="scan-run" aria-label="选择扫码实验"><option value="">跟随最新</option></select>
+        <p id="scan-identity"></p>
+        <dl id="scan-summary" aria-label="读码统计">
+          <div><dt>发现</dt><dd id="scan-discovered">—</dd></div>
+          <div><dt>成功</dt><dd id="scan-success">—</dd></div>
+          <div><dt>失败</dt><dd id="scan-failed">—</dd></div>
+        </dl>
+        <ol id="scan-rows" aria-label="逐标签读码结果"></ol>
+        <p id="scan-info" class="dim" role="status"></p>
+      </section>
+    </div>
+    <section id="task-panel" class="task-panel" aria-label="预设任务">
+      <div class="pose-title">
+        <h2><label for="task-choice">预设任务</label></h2>
+        <span id="task-phase" role="status">待命</span>
+      </div>
+      <select id="task-choice"><option value="">选择预设任务</option></select>
+      <p id="task-empty" class="dim"></p>
+      <div id="task-details" hidden>
+        <dl class="task-facts">
+          <div><dt>起飞方式</dt><dd id="task-trigger"></dd></div>
+          <div><dt>路线</dt><dd id="task-route"></dd></div>
+          <div id="task-damper-row" hidden><dt><label for="task-damper">减振球硬度</label></dt><dd><input id="task-damper" type="number" min="0" max="100" step="1" placeholder="未标注"></dd></div>
+          <div><dt>结束动作</dt><dd id="task-finish"></dd></div>
+        </dl>
+        <canvas id="task-diagram" role="img" aria-label="相对任务的飞行示意"></canvas>
+        <ol id="task-stops" aria-label="路线停留点" hidden></ol>
+        <div class="group">
+          <button id="task-focus" type="button">查看航线</button>
+          <button id="task-confirm" type="button" class="primary">确认任务，等待上电</button>
+        </div>
+      </div>
+      <p id="task-error" role="alert" hidden></p>
+      <div id="task-current" aria-label="任务运行终端">
+        <div class="task-term-head">
+          <strong id="task-active-label">任务终端</strong>
+          <div class="task-term-actions">
             <button id="task-cancel" type="button" hidden>取消任务</button>
             <button id="task-stop" type="button" hidden>结束任务并收尾</button>
+            <button id="task-log-clear" type="button" title="清空当前终端显示">清空</button>
           </div>
         </div>
-        <p id="task-error" role="alert" hidden></p>
-        <dialog id="task-auto-dialog">
-          <form method="dialog">
-            <h2>确认自动起飞任务</h2>
-            <p>保持飞机着地上锁，等页面提示预检通过。之后在定点模式用遥控器解锁，脚本将在约 3 秒后自动切 OFFBOARD 并起飞。</p>
-            <div class="group">
-              <button value="cancel" autofocus>返回</button>
-              <button value="confirm" class="primary">确认自动起飞流程</button>
-            </div>
-          </form>
-        </dialog>
-      </section>
-      <details id="manual-preview">
-      <summary>手工预览</summary>
-      <section>
-        <div class="pose-title"><h2>巡检点</h2><button id="new-point" type="button">新增点位</button></div>
-        <p id="inspection-empty" class="dim">选择一张缓存地图开始。</p>
-        <ol id="point-list"></ol>
-        <form id="point-editor" hidden>
-          <label>名称<input id="point-name" maxlength="60" required></label>
-          <div class="coordinates">
-            <label>X (m)<input id="point-x" type="number" step="any" required></label>
-            <label>Y (m)<input id="point-y" type="number" step="any" required></label>
-            <label>Z (m)<input id="point-z" type="number" step="any" required></label>
-          </div>
-          <div class="coordinates two">
-            <label>观察航向 (°)<input id="point-yaw" type="number" min="-180" max="180" step="any" value="0" required></label>
-            <label>停留 (s)<input id="point-dwell" type="number" min="0" max="3600" step="any" value="2" required></label>
-          </div>
-          <p class="dim">航向 0° 指向 +X，逆时针为正。Z 为地图坐标。</p>
+        <div class="task-term-body">
+          <div id="task-log" role="log" aria-live="polite" aria-label="任务运行日志"></div>
+          <button id="task-log-bottom" type="button" hidden>↓ 回到最新</button>
+        </div>
+        <p id="task-finish-hint" class="dim" hidden></p>
+      </div>
+      <dialog id="task-auto-dialog">
+        <form method="dialog">
+          <h2>确认自动起飞任务</h2>
+          <p>保持飞机着地上锁，等页面提示预检通过。之后在定点模式用遥控器解锁，脚本将在约 3 秒后自动切 OFFBOARD 并起飞。</p>
           <div class="group">
-            <button id="pick-point" type="button" aria-pressed="false">地图点选 XY</button>
-            <button id="use-position" type="button">使用当前位姿</button>
-          </div>
-          <div class="group">
-            <button type="submit" class="primary">保存点位</button>
-            <button id="cancel-point" type="button">取消</button>
-            <button id="delete-point" type="button" hidden>删除</button>
+            <button value="cancel" autofocus>返回</button>
+            <button value="confirm" class="primary">确认自动起飞流程</button>
           </div>
         </form>
-      </section>
-      <section class="preview-panel">
-        <h2>路线预览</h2>
-        <p class="dim">从首个勾选点出发，按列表顺序，经巡航高度连接各点。</p>
-        <label>巡航 Z (m)<input id="cruise-z" type="number" step="any"></label>
-        <div class="group"><button id="generate-preview" type="button" class="primary">生成路线</button>
-        <button id="focus-preview" type="button">查看路线</button></div>
-        <p id="inspection-status" role="status"></p>
-        <ul id="preview-errors" aria-label="无法规划的点位或航段"></ul>
-        <p class="dim">依据静态点云检查几何净空，仅用于路线预览。</p>
-      </section>
-      </details>
-    </div>
+      </dialog>
+    </section>
   </div>
 </main>
 </body>

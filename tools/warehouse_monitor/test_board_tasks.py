@@ -68,3 +68,53 @@ class IndoorDispatchTests(unittest.TestCase):
                 for invalid in (True,-1,101,'20'):
                     with self.assertRaises(ValueError):
                         q.submit(dict(req,damperDeg=invalid))
+
+    def test_task_logs_accumulate_without_overwriting(self):
+        import json
+        from threading import Event
+        from task_dispatch import Dispatch
+
+        progress = board_tasks.Progress()
+        progress.collect([
+            "[16:00:01] [ OK ] 定位就绪",
+            "[16:00:02] 阶段：TAKEOFF",
+            "[16:00:03] INDOOR6 {\"observation\":\"左下\",\"phase\":\"识别标签\",\"tagId\":5}",
+        ])
+        self.assertEqual([item["text"] for item in progress.logs], [
+            "[16:00:01] [ OK ] 定位就绪",
+            "[16:00:02] 阶段：TAKEOFF",
+            "左下 · 识别标签 · Tag 5",
+        ])
+
+        task = dict(id="test_indoor3", label="test3", title="货架四点自动拍照", mapId="indoor", automatic=False)
+        catalog = dict(tasks=[task], maps={"indoor": dict(key="shelf", sha256="test")})
+        with tempfile.TemporaryDirectory() as tmp:
+            cache = Path(tmp)
+            (cache / "display").mkdir()
+            (cache / "display/shelf.bin").touch()
+            (cache / "display/shelf.json").write_text(json.dumps(dict(sha256="test")))
+            q = Dispatch(catalog, cache, "orange", [], Event(), "~/catkin_ws")
+            rid = "b" * 32
+            q.submit(dict(id=rid, taskId="test_indoor3", mapKey="shelf", confirmAuto=False))
+            q.control(dict(id=rid), "cancel")
+            snap = q.snapshot(watch=False)
+            texts = [item["text"] for item in snap["logs"]]
+            self.assertEqual(len(texts), 2)
+            self.assertIn("已确认任务", texts[0])
+            self.assertEqual(texts[1], "已取消待下发任务")
+
+    def test_legacy_board_scan_log_before_route_is_ready(self):
+        from threading import Event
+        from task_dispatch import Dispatch
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dispatch = Dispatch({}, Path(tmp), "orange", [], Event())
+            scan = dict(observation="左下", phase="识别标签", route=None)
+            dispatch.board = dict(active=dict(id="b" * 32, state="running", scan=scan))
+            dispatch._sync_board_logs(dispatch.board)
+            scan["route"] = dict(ids=[5, 2])
+            dispatch._sync_board_logs(dispatch.board)
+            logs = dispatch.snapshot(watch=False)["logs"]
+            self.assertEqual(len(logs), 2)
+            self.assertNotIn("顺序", logs[0]["text"])
+            self.assertIn("顺序 5 → 2", logs[1]["text"])

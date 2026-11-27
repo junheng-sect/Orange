@@ -11,8 +11,22 @@ const labels = {
   stopping: "正在收尾", done: "已收尾", failed: "任务失败", cancelled: "已取消",
   expired: "任务已过期", delivered: "已送达板端",
 };
+const stateLevel = {
+  done: "ok", action_done: "ok",
+  failed: "bad", expired: "bad",
+  cancelled: "warn", queued: "warn", waiting_fcu: "warn", stopping: "warn",
+  running: "live", preparing: "live", wait_pilot: "live", wait_offboard: "live", wait_arm: "live", delivered: "live",
+};
 const purple = "#dabdff";
 const up = new Vector3(0, 1, 0);
+const MAX_DOM_LINES = 400;
+const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
+
+function nowStamp() {
+  return timeFormatter.format(new Date());
+}
 
 function addDirectionMarkers(overlay, points) {
   for (let index = 1; index < points.length; index++) {
@@ -54,7 +68,7 @@ function stopLabels(task, closes) {
 function drawRelative(canvas, task) {
   const side = task.points.every(p => p[1] === 0) && task.points.some(p => p[2] !== 0);
   const points = task.points.map(p => [p[0], p[side ? 2 : 1]]);
-  const width = 360, height = 125;
+  const width = 360, height = 112;
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
@@ -62,8 +76,8 @@ function drawRelative(canvas, task) {
   const spanX = Math.max(...xs) - Math.min(...xs), spanY = Math.max(...ys) - Math.min(...ys);
   const centerX = (Math.max(...xs) + Math.min(...xs)) / 2;
   const centerY = (Math.max(...ys) + Math.min(...ys)) / 2;
-  const scale = Math.min(260 / Math.max(.5, spanX), 70 / Math.max(.5, spanY));
-  const projected = points.map(p => [width / 2 + (p[0] - centerX) * scale, 55 - (p[1] - centerY) * scale]);
+  const scale = Math.min(260 / Math.max(.5, spanX), 62 / Math.max(.5, spanY));
+  const projected = points.map(p => [width / 2 + (p[0] - centerX) * scale, 48 - (p[1] - centerY) * scale]);
   ctx.strokeStyle = purple;
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -75,14 +89,16 @@ function drawRelative(canvas, task) {
     ctx.arc(x, y, i === 0 ? 5 : 3.5, 0, 2 * Math.PI);
     ctx.fill();
   });
-  ctx.font = '13px sans-serif';
+  ctx.font = "13px sans-serif";
   ctx.fillStyle = "#b7c9d7";
-  ctx.fillText(side ? "侧视 · 向右为前方 · 向上为升高" : "俯视 · 向右为机头前方", 12, 114);
+  ctx.fillText(side ? "侧视 · 向右为前方 · 向上为升高" : "俯视 · 向右为机头前方", 12, 102);
 }
 
-export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
+export function createTasks({ rig, focusRoute, redraw }) {
   const selector = byId("task-choice");
   const dialog = byId("task-auto-dialog");
+  const logEl = byId("task-log");
+  const bottomBtn = byId("task-log-bottom");
   const overlay = new Group();
   const scanOverlay = new Group();
   rig?.world.add(overlay, scanOverlay);
@@ -95,14 +111,111 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
   let nextId = null;
   let requestSerial = 0;
   let timer;
+  let autoFollow = true;
+  let lastOnline = null;
+  let currentLogTaskId = "";
+  let lastBackendTail = new Map();
+  let lastFallbackByTask = new Map();
 
   const selected = () => data.tasks.find(task => task.id === selector.value);
-  const panelVisible = () => !byId("inspection-panel").hidden;
+
+  function ensureEmptyHint(text = "等待选择并确认预设任务…") {
+    if (!logEl.querySelector(".log-line")) {
+      const hint = document.createElement("div");
+      hint.className = "log-empty";
+      hint.textContent = text;
+      logEl.replaceChildren(hint);
+    }
+  }
+
+  function isNearBottom() {
+    return logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight <= 28;
+  }
+
+  function appendLogLines(items) {
+    if (!items.length) return;
+    const empty = logEl.querySelector(".log-empty");
+    if (empty) empty.remove();
+    const shouldScroll = autoFollow || isNearBottom();
+    const fragment = document.createDocumentFragment();
+    for (const item of items) {
+      const row = document.createElement("div");
+      row.className = "log-line";
+      if (item.level) row.dataset.level = item.level;
+      const stamp = document.createElement("span");
+      stamp.className = "log-time";
+      stamp.textContent = item.time || nowStamp();
+      const text = document.createElement("span");
+      text.className = "log-text";
+      text.textContent = item.text;
+      row.append(stamp, text);
+      fragment.append(row);
+    }
+    logEl.append(fragment);
+    while (logEl.children.length > MAX_DOM_LINES) logEl.firstElementChild.remove();
+    if (shouldScroll) {
+      autoFollow = true;
+      logEl.scrollTop = logEl.scrollHeight;
+      bottomBtn.hidden = true;
+    } else {
+      bottomBtn.hidden = false;
+    }
+  }
+
+  function syncLogs(current, taskLabel, fallbackText, fallbackLevel) {
+    if (!current) {
+      ensureEmptyHint();
+      return;
+    }
+    const id = current.id || "default";
+    const toAppend = [];
+    if (id !== currentLogTaskId) {
+      currentLogTaskId = id;
+      if (taskLabel) {
+        toAppend.push({ time: nowStamp(), text: `── ${taskLabel} ──`, level: "phase" });
+      }
+    }
+    const backendLogs = Array.isArray(status?.logs) ? status.logs : [];
+    if (backendLogs.length) {
+      const sigs = backendLogs.map(item => `${item.time}|${item.text}`);
+      const prev = lastBackendTail.get(id);
+      let start = 0;
+      if (prev) {
+        const lastIndex = sigs.lastIndexOf(prev.lastSig);
+        if (lastIndex >= 0) {
+          start = lastIndex + 1;
+        } else if (sigs.length >= prev.count) {
+          start = prev.count;
+        }
+      }
+      for (let i = start; i < backendLogs.length; i++) {
+        toAppend.push(backendLogs[i]);
+      }
+      lastBackendTail.set(id, { count: backendLogs.length, lastSig: sigs[sigs.length - 1] });
+    } else if (fallbackText) {
+      const key = `${current.state}|${fallbackText}`;
+      if (lastFallbackByTask.get(id) !== key) {
+        lastFallbackByTask.set(id, key);
+        toAppend.push({ time: nowStamp(), text: fallbackText, level: fallbackLevel });
+      }
+    }
+    if (status?.board?.active && lastOnline !== null && lastOnline !== status.online) {
+      toAppend.push({
+        time: nowStamp(),
+        text: status.online ? "板端连接已恢复" : "板端连接中断，等待重连…",
+        level: status.online ? "ok" : "warn",
+      });
+    }
+    if (status?.board?.active) lastOnline = status.online;
+    else lastOnline = null;
+    appendLogLines(toAppend);
+  }
 
   function report(message = "") {
     const info = byId("task-error");
     info.hidden = !message;
     info.textContent = message;
+    if (message) appendLogLines([{ time: nowStamp(), text: message, level: "error" }]);
   }
 
   function paintRoute(task, closes, stops) {
@@ -112,7 +225,7 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
       if (child.isCSS2DObject) child.element.remove();
       overlay.remove(child);
     }
-    const shown = Boolean(rig && task?.fixed && panelVisible() && data.maps[map?.id]?.key === map?.key);
+    const shown = Boolean(rig && task?.fixed && data.maps[map?.id]?.key === map?.key);
     document.querySelector(".task-key").hidden = !shown;
     if (shown) {
       overlay.add(wideLine(task.points.flat(), { color: purple, linewidth: 3 }));
@@ -189,7 +302,7 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
 
   function paintScan(active) {
     const scan = active?.scan;
-    const route = panelVisible() && data.maps[map?.id]?.key === map?.key &&
+    const route = data.maps[map?.id]?.key === map?.key &&
       active?.mapKey === map?.key ? scan?.route : null;
     const key = JSON.stringify(route || null);
     if (key === scanKey) return;
@@ -230,30 +343,52 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
       || data.maps[map?.id]?.key !== map?.key || outstanding;
     byId("task-confirm").textContent = status?.enabled === false
       ? "离线预览" : "确认任务，等待上电";
-    byId("task-current").hidden = !current;
-    if (!current) return;
-    const task = data.tasks.find(task => task.id === current.taskId);
-    byId("task-active-label").textContent = task
-      ? `${task.id.startsWith("test_indoor") ? "室内" : "室外"} ${task.label} · ${task.title}` : "";
-    byId("task-phase").textContent = (labels[current.state] ?? current.state)
-      + (active && !status.online ? " · 板端连接中断，显示上次状态" : "");
+
+    const phaseEl = byId("task-phase");
+    const labelEl = byId("task-active-label");
+    const finishHint = byId("task-finish-hint");
+    if (!current) {
+      labelEl.textContent = "任务终端";
+      phaseEl.textContent = status?.enabled === false ? "离线预览" : "待命";
+      phaseEl.dataset.level = "";
+      byId("task-cancel").hidden = true;
+      byId("task-stop").hidden = true;
+      finishHint.hidden = true;
+      syncLogs(null, "", "", "info");
+      return;
+    }
+
+    const task = data.tasks.find(item => item.id === current.taskId);
+    const taskLabel = task
+      ? `${task.id.startsWith("test_indoor") ? "室内" : "室外"} ${task.label} · ${task.title}`
+      : "当前任务";
+    labelEl.textContent = taskLabel;
+    const phaseText = (labels[current.state] ?? current.state)
+      + (active && !status.online ? " · 连接中断" : "");
+    phaseEl.textContent = phaseText;
+    phaseEl.dataset.level = active && !status.online ? "warn" : (stateLevel[current.state] || "");
+
     const mode = status.online && active?.mode ? ` · 飞控 ${active.mode}` : "";
-    byId("task-message").textContent = ((request?.state === "queued" && active?.id !== request.id)
+    let fallbackText = ((request?.state === "queued" && active?.id !== request.id)
       ? request.message : status?.board?.error ?? active?.message ?? request?.message ?? "") + mode;
     const scan = active?.scan;
     if (scan && current.state === "running") {
       const tag = scan.tagId != null ? ` · Tag ${scan.tagId}` : "";
       const order = scan.route?.ids?.length ? ` · 顺序 ${scan.route.ids.join(" → ")}` : "";
-      byId("task-message").textContent =
+      fallbackText =
         `${scan.observation} · ${scan.phase}${tag} · 发现 ${scan.discovered} 张 · 成功 ${scan.success} · 失败 ${scan.failed}${order}${mode}`;
     }
+    const fallbackLevel = stateLevel[current.state] === "bad" ? "error"
+      : stateLevel[current.state] === "warn" ? "warn"
+      : stateLevel[current.state] === "ok" ? "ok" : "info";
+    syncLogs(current, taskLabel, `[${labels[current.state] ?? current.state}] ${fallbackText}`, fallbackLevel);
+
     byId("task-cancel").hidden = !(active ? active.canCancel : request?.state === "queued");
     const stop = byId("task-stop");
     const actionDone = active?.state === "action_done";
     stop.hidden = !actionDone && (!active?.canStop || !status.online);
     stop.disabled = busy || !status.online || !active?.canStop;
     byId("task-cancel").disabled = busy;
-    const finishHint = byId("task-finish-hint");
     finishHint.hidden = !actionDone;
     if (actionDone) {
       finishHint.textContent = !status.online
@@ -267,15 +402,13 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
   }
 
   function accept(snapshot) {
-    const before = watchingFlight();
     status = snapshot;
     paintStatus();
-    if (before !== watchingFlight()) syncTelemetry();
   }
 
   async function poll() {
     clearTimeout(timer);
-    if (document.hidden || !panelVisible()) return;
+    if (document.hidden) return;
     const serial = ++requestSerial;
     try {
       const response = await fetch("/task");
@@ -331,10 +464,21 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
     return body;
   }
 
-  function watchingFlight() {
-    return panelVisible() && Boolean(status?.board?.active)
-      && status.board.active.state !== "waiting_fcu";
-  }
+  logEl.addEventListener("scroll", () => {
+    autoFollow = isNearBottom();
+    bottomBtn.hidden = autoFollow;
+  });
+  bottomBtn.addEventListener("click", () => {
+    autoFollow = true;
+    logEl.scrollTop = logEl.scrollHeight;
+    bottomBtn.hidden = true;
+  });
+  byId("task-log-clear").addEventListener("click", () => {
+    logEl.replaceChildren();
+    ensureEmptyHint("已清空当前日志，等待新输出…");
+    autoFollow = true;
+    bottomBtn.hidden = true;
+  });
 
   byId("task-damper").addEventListener("input", () => { nextId = null; });
   selector.addEventListener("change", () => {
@@ -375,13 +519,8 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
     const task = selected();
     if (task?.fixed) focusRoute(task.points);
   });
-  for (const id of ["tab-live", "tab-inspection"]) {
-    byId(id).addEventListener("click", () => {
-      paintDetails();
-      void poll();
-    });
-  }
   document.addEventListener("visibilitychange", () => void poll());
+  ensureEmptyHint();
   fetch("/tasks").then(response => {
     if (!response.ok) throw Error("任务目录不可用");
     return response.json();
@@ -400,6 +539,5 @@ export function createTasks({ rig, focusRoute, redraw, syncTelemetry }) {
       report();
       populate();
     },
-    watchingFlight,
   };
 }

@@ -14,6 +14,21 @@ REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 TTL = 15 * 60
 TERMINAL = {"done", "failed", "cancelled", "expired"}
 REMOTE = "tools/warehouse_monitor/board_tasks.py"
+MAX_LOGS = 250
+
+
+def _log_time():
+    return time.strftime("%H:%M:%S", time.localtime())
+
+
+def _level_for(state, text=""):
+    if state in {"failed", "expired"} or any(token in text for token in ("失败", "故障", "异常", "错误", "终止", "超时", "退出", "中断")):
+        return "error"
+    if state in {"cancelled", "stopping", "waiting_fcu", "queued"} or any(token in text for token in ("取消", "等待", "接管")):
+        return "warn"
+    if state in {"done", "action_done"} or any(token in text for token in ("[ OK ]", "就绪", "成功", "已封包", "已收尾", "完成", "通过")):
+        return "ok"
+    return "info"
 
 
 class TaskConflict(ValueError):
@@ -54,7 +69,63 @@ class Dispatch:
         self.request = None
         self.board = None
         self.online = False
+        self.history = {}
         self.worker = Thread(target=self.run, name="task-dispatch")
+
+    def _logs(self, request_id):
+        if request_id not in self.history:
+            if len(self.history) >= 4:
+                oldest = next(iter(self.history))
+                del self.history[oldest]
+            self.history[request_id] = []
+        return self.history[request_id]
+
+    def _record_log(self, request_id, text, level="info"):
+        clean = str(text or "").strip()
+        if not request_id or not clean:
+            return
+        entries = self._logs(request_id)
+        if entries and entries[-1]["text"] == clean:
+            return
+        entries.append(dict(time=_log_time(), text=clean[:430], level=level))
+        if len(entries) > MAX_LOGS:
+            del entries[:-MAX_LOGS]
+
+    def _sync_board_logs(self, response):
+        if not isinstance(response, dict):
+            return
+        for record in (response.get("active"), response.get("request")):
+            if not isinstance(record, dict) or not record.get("id"):
+                continue
+            rid = record["id"]
+            board_logs = record.get("logs")
+            if isinstance(board_logs, list) and board_logs:
+                existing = self._logs(rid)
+                prefix = [item for item in existing if item.get("source") == "desktop"]
+                normalized = []
+                for item in board_logs[-MAX_LOGS:]:
+                    if isinstance(item, dict) and item.get("text"):
+                        normalized.append(dict(
+                            time=str(item.get("time") or _log_time()),
+                            text=str(item["text"])[:430],
+                            level=str(item.get("level") or "info"),
+                        ))
+                self.history[rid] = (prefix + normalized)[-MAX_LOGS:]
+            else:
+                mode = f" · 飞控 {record['mode']}" if record.get("mode") else ""
+                scan = record.get("scan")
+                if scan and record.get("state") == "running":
+                    tag = f" · Tag {scan['tagId']}" if scan.get("tagId") is not None else ""
+                    ids = (scan.get("route") or {}).get("ids")
+                    order = f" · 顺序 {' → '.join(map(str, ids))}" if ids else ""
+                    msg = (f"{scan.get('observation', '')} · {scan.get('phase', '')}{tag}"
+                           f" · 发现 {scan.get('discovered', 0)} 张 · 成功 {scan.get('success', 0)} · 失败 {scan.get('failed', 0)}{order}{mode}")
+                else:
+                    msg = (record.get("message") or "") + mode
+                self._record_log(rid, msg, _level_for(record.get("state"), msg))
+        if response.get("error"):
+            target = (response.get("active") or response.get("request") or self.request or {}).get("id")
+            self._record_log(target, response["error"], "error")
 
     def remote(self, verb, body):
         command = shlex.join(["python3", "-B", REMOTE, verb, json.dumps(body, separators=(",", ":"))])
@@ -72,10 +143,14 @@ class Dispatch:
                 self.watched_at = time.monotonic()
                 if self.board is None:
                     self.wake.set()
+            active = self.board.get("active") if isinstance(self.board, dict) else None
+            current_id = (active or self.request or {}).get("id", "")
+            logs = [dict(time=item["time"], text=item["text"], level=item["level"])
+                    for item in self.history.get(current_id, [])]
             return dict(request={key: val for key, val in self.request.items()
                                  if key in {"id", "taskId", "mapKey", "state", "message", "expiresAt"}}
                                 if self.request else None,
-                        board=self.board, online=self.online, enabled=True)
+                        board=self.board, online=self.online, enabled=True, logs=logs)
 
     def submit(self, body):
         if not isinstance(body, dict) or set(body) - {"damperDeg"} != {"id", "taskId", "mapKey", "confirmAuto"}:
@@ -103,6 +178,9 @@ class Dispatch:
             self.request = dict(body, state="queued", message="等待 Orange Pi 上线",
                                 expiresAt=int(time.time()) + TTL,
                                 deadline=time.monotonic() + TTL, boot=None, sent=False, command=None)
+            entries = self._logs(body["id"])
+            label = " · ".join(part for part in (task.get("label"), task.get("title")) if part) or task["id"]
+            entries.append(dict(time=_log_time(), text=f"已确认任务 {label}，等待 Orange Pi 上线", level="info", source="desktop"))
             self.wake.set()
 
     def control(self, body, verb):
@@ -112,11 +190,13 @@ class Dispatch:
             request = self.request
             if request and request["id"] == body["id"] and request["state"] == "queued" and not request["sent"] and verb == "cancel":
                 request.update(state="cancelled", message="已取消待下发任务")
+                self._record_log(body["id"], request["message"], "warn")
                 return
             active = self.board and self.board.get("active")
             if not active or active["id"] != body["id"]:
                 if verb == "cancel" and request and request["id"] == body["id"] and request["state"] == "queued":
                     request.update(command="cancel", message="等待板端确认取消")
+                    self._record_log(body["id"], request["message"], "warn")
                     self.wake.set()
                     return
                 raise TaskConflict("板端任务状态已变化，请刷新")
@@ -127,6 +207,7 @@ class Dispatch:
                 request = self.request = dict(id=active["id"], taskId=active["taskId"],
                                                state="delivered", command=None)
             request.update(command=verb, message="等待板端确认")
+            self._record_log(body["id"], "已发送取消请求，等待板端确认" if verb == "cancel" else "已发送收尾请求，等待板端确认", "warn")
             self.wake.set()
 
     def tick(self):
@@ -136,6 +217,7 @@ class Dispatch:
             command = request and request.get("command")
             if send and time.monotonic() >= request["deadline"] and not request["sent"]:
                 request.update(state="expired", message="任务已过期，请重新确认")
+                self._record_log(request["id"], request["message"], "error")
                 send = False
             if not (send or command or (request and request["state"] == "delivered")
                     or (self.board and self.board.get("active")) or
@@ -145,11 +227,13 @@ class Dispatch:
         response = self.remote("status", {"id": request_id})
         with self.lock:
             self.board, self.online = response, True
+            self._sync_board_logs(response)
             if not request or self.request is not request:
                 return
             if request.get("boot") and request["boot"] != response["boot"]:
                 if request["state"] not in TERMINAL:
                     request.update(state="failed", message="Orange Pi 已重启，请重新下发", command=None)
+                    self._record_log(request["id"], request["message"], "error")
                 return
             matching = response.get("request")
             if matching:
@@ -162,9 +246,11 @@ class Dispatch:
             elif request["state"] == "queued":
                 if time.monotonic() >= request["deadline"]:
                     request.update(state="expired", message="任务已过期，请重新确认")
+                    self._record_log(request["id"], request["message"], "error")
                     return
                 if response.get("active"):
                     request.update(state="failed", message="板端已有任务，请先收尾")
+                    self._record_log(request["id"], request["message"], "error")
                     return
                 verb = "submit"
                 request.update(sent=True, boot=response["boot"])
@@ -177,6 +263,7 @@ class Dispatch:
         result = self.remote(verb, payload)
         with self.lock:
             self.board, self.online = result, True
+            self._sync_board_logs(result)
             if self.request is not request:
                 return
             if verb != "submit" and request.get("command") == verb:
@@ -202,8 +289,10 @@ class Dispatch:
                         request = self.request
                         if time.monotonic() >= request["deadline"]:
                             request.update(state="expired", message="下发已过期。板端状态将在重连后更新")
+                            self._record_log(request["id"], request["message"], "error")
                         else:
                             request["message"] = str(error) or "等待 Orange Pi 上线"
+                            self._record_log(request["id"], request["message"], "warn")
             self.wake.wait(2.0 if self.online else 3.0)
             self.wake.clear()
 
