@@ -15,8 +15,6 @@ const previousIndoorMap = "20261021_110311_indoor";
 const outdoorMap = "20261105_114605_outdoor";
 const byId = id => document.getElementById(id);
 const viewport = byId("viewport");
-const detail = byId("detail");
-const ctx = detail.getContext("2d");
 const toggles = [...document.querySelectorAll("[data-layer]")];
 const views = [...document.querySelectorAll("[data-view]")];
 const pos = new Vector3();
@@ -30,13 +28,12 @@ const styles = {
   roof: [0x8c9fae, 2.4, .59],
   rear: [0x9baeba, 2.1, .66],
 };
-const colors = { trail: "#4fdfec", plan: "#ffd182", drone: "#f3f7fb" };
+const colors = { trail: "#4fdfec", plan: "#ffd182" };
 
 let rig;
 let dirty = true;
 let pose = null;
 let trail = [];
-let trailFlat = [];
 let plan = new Float32Array(0);
 let cloud = new Float32Array(0);
 let view = "room";
@@ -130,14 +127,12 @@ function applyVisibility() {
     rig.plan.visible = active && plan.length >= 6 && byId("planned").checked;
     rig.cloud.visible = active && cloud.length > 0 && byId("live-cloud").checked;
   }
-  drawDetail();
   dirty = true;
 }
 
 function clearMotion() {
   pose = null;
   trail = [];
-  trailFlat = [];
   plan = cloud = new Float32Array(0);
   trailId = cloudId = planId = 0;
   applyVisibility();
@@ -263,73 +258,6 @@ function updateGeometry(trailChanged, planChanged, cloudChanged) {
     rig.drone.position.copy(pos);
     rig.drone.quaternion.copy(orient);
   }
-}
-
-function drawDetail() {
-  const density = Math.min(devicePixelRatio, 2);
-  const w = detail.clientWidth, h = detail.clientHeight;
-  if (!w || !h) return;
-  if (detail.width !== Math.round(w * density) || detail.height !== Math.round(h * density)) {
-    detail.width = Math.round(w * density);
-    detail.height = Math.round(h * density);
-  }
-  ctx.setTransform(density, 0, 0, density, 0, 0);
-  ctx.clearRect(0, 0, w, h);
-  if (!visible() || !pose) {
-    ctx.fillStyle = "#a4b4c4";
-    ctx.font = "12px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("等待地图与定位对齐", w / 2, h / 2);
-    return;
-  }
-  const radius = 1.25;
-  const scale = Math.min(w, h) / (radius * 2);
-  const sx = x => w / 2 + (x - pos.x) * scale;
-  const sy = y => h / 2 - (y - pos.y) * scale;
-  const grid = .5;
-  ctx.strokeStyle = "#283847";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  for (let x = Math.ceil((pos.x - w / 2 / scale) / grid) * grid; sx(x) < w; x += grid) {
-    ctx.moveTo(sx(x), 0);
-    ctx.lineTo(sx(x), h);
-  }
-  for (let y = Math.ceil((pos.y - h / 2 / scale) / grid) * grid; sy(y) > 0; y += grid) {
-    ctx.moveTo(0, sy(y));
-    ctx.lineTo(w, sy(y));
-  }
-  ctx.stroke();
-  function path(points, color, dashed = false) {
-    if (points.length < 6) return;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.setLineDash(dashed ? [4, 4] : []);
-    ctx.beginPath();
-    ctx.moveTo(sx(points[0]), sy(points[1]));
-    for (let i = 3; i < points.length; i += 3) ctx.lineTo(sx(points[i]), sy(points[i + 1]));
-    ctx.stroke();
-    ctx.setLineDash([]);
-  }
-  if (byId("planned").checked) path(plan, colors.plan, pending);
-  if (byId("traveled").checked) path(trailFlat, colors.trail);
-  ctx.save();
-  ctx.translate(w / 2, h / 2);
-  ctx.rotate(-Math.atan2(forward.y, forward.x));
-  ctx.fillStyle = colors.drone;
-  ctx.strokeStyle = colors.drone;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(3, 0); ctx.lineTo(22, 0); ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(25, 0); ctx.lineTo(16, -5); ctx.lineTo(16, 5); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.arc(0, 0, 4, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
-  ctx.strokeStyle = "#9db1c3";
-  ctx.beginPath(); ctx.moveTo(10, h - 12); ctx.lineTo(10 + .5 * scale, h - 12); ctx.stroke();
-  ctx.fillStyle = "#afc0cd";
-  ctx.textAlign = "left";
-  ctx.font = "10px ui-monospace, monospace";
-  ctx.fillText("0.5 m", 10, h - 17);
 }
 
 function asFloats(encoded) {
@@ -532,7 +460,6 @@ function consume(result) {
     if (result.trailReset) trail = [];
     trail.push(...result.trail);
     if (trail.length > 4800) trail.splice(0, trail.length - 4800);
-    trailFlat = trail.flat();
   }
   if (planChanged) plan = result.plan ? asFloats(result.plan) : new Float32Array(0);
   if (cloudChanged) cloud = result.cloud ? asFloats(result.cloud) : new Float32Array(0);
@@ -597,7 +524,7 @@ try {
 } catch {
   const error = byId("render-error");
   error.hidden = false;
-  error.textContent = "三维视图需要 WebGL 2。右侧俯视和状态仍可使用。";
+  error.textContent = "三维视图需要 WebGL 2。相机、读码和任务状态仍可查看。";
 }
 inspection = createInspection({
   rig, viewport, focusRoute, redraw: () => { dirty = true; }, setView: mode => setView(mode, true),
@@ -617,7 +544,6 @@ byId("display-map").addEventListener("change", event => {
 setView("room");
 updateLayers();
 void loadCatalog();
-new ResizeObserver(drawDetail).observe(detail);
 views.forEach(button => button.addEventListener("click", () => setView(button.dataset.view)));
 toggles.forEach(input => input.addEventListener("change", updateLayers));
 for (const id of ["live-cloud", "planned", "traveled"]) {

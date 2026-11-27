@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Serve local maps, Orange Pi telemetry and preset task preparation."""
 import argparse
-from contextlib import contextmanager, nullcontext
+from contextlib import closing, contextmanager, nullcontext
 import hashlib
 from http.client import HTTPException
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,6 +23,7 @@ from urllib.request import ProxyHandler, build_opener
 from board_connection import DEFAULT_ROOT, in_checkout, remote_path, settings
 from camera_view import Camera, MODES
 from map_cloud import display_map
+from scan_connection import ScanConnection
 from inspection import Conflict, Inspection
 from task_dispatch import Dispatch, TaskConflict, catalog
 
@@ -38,6 +39,7 @@ SSH = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
 HTTP = build_opener(ProxyHandler({}))
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
+    "/scans.js": ("scans.js", "text/javascript; charset=utf-8"),
     "/camera.js": ("camera.js", "text/javascript; charset=utf-8"),
     "/monitor.js": ("monitor.js", "text/javascript; charset=utf-8"),
     "/monitor.css": ("monitor.css", "text/css; charset=utf-8"),
@@ -155,7 +157,7 @@ class Telemetry:
             self.worker.join()
 
 
-def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=None, camera=None):
+def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=None, camera=None, scans=None):
     inspection = Inspection(cache, RVIZ_MAPS, MAP_KEY, fingerprint, temporary_path)
     tasks = dispatch.data if dispatch else catalog(ROOT)
 
@@ -209,6 +211,20 @@ def serve(port, cache, upstream, telemetry=None, board_status=False, dispatch=No
                             self.wfile.write(b"\r\n")
                             stamp = new
                     return
+                elif request.path == "/scan-runs" or request.path.startswith("/scan-runs/"):
+                    if self.headers.get("Sec-Fetch-Site") not in (None, "none", "same-origin"):
+                        self.send_error(403)
+                        return
+                    if scans is None:
+                        self.json_reply(dict(online=False, error="离线模式", data=None, updatedAt=None))
+                    elif request.path == "/scan-runs":
+                        self.json_reply(scans.read())
+                    else:
+                        key = request.path[len("/scan-runs/"):]
+                        if not key:
+                            self.send_error(404)
+                            return
+                        self.json_reply(scans.read(key))
                 elif request.path == "/map":
                     key = parse_qs(request.query).get("key", [""])[0]
                     if not MAP_KEY.fullmatch(key):
@@ -396,7 +412,10 @@ def main():
     telemetry = None if args.offline else Telemetry(args.host, args.tunnel_port, args.board_port, stopped, args.board_status, remote_root)
     dispatch = None if args.offline else Dispatch(catalog(ROOT), args.cache, args.host, SSH, stopped, remote_root)
     camera = None if args.offline else Camera(SSH, args.host, stopped, remote_root)
-    with serve(args.port, args.cache, upstream, telemetry, args.board_status, dispatch, camera) as http:
+    scans = None if args.offline else ScanConnection(SSH, args.host)
+    with (closing(scans) if scans else nullcontext()), serve(
+        args.port, args.cache, upstream, telemetry, args.board_status, dispatch, camera, scans
+    ) as http:
         with (telemetry.running() if telemetry else nullcontext()), (dispatch.running() if dispatch else nullcontext()):
             http.timeout = .35
             print(f"仓库无人机监看 http://127.0.0.1:{args.port}/", flush=True)

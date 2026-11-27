@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="/monitor.css">
 <script defer src="/monitor.js"></script>
 <script defer src="/camera.js"></script>
+<script defer src="/scans.js"></script>
 </head>
 <body>
 <main>
@@ -65,19 +66,27 @@
         <button id="tab-live" type="button" aria-pressed="true">实时监看</button>
         <button id="tab-inspection" type="button" hidden aria-pressed="false">预设任务</button>
       </div>
-      <div id="live-panel">
-      <section>
-        <details id="camera-panel">
-          <summary>OV13855 相机</summary>
-          <label>画面 <select id="camera-mode">
+      <section id="camera-panel">
+        <div class="pose-title">
+          <h2>OV13855 相机</h2>
+          <select id="camera-mode" aria-label="相机画面模式">
             <option value="auto">自动 · 任务优先</option><option value="raw">原始画面</option>
             <option value="task">任务标注</option><option value="local">本地识别</option>
-          </select></label>
-          <p id="camera-status" role="status"></p>
-          <img id="camera-image" hidden alt="OV13855 实时画面">
-          <div id="camera-events" aria-label="任务识别记录"></div>
-        </details>
+          </select>
+        </div>
+        <p id="camera-status" role="status"></p>
+        <img id="camera-image" hidden alt="OV13855 实时画面">
+        <div id="camera-events" aria-label="相机识别事件"></div>
       </section>
+      <section id="scan-panel" aria-labelledby="scan-heading">
+        <div class="pose-title"><h2 id="scan-heading">读码情况</h2><span id="scan-state"></span></div>
+        <select id="scan-run" aria-label="选择扫码实验"><option value="">跟随最新</option></select>
+        <p id="scan-identity"></p>
+        <p id="scan-summary" role="status"></p>
+        <ol id="scan-rows" aria-label="逐标签读码结果"></ol>
+        <p id="scan-info" class="dim" role="status"></p>
+      </section>
+      <div id="live-panel">
       <section class="flight-section">
         <details id="flight-status">
           <summary>
@@ -106,10 +115,6 @@
           <div><dt>高度 / cm</dt><dd id="dll-z">—</dd></div>
           <div><dt>航向 / °</dt><dd id="dll-yaw">—</dd></div>
         </dl>
-      </section>
-      <section>
-        <div class="close-title"><h2>局部俯视</h2><span class="dim">X 向右 · Y 向上</span></div>
-        <canvas id="detail" role="img" aria-label="俯视飞行轨迹和机头"></canvas>
       </section>
       <section>
         <h2>实时图层</h2>

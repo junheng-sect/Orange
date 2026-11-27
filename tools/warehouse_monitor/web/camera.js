@@ -1,6 +1,4 @@
 (() => {
-  const panel = document.querySelector("#camera-panel");
-  const live = document.querySelector("#live-panel");
   const image = document.querySelector("#camera-image");
   const status = document.querySelector("#camera-status");
   const select = document.querySelector("#camera-mode");
@@ -45,7 +43,7 @@
     request("close", true).catch(() => {});
   }
   function update() {
-    const wanted = panel.open && !live.hidden && !document.hidden;
+    const wanted = !document.hidden;
     if (!wanted) return stop();
     if (!active) { active = true; tick(++generation); }
   }
@@ -53,9 +51,8 @@
   select.addEventListener("change", () => {
     if (active) { clearTimeout(timer); tick(++generation); }
   });
-  panel.addEventListener("toggle", update);
   document.addEventListener("visibilitychange", update);
   window.addEventListener("pagehide", stop);
   window.addEventListener("pageshow", update);
-  new MutationObserver(update).observe(live, {attributes: true, attributeFilter: ["hidden"]});
+  update();
 })();
