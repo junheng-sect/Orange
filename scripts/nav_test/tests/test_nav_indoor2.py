@@ -222,6 +222,7 @@ class IndoorSquareTests(unittest.TestCase):
 mkdir() { :; }
 source() {
   builtin source "$@"
+  nt_open_logs() { :; }  # This probe exercises argument resolution only.
   nt_bringup() {
     python3 - "$TEST_NAME" "$MAP" "$RELOC_CONFIG" "$MAP_FRAME" "$NAV_CONFIG" "$PREVIEW" "$PREVIEW_RADIUS" "$PREVIEW_HALF_HEIGHT" <<'PY'
 import json,sys
