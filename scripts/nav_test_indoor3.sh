@@ -33,7 +33,7 @@ test_after_fusion() {
     err "全分辨率相机已有节点，请在地面结束原相机任务后再启动 test3"
     return 1
   fi
-  start_child "$PF_INDOOR3_CAMERA" "$OUT/camera.log" roslaunch "$NT_DIR/indoor3_camera.launch"
+  start_child "$PF_INDOOR3_CAMERA" "$NT_LOG_DIR/camera.log" roslaunch "$NT_DIR/indoor3_camera.launch"
   python3 -B "$NT_DIR/nav_indoor3.py" --probe-camera --out "$OUT" 2>&1 | tee -a "$LOG"
 }
 

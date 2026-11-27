@@ -113,7 +113,7 @@ namespace ego_planner
 
     if ((start_pt - local_target_pt).norm() < 0.2)
     {
-      cout << "Close to goal" << endl;
+      cout << "Close to goal" << '\n';
       continous_failures_count_++;
       return false;
     }
@@ -312,7 +312,7 @@ namespace ego_planner
       // cout << "enter" << endl;
       std::vector<ControlPoints> trajs = bspline_optimizer_->distinctiveTrajs(segments);
       cout << "\033[1;33m"
-           << "multi-trajs=" << trajs.size() << "\033[1;0m" << endl;
+           << "multi-trajs=" << trajs.size() << "\033[1;0m" << '\n';
 
       double final_cost, min_cost = 999999.0;
       for (int i = trajs.size() - 1; i >= 0; i--)
@@ -320,7 +320,7 @@ namespace ego_planner
         if (bspline_optimizer_->BsplineOptimizeTrajRebound(ctrl_pts_temp, final_cost, trajs[i], ts))
         {
 
-          cout << "traj " << trajs.size() - i << " success." << endl;
+          cout << "traj " << trajs.size() - i << " success." << '\n';
 
           flag_step_1_success = true;
           if (final_cost < min_cost)
@@ -339,7 +339,7 @@ namespace ego_planner
         }
         else
         {
-          cout << "traj " << trajs.size() - i << " failed." << endl;
+          cout << "traj " << trajs.size() - i << " failed." << '\n';
         }
       }
 
@@ -355,7 +355,7 @@ namespace ego_planner
       visualization_->displayInitPathList(point_set, 0.2, 0);
     }
 
-    cout << "plan_success=" << flag_step_1_success << endl;
+    cout << "plan_success=" << flag_step_1_success << '\n';
     if (!flag_step_1_success)
     {
       visualization_->displayOptimalList(ctrl_pts, 0);
@@ -379,7 +379,7 @@ namespace ego_planner
       // acceleration limit), so check again, up to 3 passes. A later pass failing keeps the previous result.
       for (int pass = 0; pass < 3 && !pos.checkFeasibility(ratio, false); ++pass)
       {
-        cout << "Need to reallocate time." << endl;
+        cout << "Need to reallocate time." << '\n';
 
         UniformBspline refined = pos; // refineTrajAlgo overwrites its input
         double ts_refined = ts;
@@ -452,7 +452,7 @@ namespace ego_planner
     static int count_success = 0;
     sum_time += (t_init + t_opt + t_refine).toSec();
     count_success++;
-    cout << "total time:\033[42m" << (t_init + t_opt + t_refine).toSec() << "\033[0m,optimize:" << (t_init + t_opt).toSec() << ",refine:" << t_refine.toSec() << ",avg_time=" << sum_time / count_success << endl;
+    cout << "total time:\033[42m" << (t_init + t_opt + t_refine).toSec() << "\033[0m,optimize:" << (t_init + t_opt).toSec() << ",refine:" << t_refine.toSec() << ",avg_time=" << sum_time / count_success << '\n';
 
     // success. YoY
     continous_failures_count_ = 0;

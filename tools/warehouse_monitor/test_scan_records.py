@@ -42,6 +42,13 @@ class ScanRecordsTest(unittest.TestCase):
         folder = self.root / name
         folder.mkdir()
         goal = folder / "goal_test_indoor4_fixture.json"
+        # The task publishes each update by atomic replacement. In-place writes of
+        # equal size may share an mtime tick on the board.
+        def publish_goal(data):
+            temp = goal.with_suffix(".tmp")
+            temp.write_text(json.dumps(data))
+            temp.replace(goal)
+
         data = dict(end="RUNNING", batches=[
             dict(observation=1, name="左下", candidates=[
                 dict(id=5, status="planned"), dict(id=2, status="skipped", reason="height"),
@@ -51,15 +58,15 @@ class ScanRecordsTest(unittest.TestCase):
                 dict(id=4, status="skipped", reason="angle")], order=[2])],
             scans=[dict(id=5, observation=1, status="success", qr="BOX-05"),
                    dict(id=2, observation=2, status="running")])
-        goal.write_text(json.dumps(data))
+        publish_goal(data)
         first = run_detail(self.root, name)
         self.assertEqual((first["discovered"], first["success"], first["failed"]), (4, 1, 0))
         self.assertEqual([r["status"] for r in first["rows"]], ["success", "unattempted", "running", "skipped"])
         data["end"] = "ABORTED"
-        goal.write_text(json.dumps(data))
+        publish_goal(data)
         self.assertEqual(run_detail(self.root, name)["rows"][2]["status"], "aborted")
         data["scans"][1].update(status="failed", reason="decode_fail")
-        goal.write_text(json.dumps(data))
+        publish_goal(data)
         final = run_detail(self.root, name)
         self.assertEqual((final["state"], final["failed"]), ("ABORTED", 1))
         self.assertEqual(final["rows"][2]["reason"], "decode_fail")

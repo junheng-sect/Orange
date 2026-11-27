@@ -174,6 +174,7 @@ class Indoor4Runner(GlobalRunner):
         super().__init__(args, cfg, state, buf, prepare, check, client)
         self.route = args.route
         self.out = Path(args.out)
+        self.capture_waypoints = getattr(args, 'capture_waypoints', False)
         self.cam_translation, self.cam_rotation, self.layout, self.config_paths = load_calibration()
         self.lever = finite(cfg['lever_body'])
         self.vision = self.vision_type()
@@ -337,10 +338,11 @@ class Indoor4Runner(GlobalRunner):
         self.pause(1., stopped=True)
         start = rospy.Time.now()
         end = start + rospy.Duration(2.)
-        photo = self.vision.take_photo(start, self.stopped)
+        frame = self.vision.take_photo(start, self.stopped) if self.capture_waypoints else None
         self.pause(max(0., (end - rospy.Time.now()).to_sec()) + .20, stopped=True)
         batch = dict(observation=i + 1, name=self.route['points'][i]['name'],
-                     photo=self.capture(photo, i), observations=[], candidates=[], order=[])
+                     photo=self.capture(frame, i) if self.capture_waypoints else dict(status='disabled'),
+                     observations=[], candidates=[], order=[])
         self.record['batches'].append(batch)
         frames = self.vision.window(start, end)
         batch['frames'] = len(frames)
@@ -505,6 +507,7 @@ def run_cli(runner_type, route_loader, node_name):
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--preview', action='store_true')
     parser.add_argument('--probe-camera', action='store_true')
+    parser.add_argument('--capture-waypoints', action='store_true')
     args = parser.parse_args()
     if args.probe_camera:
         return probe(args.out, runner_type.vision_type, node_name.split('nav_', 1)[-1] + '_camera_probe')
@@ -512,7 +515,7 @@ def run_cli(runner_type, route_loader, node_name):
     return serve(node_name, SimpleNamespace(
         route=route, points=[(*p['xyz'], route['yaw_deg']) for p in route['points']],
         hold=route['hold_s'], check_segments=False, delay=3., max_start_offset=math.inf,
-        out=str(args.out.resolve()), preview=args.preview), runner_type)
+        out=str(args.out.resolve()), preview=args.preview, capture_waypoints=args.capture_waypoints), runner_type)
 
 
 def main():

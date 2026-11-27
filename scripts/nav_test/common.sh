@@ -12,6 +12,7 @@
 #   --show-dll-config   只显示本次任务的旁路与录包配置，随后退出
 #   --no-dll            本次跳过 DLL 旁路对照
 #   --record-raw-lidar  本次额外录原始 /livox/lidar，供重新回放和静止 ICP
+#   --record-nav-cloud  本次额外录 /drone_nav/cloud，供避障复盘和 EGO 重放
 #   --ev-mode MODE     转给 fusion.sh：外部定位送飞控的方式，pose（默认，只发位姿）/ odom（位姿 + 速度，
 #                      要 MAVROS 用 MAVLink2、飞控 EKF2_EV_CTRL 带速度位 bit2）。只能开机时选，测试中途不能换
 #   --live-grid-only   跳过先验栅格，仅用当前测试的实时观测
@@ -45,6 +46,20 @@ ok()   { printf '[%s] [ OK ] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 warn() { printf '[%s] [WARN] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG"; }
 err()  { printf '[%s] [FAIL] %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG" >&2; }
 hr()   { printf '%s\n' "----------------------------------------------------------------" | tee -a "$LOG"; }
+
+# The task owns both sets of logs. A nested fusion writes here and the parent archives
+# once all writers have stopped. The separate PID directory is never archived.
+nt_open_logs() {
+  ORANGE_NAV_LOG_ROOT=$(mktemp -d /dev/shm/nav_test_logs.XXXXXX) || return 1
+  NT_LOG_DIR="$ORANGE_NAV_LOG_ROOT/task"
+  export ORANGE_NAV_LOG_ROOT ROS_LOG_DIR="$NT_LOG_DIR/ros_log"
+  mkdir -p -- "$ROS_LOG_DIR" || return 1
+  log "实时子进程日志：$NT_LOG_DIR（收尾归档至 $OUT）"
+}
+
+nt_archive_logs() {
+  python3 -B "$DIR/archive_runtime_logs.py" "$ORANGE_NAV_LOG_ROOT" --task "$OUT" --fusion "$WS/logs/fusion"
+}
 
 # ---------------------------------------------------------------- 子进程 ----
 # 同 reloc_test.sh：子进程各开一个会话（终端的 Ctrl+C 绕不到它们，由本脚本统一转发），
@@ -130,7 +145,13 @@ finish() { # finish <退出码> [force]：信号触发时飞机还解锁着就�
   if (( NT_DLL )); then stop_child "$PF_DLL" "DLL 旁路" INT 15 || _cleanup_ok=0; fi
   stop_child "$PF_RELOC" "重定位节点" INT 10 || _cleanup_ok=0
   stop_child "$PF_FUSION" "定位链路 fusion.sh（录包收尾、恢复对时）" TERM 60 || _cleanup_ok=0
-  rm -rf "$RUN_DIR"
+  if (( _cleanup_ok )) && nt_archive_logs; then
+    rm -rf "$RUN_DIR"
+  else
+    warn "日志暂未归档：$ORANGE_NAV_LOG_ROOT（进程身份文件：$RUN_DIR）"
+    _cleanup_ok=0
+    _code=1
+  fi
   # 测完常直接断电：包的索引还在页缓存里就会丢
   log "写盘（sync）……"; sync
   hr
@@ -143,7 +164,7 @@ finish() { # finish <退出码> [force]：信号触发时飞机还解锁着就�
       # The indexed logs are immutable from here on.
       if [ -n "${WAREHOUSE_TASK_ID:-}" ] && [ "$_code" -eq 130 ]; then echo "[ OK ] 网页任务已收尾"; fi
     else
-      echo "进程未完全退出，暂不索引 $OUT" >&2
+      echo "子进程或日志尚未收尾，暂不索引 $OUT" >&2
       _code=1
     fi
   elif [ -n "${WAREHOUSE_TASK_ID:-}" ] && [ "$_cleanup_ok" -eq 1 ] && [ "$_code" -eq 130 ]; then
@@ -172,9 +193,9 @@ LIMITS
 }
 
 nt_check_chain() { # 每次发目标前确认链路还在
-  child_pid "$PF_FUSION" >/dev/null || { err "定位链路 fusion.sh 已退出，看 $OUT/fusion.log"; return 1; }
-  child_pid "$PF_RELOC" >/dev/null || { err "重定位节点已退出，看 $OUT/reloc.log"; return 1; }
-  child_pid "$PF_NAV" >/dev/null || { err "导航已退出，看 $OUT/nav.log"; return 1; }
+  child_pid "$PF_FUSION" >/dev/null || { err "定位链路 fusion.sh 已退出，看 $NT_LOG_DIR/fusion.log"; return 1; }
+  child_pid "$PF_RELOC" >/dev/null || { err "重定位节点已退出，看 $NT_LOG_DIR/reloc.log"; return 1; }
+  child_pid "$PF_NAV" >/dev/null || { err "导航已退出，看 $NT_LOG_DIR/nav.log"; return 1; }
 }
 
 # These deployed task IDs keep their original recording and process footprint.
@@ -205,6 +226,7 @@ nav_test_main() {
       --preview) PREVIEW=1 ;;
       --no-dll) NT_DLL=0 ;;
       --show-dll-config) _show_dll=1 ;;
+      --record-nav-cloud) export RC_RECORD_NAV_CLOUD=true ;;
       --record-raw-lidar) NT_RAW_LIDAR=1 ;;
       --live-grid-only) LIVE_GRID_ONLY=1 ;;
       --map) MAP="${2:-}"; SHIFT=2 ;;
@@ -225,7 +247,7 @@ nav_test_main() {
     local _dll_text=关闭 _raw_text="沿用录包配置（默认关闭）"
     if (( NT_DLL )); then _dll_text="开启（只作对照）"; fi
     if (( NT_RAW_LIDAR )); then _raw_text="开启"; fi
-    printf '%s\n' "任务：$TEST_NAME" "主定位先验图：$MAP" "DLL 旁路：$_dll_text" "原始雷达：$_raw_text"
+    printf '%s\n' "任务：$TEST_NAME" "主定位先验图：$MAP" "DLL 旁路：$_dll_text" "原始雷达：$_raw_text" "导航点云录包：${RC_RECORD_NAV_CLOUD:-沿用录包配置（默认关闭）}"
     return 0
   fi
 
@@ -248,6 +270,7 @@ nav_test_main() {
   if [ -n "${WAREHOUSE_TASK_ID:-}" ]; then OUT="$OUT-${WAREHOUSE_TASK_ID:0:8}"; fi
   mkdir -p "$OUT"
   LOG="$OUT/nav_test.log"
+  nt_open_logs || exit 1
   RUN_DIR="$(mktemp -d /tmp/nav_test.XXXXXX)"
   PF_FUSION="$RUN_DIR/fusion.pid"; PF_RELOC="$RUN_DIR/reloc.pid"; PF_CAR="$RUN_DIR/car.pid"; PF_NAV="$RUN_DIR/nav.pid"
   PF_DLL="$RUN_DIR/dll.pid"
@@ -261,8 +284,8 @@ nav_test_main() {
 
   nt_bringup
   if (( NT_DLL )); then
-    log "定位已就绪，异步启动 DLL 旁路（日志 $OUT/dll.log）"
-    start_child "$PF_DLL" "$OUT/dll.log" nice -n 10 env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+    log "定位已就绪，异步启动 DLL 旁路（日志 $NT_LOG_DIR/dll.log）"
+    start_child "$PF_DLL" "$NT_LOG_DIR/dll.log" nice -n 10 env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
       "$NT_DIR/start_dll_observer.sh" "$MAP" "$RELOC_CONFIG" "$OUT" || warn "DLL 旁路未启动"
   fi
   if [ -n "${WAREHOUSE_TASK_ID:-}" ]; then
@@ -283,8 +306,8 @@ nav_test_main() {
   local _nav_gone=0
   while :; do
     sleep 2
-    child_pid "$PF_FUSION" >/dev/null || { err "定位链路 fusion.sh 已退出，看 $OUT/fusion.log"; finish 1 force; }
-    if [ "${NT_MANUAL_FLIGHT:-0}" = 0 ] && [ "$_nav_gone" -eq 0 ] && ! child_pid "$PF_NAV" >/dev/null; then warn "导航已退出，看 $OUT/nav.log"; _nav_gone=1; fi
+    child_pid "$PF_FUSION" >/dev/null || { err "定位链路 fusion.sh 已退出，看 $NT_LOG_DIR/fusion.log"; finish 1 force; }
+    if [ "${NT_MANUAL_FLIGHT:-0}" = 0 ] && [ "$_nav_gone" -eq 0 ] && ! child_pid "$PF_NAV" >/dev/null; then warn "导航已退出，看 $NT_LOG_DIR/nav.log"; _nav_gone=1; fi
   done
 }
 
@@ -388,11 +411,11 @@ PY
   local _record_env=("NAV_TEST_DLL_TASK=")
   if (( NT_DLL )); then _record_env=("NAV_TEST_DLL_TASK=$TEST_NAME"); fi
   if (( NT_RAW_LIDAR )); then _record_env+=("RC_RECORD_RAW_CLOUD=true"); fi
-  start_child "$PF_FUSION" "$OUT/fusion.log" env "${_record_env[@]}" "$DIR/fusion.sh" --no-camera --no-winch --bag-dir "$OUT" --bag-prefix "$TEST_NAME" --ev-mode "$EV_MODE" "${FUSION_ARGS[@]}"
+  start_child "$PF_FUSION" "$NT_LOG_DIR/fusion.log" env "${_record_env[@]}" "$DIR/fusion.sh" --no-camera --no-winch --bag-dir "$OUT" --bag-prefix "$TEST_NAME" --ev-mode "$EV_MODE" "${FUSION_ARGS[@]}"
   local _t=0
   until timeout 3 rostopic echo -n1 /fastlio/odom_world >/dev/null 2>&1; do
-    child_pid "$PF_FUSION" >/dev/null || { err "fusion.sh 退出了，最后几行："; tail -n 8 "$OUT/fusion.log" | tee -a "$LOG"; finish 1 force; }
-    _t=$((_t + 4)); [ "$_t" -ge 180 ] && { err "180 s 内没有 /fastlio/odom_world，看 $OUT/fusion.log"; finish 1 force; }
+    child_pid "$PF_FUSION" >/dev/null || { err "fusion.sh 退出了，最后几行："; tail -n 8 "$NT_LOG_DIR/fusion.log" | tee -a "$LOG"; finish 1 force; }
+    _t=$((_t + 4)); [ "$_t" -ge 180 ] && { err "180 s 内没有 /fastlio/odom_world，看 $NT_LOG_DIR/fusion.log"; finish 1 force; }
     sleep 1
   done
   ok "FAST-LIO 和重力桥已输出（/fastlio/odom_world）"
@@ -402,8 +425,8 @@ PY
   fi
 
   hr; log "步骤 3/4：重定位 + world map（第一个窗口算 6～12 s，第二个窗口确认 1～3 s）。继续别动"
-  start_child "$PF_RELOC" "$OUT/reloc.log" rosrun drone_relocalization relocalize --map "$MAP" --config "$RELOC_CONFIG" --save "$OUT"
-  start_child "$PF_CAR" "$OUT/car_bridge.log" roslaunch car_bridge car_bridge.launch drone_map:="$MAP" frames:="$MAP_FRAME"
+  start_child "$PF_RELOC" "$NT_LOG_DIR/reloc.log" rosrun drone_relocalization relocalize --map "$MAP" --config "$RELOC_CONFIG" --save "$OUT"
+  start_child "$PF_CAR" "$NT_LOG_DIR/car_bridge.log" roslaunch car_bridge car_bridge.launch drone_map:="$MAP" frames:="$MAP_FRAME"
   cat >"$RUN_DIR/wait_reloc.py" <<'PY'
 import json, math, os, sys, time
 import rospy
@@ -455,9 +478,9 @@ try:
 except KeyboardInterrupt:
     sys.exit(130)
 PY
-  local _rpid; _rpid="$(child_pid "$PF_RELOC")" || { err "重定位节点没起来，看 $OUT/reloc.log"; finish 1 force; }
-  python3 "$RUN_DIR/wait_reloc.py" "$_rpid" "$LOG" || { err "重定位没成功，看 $OUT/reloc.log"; finish 1 force; }
-  ok "重定位完成；world map 由 car_bridge 发（看 $OUT/car_bridge.log）"
+  local _rpid; _rpid="$(child_pid "$PF_RELOC")" || { err "重定位节点没起来，看 $NT_LOG_DIR/reloc.log"; finish 1 force; }
+  python3 "$RUN_DIR/wait_reloc.py" "$_rpid" "$LOG" || { err "重定位没成功，看 $NT_LOG_DIR/reloc.log"; finish 1 force; }
+  ok "重定位完成；world map 由 car_bridge 发（看 $NT_LOG_DIR/car_bridge.log）"
 
   if [[ "${NT_MANUAL_FLIGHT:-0}" == 1 ]]; then return 0; fi
   hr; log "步骤 4/4：启动导航（EGO + 执行器 + 网关，$([ "$PREVIEW" -eq 1 ] && echo 只预览 || echo 真实输出)）"
@@ -466,7 +489,7 @@ PY
   _nav_args+=(prior_grid_file:="$_prior_file" prior_map_sha256:="$_prior_map_sha")
   [[ "$TEST_NAME" != test_indoor[456] ]] || _nav_args+=(allow_short_goals:=true)
   [ "$TEST_NAME" != test_indoor3_3 ] || _nav_args+=(allow_short_goals:=true)
-  start_child "$PF_NAV" "$OUT/nav.log" roslaunch drone_navigation navigation.launch "${_nav_args[@]}"
+  start_child "$PF_NAV" "$NT_LOG_DIR/nav.log" roslaunch drone_navigation navigation.launch "${_nav_args[@]}"
   cat >"$RUN_DIR/wait_nav.py" <<'PY'
 import json, os, sys, time
 import rospy
@@ -506,9 +529,9 @@ try:
 except KeyboardInterrupt:
     sys.exit(130)
 PY
-  local _npid; _npid="$(child_pid "$PF_NAV")" || { err "导航没起来，看 $OUT/nav.log"; finish 1 force; }
+  local _npid; _npid="$(child_pid "$PF_NAV")" || { err "导航没起来，看 $NT_LOG_DIR/nav.log"; finish 1 force; }
   if ! python3 "$RUN_DIR/wait_nav.py" "$_npid" "$PREVIEW" "$((1 - LIVE_GRID_ONLY))" 2>&1 | tee -a "$LOG"; then
-    err "导航没就绪，最后几行："; tail -n 8 "$OUT/nav.log" | tee -a "$LOG"; finish 1 force
+    err "导航没就绪，最后几行："; tail -n 8 "$NT_LOG_DIR/nav.log" | tee -a "$LOG"; finish 1 force
   fi
   ok "导航就绪（输入 READY，网关 $([ "$PREVIEW" -eq 1 ] && echo 只预览 || echo 真实输出)）"
 }

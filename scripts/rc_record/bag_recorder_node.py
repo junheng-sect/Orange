@@ -25,7 +25,7 @@ offboard_bag_recorder 一致），不 fork rosbag record 进程；bag 名用六�
 参数（rospy 私有参数，命令行可直接 _name:=value 覆盖）：
   rc_topic, rc_channel(1-based), rc_threshold, active_high, confirm_samples,
   release_tail_s, rc_warn_timeout_s, stop_on_rc_loss, bag_directory, bag_prefix,
-  topics, latched_topics, record_raw_cloud, record_registered_cloud, status_topic, bag_path_topic, status_rate
+  topics, latched_topics, record_raw_cloud, record_registered_cloud, record_nav_cloud, status_topic, bag_path_topic, status_rate
 """
 
 import json
@@ -95,6 +95,7 @@ def topic_type_registry():
         '/fastlio/odom_world': Odometry,
         '/fastlio/velocity': Vector3Stamped,
         '/cloud_registered': PointCloud2,
+        '/drone_nav/cloud': PointCloud2,
         '/Odometry': Odometry,
         '/livox/imu': Imu,
         '/tf': TFMessage,
@@ -127,7 +128,6 @@ def topic_type_registry():
         registry.update({
             '/drone_nav/odom': Odometry,
             '/drone_nav/sensor_odom': Odometry,
-            '/drone_nav/cloud': PointCloud2,
             '/drone_nav/planner_goal': PoseStamped,
             '/drone_nav/planner_path': Path,
             '/drone_nav/bspline': Bspline,
@@ -187,7 +187,7 @@ class RcBagRecorder(object):
             release_tail_s=float(rospy.get_param('~release_tail_s', 1.0)))
 
         registry = topic_type_registry()
-        wanted = list(rospy.get_param('~topics', DEFAULT_TOPICS))
+        wanted = list(dict.fromkeys(rospy.get_param('~topics', DEFAULT_TOPICS)))
         self._dll_task = os.environ.get('NAV_TEST_DLL_TASK', '')
         self._dll_publisher = None
         if self._dll_task:
@@ -203,6 +203,8 @@ class RcBagRecorder(object):
         if bool(rospy.get_param('~record_registered_cloud', False)):
             if '/cloud_registered' not in wanted:
                 wanted.append('/cloud_registered')
+        if rospy.get_param('~record_nav_cloud', False) and '/drone_nav/cloud' not in wanted:
+            wanted.append('/drone_nav/cloud')
         self._topics = []
         for topic in wanted:
             if topic not in registry:

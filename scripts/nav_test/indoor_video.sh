@@ -14,15 +14,15 @@ video_after_fusion() {
   fi
   printf '%s\n' ov13855 > "$OUT/video_cameras.txt" || return 1
   PF_CAM="$RUN_DIR/video_cameras.pid"; PF_VIDEO="$RUN_DIR/video.pid"; PF_RECORD="$RUN_DIR/record.pid"
-  start_child "$PF_CAM" "$OUT/camera.log" roslaunch "$NT_DIR/indoor3_4_camera.launch" "full:=${VIDEO_FULL:-false}"
-  start_child "$PF_VIDEO" "$OUT/video.log" env ROSCONSOLE_STDOUT_LINE_BUFFERED=1 nice -n 5 \
+  start_child "$PF_CAM" "$NT_LOG_DIR/camera.log" roslaunch "$NT_DIR/indoor3_4_camera.launch" "full:=${VIDEO_FULL:-false}"
+  start_child "$PF_VIDEO" "$NT_LOG_DIR/video.log" env ROSCONSOLE_STDOUT_LINE_BUFFERED=1 nice -n 5 \
     rosrun dual_camera_recorder dual_camera_recorder_node "_directory:=$OUT" _ov13855_only:=true "_bag_prefix:=$TEST_NAME"
   timeout 25 rostopic echo -n1 --filter 'm.data' /indoor3_4_video/ready | grep -q True || {
-    err "OV13855 录像预热失败：查看 $OUT/camera.log 和 $OUT/video.log"; return 1; }
+    err "OV13855 录像预热失败：查看 $NT_LOG_DIR/camera.log 和 $NT_LOG_DIR/video.log"; return 1; }
   ok "OV13855 1280×960/15 fps 灰度原图就绪"
   local dll_task=""
   (( NT_DLL )) && dll_task="$TEST_NAME"
-  start_child "$PF_RECORD" "$OUT/record.log" env ROS_PACKAGE_PATH="$DIR:$ROS_PACKAGE_PATH" NAV_TEST_DLL_TASK="$dll_task" RC_RECORD_RAW_CLOUD="$NT_RAW_LIDAR" \
+  start_child "$PF_RECORD" "$NT_LOG_DIR/record.log" env ROS_PACKAGE_PATH="$DIR:$ROS_PACKAGE_PATH" NAV_TEST_DLL_TASK="$dll_task" RC_RECORD_RAW_CLOUD="$NT_RAW_LIDAR" \
     roslaunch "$DIR/launch/fusion_aux.launch" record:=true winch:=false bag_prefix:="$TEST_NAME" bag_dir:="$OUT"
   timeout 15 rostopic echo -n1 /rc_record/status | grep -q 'healthy=True' || { err "通道 6 录包器未就绪"; return 1; }
   ok "Channel 6 录包已待命，OV13855 录像跟随 bag"

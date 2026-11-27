@@ -121,6 +121,7 @@ OUT="$HOME/test_data/nav_test/$(date +%Y%m%d_%H%M%S)_test12"
 [[ -z "$TASK_ID" ]] || OUT+="-${TASK_ID:0:8}"
 mkdir -p -- "$(dirname "$OUT")" && mkdir -- "$OUT" || exit 1
 LOG="$OUT/nav_test.log"
+nt_open_logs || exit 1
 RUN_DIR=$(mktemp -d /tmp/nav_test12.XXXXXX) || exit 1
 PF_FUSION="$RUN_DIR/fusion.pid"
 PF_RELOC="$RUN_DIR/reloc.pid"
@@ -169,10 +170,11 @@ finish12() {
     [[ ! -f "$bag" ]] || log "实飞对照包：$bag"
   done
   local clean=1
-  if ! grep -qx 'TEST12_RECORD stopped' "$OUT/record.log" || compgen -G "$OUT/*.bag.active" >/dev/null; then
-    warn "录包器未确认正常退出，请检查 $OUT/record.log"
+  if ! grep -qx 'TEST12_RECORD stopped' "$NT_LOG_DIR/record.log" || compgen -G "$OUT/*.bag.active" >/dev/null; then
+    warn "录包器未确认正常退出，请检查 $NT_LOG_DIR/record.log"
     clean=0
   fi
+  nt_archive_logs || clean=0
   if ! sync -f "$OUT"; then
     warn "同步写盘失败，请检查 $OUT"
     clean=0
@@ -219,8 +221,8 @@ bringup12() {
       sha256sum "$WS/devel/lib/ywl_localization/ywl_localization_node"; } >"$OUT/ywl_version.txt" || return 1
     record_args+=(--ywl)
   fi
-  start_child "$PF_RECORD" "$OUT/record.log" "$RECORDER" "${record_args[@]}"
-  setsid tail -n +1 -F --pid="$$" "$OUT/record.log" &
+  start_child "$PF_RECORD" "$NT_LOG_DIR/record.log" "$RECORDER" "${record_args[@]}"
+  setsid tail -n +1 -F --pid="$$" "$NT_LOG_DIR/record.log" &
   tail_pids+=("$!")
   wait_stage recorder 15 "$PF_RECORD" || { err '录包器未就绪，查看 record.log'; return 1; }
   ok 'Channel 6 录包已待命'
@@ -230,14 +232,14 @@ bringup12() {
   else
     warn '当前 fusion.sh 不支持单帧 timing/ 诊断'
   fi
-  start_child "$PF_FUSION" "$OUT/fusion.log" "$DIR/fusion.sh" "${fusion_args[@]}"
+  start_child "$PF_FUSION" "$NT_LOG_DIR/fusion.log" "$DIR/fusion.sh" "${fusion_args[@]}"
   wait_stage fastlio 180 "$PF_RECORD" "$PF_FUSION" || { err 'FAST-LIO 未就绪，查看 fusion.log'; return 1; }
   ok 'FAST-LIO2 和重力桥已输出'
   if (( USE_YWL )); then
     log 'YWL 正在校验地图并建立固定索引'
-    start_child "$PF_YWL" "$OUT/ywl.log" roslaunch ywl_localization ywl.launch \
+    start_child "$PF_YWL" "$NT_LOG_DIR/ywl.log" roslaunch ywl_localization ywl.launch \
       "map_dir:=$YWL_MAP" "legacy_map_dir:=$MAP" "reloc_config:=$RELOC_CONFIG" "calibration:=$YWL_CONFIG"
-    setsid tail -n +1 -F --pid="$$" "$OUT/ywl.log" &
+    setsid tail -n +1 -F --pid="$$" "$NT_LOG_DIR/ywl.log" &
     tail_pids+=("$!")
     wait_stage ywl-bootstrap 150 "$PF_RECORD" "$PF_FUSION" "$PF_YWL" ||
       { err 'YWL 启动里程计未就绪，查看 ywl.log'; return 1; }
@@ -247,7 +249,7 @@ bringup12() {
     # Keep the startup solver from competing with both estimators for BLAS workers.
     reloc_cmd=(env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 "${reloc_cmd[@]}")
   fi
-  start_child "$PF_RELOC" "$OUT/reloc.log" "${reloc_cmd[@]}"
+  start_child "$PF_RELOC" "$NT_LOG_DIR/reloc.log" "${reloc_cmd[@]}"
   wait_stage reloc 150 "$PF_RECORD" "$PF_FUSION" "$PF_RELOC" || { err '室外重定位未确认，查看 reloc.log'; return 1; }
   local ready='室外重定位已确认'
   if (( USE_DLL )); then
@@ -263,7 +265,7 @@ bringup12() {
   if (( USE_DLL )); then
     log 'DLL 正在建立距离场，旁路差值就绪后自动显示'
     # The child inherits the task workspace; record the exact DLL inputs.
-    start_child "$PF_DLL" "$OUT/dll.log" bash -c '
+    start_child "$PF_DLL" "$NT_LOG_DIR/dll.log" bash -c '
       set -e
       pkg=$(rospack find fastlio_dll)
       config="$pkg/config/outdoor_large_field.yaml"
@@ -272,7 +274,7 @@ bringup12() {
       cp -- "$1/manifest.json" "$3/dll_map_manifest.json"
       exec roslaunch fastlio_dll observe.launch "map_dir:=$1" "legacy_map_dir:=$2" "config:=$config"
     ' _ "$DLL_MAP" "$MAP" "$OUT"
-    setsid tail -n +1 -F --pid="$$" "$OUT/dll.log" &
+    setsid tail -n +1 -F --pid="$$" "$NT_LOG_DIR/dll.log" &
     tail_pids+=("$!")
   fi
   log '落地静止后拨回 Channel 6 封包。上锁后 Ctrl+C 收尾'

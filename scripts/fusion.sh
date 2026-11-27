@@ -66,7 +66,7 @@ CORE_LAUNCH="$DIR/launch/fusion_core.launch"
 AUX_LAUNCH="$DIR/launch/fusion_aux.launch"
 FC_TIME_PY="$DIR/fc_set_time.py"
 RC_RECORD_DIR="$DIR/rc_record"
-LOG_DIR="$WS/logs/fusion"
+ARCHIVE_LOG_DIR="$WS/logs/fusion"
 # 与 start_handheld_test.sh 共用同一把锁文件：新旧入口互斥
 LOCK_FILE="/tmp/mid360s_fusion.lock"
 
@@ -119,8 +119,18 @@ done
 [ -n "$BAG_DIR" ] || { echo "包目录不能为空" >&2; exit 2; }
 case "$EV_MODE" in pose|odom) ;; *) echo "--ev-mode 只能是 pose 或 odom（收到：$EV_MODE）" >&2; exit 2 ;; esac
 
-mkdir -p "$LOG_DIR" "$BAG_DIR"
+mkdir -p "$BAG_DIR" || exit 1
 STAMP="$(date +%Y%m%d_%H%M%S)"
+FUSION_OWNS_LOGS=0
+if [[ -n "${ORANGE_NAV_LOG_ROOT:-}" ]]; then
+  FUSION_LOG_ROOT="$ORANGE_NAV_LOG_ROOT"
+else
+  FUSION_LOG_ROOT=$(mktemp -d /dev/shm/fusion_logs.XXXXXX) || exit 1
+  FUSION_OWNS_LOGS=1
+  export ROS_LOG_DIR="$FUSION_LOG_ROOT/fusion/ros_logs_${STAMP}"
+fi
+LOG_DIR="$FUSION_LOG_ROOT/fusion"
+mkdir -p -- "$LOG_DIR" "$ROS_LOG_DIR" || exit 1
 RUN_START_TS="$(date +%s)"        # 收尾时用它筛「本次生成的 bag」
 LOGFILE="$LOG_DIR/fusion_${STAMP}.log"
 # 本次运行专属目录：放 roslaunch 身份文件和 bag 清单，退出时整个删掉，
@@ -167,6 +177,10 @@ on_exit() {
     fi
   fi
   rm -rf "$RUN_DIR"
+  if (( FUSION_OWNS_LOGS )); then
+    python3 -B "$DIR/archive_runtime_logs.py" "$FUSION_LOG_ROOT" --fusion "$ARCHIVE_LOG_DIR" || exit 1
+    echo "融合日志已归档：$ARCHIVE_LOG_DIR"
+  fi
 }
 trap on_exit EXIT
 

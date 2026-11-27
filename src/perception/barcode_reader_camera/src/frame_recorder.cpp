@@ -151,7 +151,7 @@ std::string retryFile(const RetryFrameRecord& f) {
   return f.gray.empty() ? "" : "retry_" + std::to_string(f.index) + ".png";
 }
 
-std::string metaYaml(const DecodeRecord& r, const Metrics& m) {
+std::string metaYaml(const DecodeRecord& r, const Metrics& m, bool saved_images) {
   YAML::Emitter e;
   e.SetDoublePrecision(10);
   e.SetFloatPrecision(7);
@@ -207,7 +207,7 @@ std::string metaYaml(const DecodeRecord& r, const Metrics& m) {
   e << YAML::Key << "retries" << YAML::Value << YAML::BeginSeq;
   for (const auto& f : r.retries)
     e << YAML::Flow << YAML::BeginMap << YAML::Key << "index" << YAML::Value << f.index
-      << YAML::Key << "file" << YAML::Value << retryFile(f)
+      << YAML::Key << "file" << YAML::Value << (saved_images ? retryFile(f) : "")
       << YAML::Key << "stamp" << YAML::Value << num(f.stamp, 6)
       << YAML::Key << "rvec" << YAML::Value << YAML::BeginSeq << f.pose.rvec[0] << f.pose.rvec[1]
       << f.pose.rvec[2] << YAML::EndSeq << YAML::Key << "tvec" << YAML::Value << YAML::BeginSeq
@@ -306,8 +306,10 @@ void FrameRecorder::write(const DecodeRecord& r) {
     if (r.wall_time - last_chain_error_save_ < kChainErrorSaveGapS) save = false;
     else last_chain_error_save_ = r.wall_time;
   }
+  // The monitor verifies the QR against the producing frame's timestamp in retries[].
+  const bool retry_hit = log_attempts_ && r.success && r.out.result_frame > 0;
   std::string name;
-  if (save) {
+  if (save || retry_hit) {
     // 20261011_214005_123_ok / _partial / _decode_fail / _no_tag ...
     const std::string base = formatTime(r.wall_time, false) + "_" +
                              (r.success || r.error.empty() ? resultName(r) : r.error);
@@ -315,16 +317,17 @@ void FrameRecorder::write(const DecodeRecord& r) {
     for (int i = 2; exists(dir_ + "/" + name); ++i) name = base + "_" + std::to_string(i);
     const std::string d = dir_ + "/" + name;
     makeDirs(d);
-    const std::vector<int> png = {cv::IMWRITE_PNG_COMPRESSION, 1};
-    writeImage(d + "/frame.png", r.frame, png);
-    for (const auto& f : r.retries)
-      if (!f.gray.empty()) writeImage(d + "/" + retryFile(f), f.gray, png);
-    if (r.camera.valid()) writeText(d + "/camera.yaml", cameraYaml(r.camera, r.frame.size()));
-    writeText(d + "/meta.yaml", metaYaml(r, m));
-    std::string log;
-    for (const auto& line : r.log) log += line + "\n";
-    writeText(d + "/decode.log", log);
-
+    if (save) {
+      const std::vector<int> png = {cv::IMWRITE_PNG_COMPRESSION, 1};
+      writeImage(d + "/frame.png", r.frame, png);
+      for (const auto& f : r.retries)
+        if (!f.gray.empty()) writeImage(d + "/" + retryFile(f), f.gray, png);
+      if (r.camera.valid()) writeText(d + "/camera.yaml", cameraYaml(r.camera, r.frame.size()));
+      std::string log;
+      for (const auto& line : r.log) log += line + "\n";
+      writeText(d + "/decode.log", log);
+    }
+    writeText(d + "/meta.yaml", metaYaml(r, m, save));
   }
 
   if (!log_attempts_) return;

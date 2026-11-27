@@ -105,6 +105,7 @@ rostopic echo /rc_record/bag_path    # latched："OPEN <path>" / "CLOSED <path>"
 | `stop_on_rc_loss` | `false` | false: 丢遥控也不截断正在录的包 |
 | `bag_directory` / `bag_prefix` | `~/test_data/bags` / `handheld` | 输出位置与包名前缀 |
 | `record_raw_cloud` | `false` | true 额外录 `/livox/lidar`（约 +5 MB/s，需先 source devel） |
+| `record_nav_cloud` | `false` | 开启后录制 `/drone_nav/cloud`，可用 `RC_RECORD_NAV_CLOUD=true` 覆盖。显式列入 `topics` 也会录制。 |
 | `record_registered_cloud` | `false` | true 额外录 `/cloud_registered`（约 +3 MB/s）；可用 `RC_RECORD_REGISTERED_CLOUD=true` 覆盖 |
 | `status_rate` | `2.0` | `/rc_record/status` 频率 |
 | `topics` | 见 yaml | 录制话题；类型必须在节点的登记表里，否则启动时跳过并报错 |

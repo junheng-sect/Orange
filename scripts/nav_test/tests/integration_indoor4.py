@@ -284,6 +284,7 @@ def main(camera_type=Camera, runner_type=Indoor4Runner, route_loader=load_route,
     assert os.environ.get('ROS_MASTER_URI') == 'http://127.0.0.1:%d' % port
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', required=True, type=Path)
+    parser.add_argument('--capture-waypoints', action='store_true')
     args = parser.parse_args()
     ordering()
     rospy.init_node('indoor4_isolated')
@@ -312,7 +313,7 @@ def main(camera_type=Camera, runner_type=Indoor4Runner, route_loader=load_route,
         client = actionlib.SimpleActionClient('/drone_nav/execute_route', ExecuteRouteAction)
         assert client.wait_for_server(rospy.Duration(15))
         run_args = SimpleNamespace(preview=True, points=[(*p['xyz'], route['yaw_deg']) for p in route['points']],
-            max_start_offset=math.inf, check_segments=False, hold=3., delay=3., out=str(args.out), route=route)
+            max_start_offset=math.inf, check_segments=False, hold=3., delay=3., out=str(args.out), route=route, capture_waypoints=args.capture_waypoints)
         runner = runner_type(run_args, cfg, state, buffer, prepare, check, client)
         wait_for(lambda: not runner.inputs_problem() and prepare().success, 20, 'input not ready')
         wait_for(lambda: check(path_of([fixture.p, map_rotation.T @ route['points'][0]['xyz']])).valid, 20, 'free grid not ready')
@@ -321,7 +322,11 @@ def main(camera_type=Camera, runner_type=Indoor4Runner, route_loader=load_route,
         record = runner.record
         assert record['end'] == 'SUCCEEDED'
         assert len(record['batches']) == 4
-        assert all(batch['photo'].get('file') for batch in record['batches'])
+        if args.capture_waypoints:
+            assert all((args.out / b['photo']['file']).is_file() for b in record['batches'])
+        else:
+            assert all(b['photo'] == {'status': 'disabled'} for b in record['batches'])
+            assert not list(args.out.glob('*.png'))
         if verify:
             verify(runner, camera, sent_goals, route, fixture, args.out)
         else:
@@ -337,7 +342,7 @@ def main(camera_type=Camera, runner_type=Indoor4Runner, route_loader=load_route,
                 if 'camera_map' in entry:
                     np.testing.assert_allclose(entry['tag_xyz_map'], camera.coords[entry['id']], atol=.005)
                     np.testing.assert_allclose(np.linalg.norm(np.asarray(entry['camera_map'])-entry['paper_map']), .8)
-        print('PASS four batches, four photos and final return', flush=True)
+        print('PASS four batches, waypoint photo policy and final return', flush=True)
         runner.s.begin(False, cfg['map_id'])
         short_goals(fixture, runner, splines)
         reject_occupied(fixture, runner, splines)

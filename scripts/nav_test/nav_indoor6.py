@@ -201,6 +201,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--probe-camera', action='store_true')
+    parser.add_argument('--capture-waypoints', action='store_true')
     parser.add_argument('--preview', action='store_true')
     args = parser.parse_args(rospy.myargv()[1:])
     if args.probe_camera:

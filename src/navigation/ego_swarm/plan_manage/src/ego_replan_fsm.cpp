@@ -92,7 +92,7 @@ namespace ego_planner
       readGivenWps();
     }
     else
-      cout << "Wrong target_type_ value! target_type_=" << target_type_ << endl;
+      cout << "Wrong target_type_ value! target_type_=" << target_type_ << '\n';
   }
 
   void EGOReplanFSM::readGivenWps()
@@ -235,14 +235,14 @@ namespace ego_planner
   void EGOReplanFSM::triggerCallback(const geometry_msgs::PoseStampedPtr &msg)
   {
     have_trigger_ = true;
-    cout << "Triggered!" << endl;
+    cout << "Triggered!" << '\n';
     init_pt_ = odom_pos_;
   }
 
   void EGOReplanFSM::waypointCallback(const geometry_msgs::PoseStampedPtr &msg)
   {
 
-    cout << "Triggered!" << endl;
+    cout << "Triggered!" << '\n';
     // trigger_ = true;
     init_pt_ = odom_pos_;
 
@@ -544,7 +544,8 @@ namespace ego_planner
     static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
     int pre_s = int(exec_state_);
     exec_state_ = new_state;
-    cout << "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
+    if (pre_s != int(new_state))
+      cout << "[" << pos_call << "]: from " << state_str[pre_s] << " to " << state_str[int(new_state)] << '\n';
   }
 
   std::pair<int, EGOReplanFSM::FSM_EXEC_STATE> EGOReplanFSM::timesOfConsecutiveStateCalls()
@@ -556,7 +557,7 @@ namespace ego_planner
   {
     static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
 
-    cout << "[FSM]: state: " + state_str[int(exec_state_)] << endl;
+    ROS_DEBUG("[FSM]: state: %s", state_str[int(exec_state_)].c_str());
   }
 
   void EGOReplanFSM::execFSMCallback(const ros::TimerEvent &e)
@@ -569,9 +570,9 @@ namespace ego_planner
     {
       printFSMExecState();
       if (!have_odom_)
-        cout << "no odom." << endl;
+        ROS_DEBUG("no odom.");
       if (!have_target_)
-        cout << "wait for goal or trigger." << endl;
+        ROS_DEBUG("wait for goal or trigger.");
       fsm_num = 0;
     }
 
@@ -960,7 +961,7 @@ namespace ego_planner
 
     static bool last_refine_success = true;
     if (plan_and_refine_success || last_refine_success)
-      cout << "refine_success=" << plan_and_refine_success << endl;
+      cout << "refine_success=" << plan_and_refine_success << '\n';
     last_refine_success = plan_and_refine_success;
     if (plan_and_refine_success)
       plan_fail_count_ = 0;
@@ -1152,7 +1153,7 @@ namespace ego_planner
           {
             pos_t = pos_t_temp;
             dist = (pos_t - start_pt_).norm();
-            cout << "Escape cornor case \"getLocalTarget\"" << endl;
+            cout << "Escape cornor case \"getLocalTarget\"" << '\n';
             break;
           }
         }

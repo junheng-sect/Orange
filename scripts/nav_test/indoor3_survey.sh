@@ -43,7 +43,7 @@ test_after_fusion() {
     return 1
   fi
   PF_SURVEY_CAMERA="$RUN_DIR/${SURVEY_VARIANT}_camera.pid"
-  start_child "$PF_SURVEY_CAMERA" "$OUT/camera.log" roslaunch "$NT_DIR/$SURVEY_LAUNCH" "${CAMERA_ARGS[@]}"
+  start_child "$PF_SURVEY_CAMERA" "$NT_LOG_DIR/camera.log" roslaunch "$NT_DIR/$SURVEY_LAUNCH" "${CAMERA_ARGS[@]}"
   python3 -B "$NT_DIR/$SURVEY_RUNNER" "${SURVEY_FLAGS[@]}" --probe-camera --out "$OUT" 2>&1 | tee -a "$LOG"
 }
 

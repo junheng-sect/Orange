@@ -17,7 +17,19 @@ test_desc() {
     echo "四点识别 AprilTag、逐批扫描 QR、返回右下悬停"
   fi
 }
-test_arg() { return 1; }
+SCAN_SAVE_FRAMES=off
+CAPTURE_WAYPOINTS=0
+test_arg() {
+  case "$1" in
+    --scan-save-frames)
+      case "${2:-}" in
+        off|failed|all) SCAN_SAVE_FRAMES=$2; SHIFT=2 ;;
+        *) echo "--scan-save-frames 需要 off、failed 或 all" >&2; return 1 ;;
+      esac ;;
+    --capture-waypoints) CAPTURE_WAYPOINTS=1 ;;
+    *) return 1 ;;
+  esac
+}
 test_preflight() {
   [ "$EV_MODE" = odom ] && [[ "$NAV_CONFIG" -ef "$DEFAULT_NAV_CONFIG" && "$MAP_FRAME" -ef "$DEFAULT_MAP_FRAME" ]] ||
     { echo "室内 ${SCAN_NAME} 需要飞扫图的导航配置、地图标定和 odom 模式" >&2; return 1; }
@@ -34,7 +46,7 @@ test_after_fusion() {
   PF_SCAN_CAMERA="$RUN_DIR/${SCAN_VARIANT}_camera.pid"
   local camera_variant="$SCAN_VARIANT"
   [[ "$TEST_NAME" != test_indoor6 ]] || camera_variant=indoor5
-  start_child "$PF_SCAN_CAMERA" "$OUT/camera.log" roslaunch "$NT_DIR/${camera_variant}_camera.launch" save_dir:="$OUT/barcode"
+  start_child "$PF_SCAN_CAMERA" "$NT_LOG_DIR/camera.log" roslaunch "$NT_DIR/${camera_variant}_camera.launch" save_dir:="$OUT/barcode" save_frames:="$SCAN_SAVE_FRAMES"
   python3 -B "$NT_DIR/nav_${SCAN_VARIANT}.py" --probe-camera --out "$OUT" 2>&1 | tee -a "$LOG"
 }
 
@@ -45,6 +57,7 @@ test_cleanup() {
 run_test() {
   nt_check_chain || return 1
   local flags=()
+  if (( CAPTURE_WAYPOINTS )); then flags+=(--capture-waypoints); fi
   if [ "$PREVIEW" -eq 1 ]; then
     local answer
     read -r -p "回车开始单圈预览，q 退出：" answer </dev/tty || return

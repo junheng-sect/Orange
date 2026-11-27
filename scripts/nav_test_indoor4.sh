@@ -4,6 +4,8 @@
 # 观察点、扫码点和返回点共用航线 yaw_deg，当前地图航向为 −89.5°。
 # 人工定点起飞，设定值预发送后手切 OFFBOARD。最后回右下悬停，由飞手接管降落。
 # --preview 只启动预览链路，需手持或模拟走完航点，不发飞控设定值。
+# --scan-save-frames off|failed|all  扫码 PNG 保存模式，默认 off
+# --capture-waypoints               保存观察点全分辨率 PNG，默认关闭
 # ==============================================================================
 TEST_NAME=test_indoor4
 source "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/nav_test/indoor_label_scan.sh"

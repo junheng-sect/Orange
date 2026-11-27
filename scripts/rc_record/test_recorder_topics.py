@@ -24,8 +24,8 @@ class TopicTests(unittest.TestCase):
         self.assertIs(registry['/mavros/extended_state'],ExtendedState)
         self.assertIs(registry['/mavros/estimator_status'],EstimatorStatus)
 
-    def recorder(self, cloud=False, topics=None):
-        params = {'~record_registered_cloud': cloud,
+    def recorder(self, cloud=False, topics=None, nav_cloud=False):
+        params = {'~record_registered_cloud': cloud, '~record_nav_cloud': nav_cloud,
                   '~topics': topics if topics is not None else ['/fastlio/velocity']}
         with ExitStack() as stack:
             stack.enter_context(patch.object(rospy, 'get_param', side_effect=lambda k, d=None: params.get(k, d)))
@@ -56,6 +56,16 @@ class TopicTests(unittest.TestCase):
             self.assertEqual(topics.count(topic), 1)
         self.assertIn('/nav_test/observer', node._latched)
         self.assertNotIn('/livox/lidar', topics)
+
+    def test_nav_cloud_follows_its_own_switch_and_explicit_topics(self):
+        topic = '/drone_nav/cloud'
+        with Path(__file__).with_name('rc_record.yaml').open() as stream:
+            config = yaml.safe_load(stream)['rc_bag_recorder']
+        self.assertFalse(config['record_nav_cloud'])
+        for enabled, topics, expected in [(False, config['topics'], 0), (True, config['topics'], 1),
+                                          (False, [topic], 1), (True, [topic, topic], 1)]:
+            _, subscribed = self.recorder(nav_cloud=enabled, topics=topics)
+            self.assertEqual(subscribed.count(topic), expected)
 
     def test_cloud_enabled_adds_one_subscription(self):
         _, subscribed = self.recorder(cloud=True)

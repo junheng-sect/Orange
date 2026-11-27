@@ -87,13 +87,15 @@ roslaunch --ros-args barcode_reader_camera barcode_reader_camera.launch
 ~/test_data/barcode/20261013_150000_qr_top_tag_bottom/
   attempts.csv                       # 默认就有：每次读码一行
   rc_read.csv                        # 用 manual_read 拨杆时才有：每次拨杆一行（tag 位置 + 结果），见 barcode_rc_trigger
-  20261013_150012_345_ok/            # save_frames:=failed 或 all 时：一次读码一个目录
+  20261013_150012_345_ok/            # 重试命中或保存原图时建立
   20261013_150015_901_decode_fail/
 ```
 
 - `attempts.csv`：结果、码、耗时、tag 距离和倾角、标签区域亮度和清晰度、试了几帧，最后一列是对应的读码目录名；不存图。
 
-每个读码目录里（全分辨率 PNG 约 5 MB 一张：第一帧读出约 5 MB，重试到超时约 20 MB）：
+开启 `log_attempts` 时，重试成功会单独保存 `meta.yaml`，供网页按二维码与图像时间戳核对命中帧号。CSV 的 `dir` 列指向这次尝试，未写入 PNG 的重试帧在元数据里的 `file` 为空。
+
+开启存图的读码目录里（全分辨率 PNG 约 5 MB 一张：第一帧读出约 5 MB，重试到超时约 20 MB）：
 
 - `frame.png`：第一帧原图（无损 PNG）。
 - `retry_N.png`：第 N 个重试帧，只存前 `save_retry_frames` 张、读出码的那一帧和最后一帧。

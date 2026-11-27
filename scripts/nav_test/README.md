@@ -395,6 +395,12 @@ ROS 服务单次等待上限 2 s，并受起飞/航段/降落阶段的剩余时�
 
 默认按原有设置录包，并增加两路地图位姿、校正、状态与会话信息。需要雷达原始数据以便重跑或静止检查点 ICP 时，在本次命令末尾加 `--record-raw-lidar`；只用原定位可加 `--no-dll`。通用录包导出：`python3 "$ORANGE_ROOT"/tools/warehouse_monitor/export_dll_drift.py "$bag" "${bag%.bag}_drift"`（先加载板端当前检出的 devel 环境）。四点观察的短停可以作同帧差值分析；ICP 工具只为满足其静止时长和几何质量条件的窗口出参考值。
 
+### 运行日志与按需采集
+
+任务启动后，`nav_test.log` 记录实时子进程日志所在的 `/dev/shm` 目录。导航、定位、相机和 ROS 日志在收尾时写回实验目录，fusion 的带时间文件和逐秒监控 CSV 写回工作空间的 `logs/fusion/`。提前断电会丢失尚在内存中的日志。归档失败时，终端会给出保留副本的位置。
+
+室内 test4、test5、test6 默认保存扫码结果和命中帧号。要保存图像，使用 `--scan-save-frames failed` 或 `--scan-save-frames all`。加 `--capture-waypoints` 同时采集定点原图。需要用实时障碍点云重放 EGO 时，在使用公共导航入口的任务上加 `--record-nav-cloud`。
+
 ## 室内 test5 固定纸面四点扫码
 
 板端运行 `"$ORANGE_ROOT"/scripts/nav_test_indoor5.sh`，手持预览加 `--preview`。四个观察点沿用室内 test4，地图航向 −89.5°。货签竖直正放，外法线沿机头反方向。OV13855 在 1280×960 图上检测四角，由同帧机体姿态、相机外参和 43.7 mm 黑框拟合中心位置；扫码时使用固定纸面将 QR 区域投影到全分辨率图。机体控制点的候选高度和运行高度上限均为 1.70 m，光心距纸面中心 0.80 m。

@@ -167,6 +167,28 @@ TEST(FrameRecorder, AllModeWritesReplayableAttempt) {
   EXPECT_TRUE(endsWith(csv[1], ",3,0,\"" + dirs[0] + "\""));  // frames, result_frame, dir
 }
 
+TEST(FrameRecorder, RetryHitWithoutPngKeepsTimestampAndDirectory) {
+  for (SaveFrames mode : {SaveFrames::Off, SaveFrames::Failed}) {
+    const std::string dir = makeTempDir();
+    DecodeRecord rec = makeRecord(true, "");
+    rec.out.codes[0].frame = rec.out.result_frame = 1;
+    {
+      FrameRecorder recorder(dir, mode, true);
+      ASSERT_TRUE(recorder.submit(rec));
+    }
+    const auto dirs = subdirs(dir);
+    ASSERT_EQ(dirs.size(), 1u);
+    const std::string attempt = dir + "/" + dirs.front();
+    EXPECT_EQ(subdirs(attempt), std::vector<std::string>{"meta.yaml"});
+    const auto meta = YAML::LoadFile(attempt + "/meta.yaml");
+    EXPECT_NEAR(meta["retries"][0]["stamp"].as<double>(), rec.retries[0].stamp, 0.000001);
+    EXPECT_EQ(meta["retries"][0]["file"].as<std::string>(), "");
+    const auto csv = lines(dir + "/attempts.csv");
+    ASSERT_EQ(csv.size(), 2u);
+    EXPECT_TRUE(endsWith(csv[1], ",3,1,\"" + dirs.front() + "\""));
+  }
+}
+
 TEST(FrameRecorder, KeepsResultFrameForDesktopPreview) {
   const std::string dir = makeTempDir();
   DecodeRecord rec = makeRecord(true, "");
