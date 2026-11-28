@@ -58,7 +58,7 @@
       if (row.reason) el.append(cell(row.reason, "scan-reason"));
       return el;
     });
-    list.replaceChildren(...rows);
+    list.replaceChildren(...rows.reverse());
   }
 
   async function read(path, signal) {

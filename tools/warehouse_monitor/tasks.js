@@ -290,7 +290,7 @@ export function createTasks({ rig, focusRoute, redraw }) {
   function populate() {
     const previous = selector.value;
     selector.length = 1;
-    for (const task of data.tasks.filter(matchesMap)) {
+    for (const task of data.tasks.filter(matchesMap).reverse()) {
       selector.add(new Option(`${task.label} · ${task.title}`, task.id));
     }
     selector.value = previous;
