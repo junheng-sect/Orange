@@ -34,7 +34,8 @@ def main():
         if not path.is_absolute() and not path.is_file():
             path = share / path
         path = path.resolve(strict=True)
-        cfg = resolve(path, args.map, share)
+        receipt = {}
+        cfg = resolve(path, args.map, share, prior_receipt=receipt)
         expected = os.getenv('WAREHOUSE_MISSION_SHA256')
         if expected is not None and expected != cfg['mission_sha256']:
             raise ValueError('网页所选任务版本已改变')
@@ -52,8 +53,10 @@ def main():
             launch = 'source %s && exec %s' % (shlex.quote(str(ws / 'devel/setup.bash')), shlex.join(command))
             os.execlp('tmux', 'tmux', 'new-session', '-s', 'nav', 'bash -c ' + shlex.quote(launch))
         rec, m = cfg['recording'], cfg['map']
+        os.environ.pop('INSPECTION_PRIOR_VERIFIED', None)
+        os.environ.update(receipt)
         os.environ.update(INSPECTION_CONFIG=json.dumps(cfg, ensure_ascii=False, allow_nan=False),
-                          INSPECTION_WORKSPACE=str(workspace(share)), INSPECTION_PKG=str(share),
+                          INSPECTION_MAP_SHA=m['sha256'], INSPECTION_WORKSPACE=str(workspace(share)), INSPECTION_PKG=str(share),
                           TEST_NAME='mission_' + cfg['name'], DEFAULT_MAP=m['dir'],
                           DEFAULT_RELOC_CONFIG=m['reloc_config'], DEFAULT_EV_MODE=m['ev_mode'],
                           INSPECTION_SUFFIX=uuid.uuid4().hex[:10],

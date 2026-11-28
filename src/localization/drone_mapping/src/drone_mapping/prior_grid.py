@@ -38,6 +38,11 @@ def geometry(origin, shape):
         raise ValueError('先验栅格尺寸或原点非法')
 
 
+def file_stamp(folder):
+    stats = [(folder / name).stat() for name in ('map_world.pcd', 'prior_grid.bin')]
+    return ':'.join(str(value) for st in stats for value in (st.st_mtime_ns, st.st_size))
+
+
 def verify(folder):
     path = folder / 'prior_grid.bin'
     with path.open('rb') as stream:

@@ -120,8 +120,8 @@ def location(value, base):
     return (base / Path(value).expanduser()).resolve(strict=True)
 
 
-def resolve(path, map_override, share):
-    from drone_mapping.prior_grid import verify
+def resolve(path, map_override, share, *, prior_receipt=None):
+    from drone_mapping.prior_grid import file_stamp, verify
     from drone_navigation.core import deployment
     from car_bridge import calib
     from drone_relocalization.settings import load as load_reloc
@@ -129,8 +129,11 @@ def resolve(path, map_override, share):
     m, f = cfg['map'], cfg['flight']
     base = path.parent
     folder = location(str(map_override), Path.cwd()) if map_override else location(m['dir'], base)
+    before = file_stamp(folder) if prior_receipt is not None else None
     if not (folder / 'meta.json').is_file() or verify(folder) != m['sha256']:
         raise ValueError('任务地图指纹或 meta.json 不匹配')
+    if prior_receipt is not None and file_stamp(folder) == before:
+        prior_receipt['INSPECTION_PRIOR_VERIFIED'] = m['sha256'] + ':' + before
     if 'map_frame' in m:
         frame_file = location(m['map_frame'], base)
         frames = calib.load(str(frame_file))

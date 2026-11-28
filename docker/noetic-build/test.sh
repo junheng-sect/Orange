@@ -31,6 +31,7 @@ for suite in land takeoff; do
     check python3 -m unittest discover -s src/navigation/drone_navigation/test -p "test_$suite.py"
 done
 check python3 -m unittest discover -s scripts/nav_test/tests -p 'test_nav_*.py'
+check python3 -m unittest discover -s scripts/nav_test/tests -p test_startup_optimizations.py
 check python3 -m unittest discover -s scripts/nav_test/tests -p test_indoor3_3_lock.py
 check bash scripts/nav_test/tests/test_dll_defaults.sh
 check python3 scripts/rc_record/test_rc_record_policy.py

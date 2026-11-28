@@ -88,6 +88,7 @@ start_child() { # start_child <pidfile> <logfile> <命令...>
     printf "%s %s\n" "$$" "${20:-}" >"$_pf"
     exec "${_cmd[@]}"
   ' _ "$_pf" "$@" 199>&- </dev/null >"$_lf" 2>&1 &
+  NT_CHILD_JOB=$!
   local _i=0
   while [ "$_i" -lt 50 ] && [ ! -s "$_pf" ]; do sleep 0.1; _i=$((_i + 1)); done
 }
@@ -138,6 +139,10 @@ finish() { # finish <退出码> [force]：信号触发时飞机还解锁着就�
   fi
   hr; log "收尾（只停本次启动的进程，常驻 roscore / MAVROS 不动）"
   local _cleanup_ok=1
+  if [[ -n ${PF_EV_CHECK:-} ]]; then stop_child "$PF_EV_CHECK" "EV 参数探针" TERM 5 || _cleanup_ok=0; fi
+  if [[ -n ${PF_WAIT_ODOM:-} ]]; then stop_child "$PF_WAIT_ODOM" "里程计探针" TERM 5 || _cleanup_ok=0; fi
+  if [[ -n ${EV_JOB:-} ]] && ! child_pid "$PF_EV_CHECK" >/dev/null; then wait "$EV_JOB" 2>/dev/null || true; fi
+  if [[ -n ${ODOM_JOB:-} ]] && ! child_pid "$PF_WAIT_ODOM" >/dev/null; then wait "$ODOM_JOB" 2>/dev/null || true; fi
   if declare -F test_cleanup >/dev/null; then
     test_cleanup || _cleanup_ok=0
   fi
@@ -177,42 +182,41 @@ finish() { # finish <退出码> [force]：信号触发时飞机还解锁着就�
 }
 
 # Read the EGO launch limits; task overrides may only tighten the navigation hard limits.
-nt_ego_limits() {
-  python3 - "$1" "$2" <<'LIMITS'
-import math, sys, yaml
-with open(sys.argv[1]) as stream:
-    cfg = yaml.safe_load(stream)['config']
-overrides = cfg.get('planner_limits', cfg.get('planner_limits_by_task', {}).get(sys.argv[2], {}))
-limits = []
-for key in ('max_vel', 'max_acc'):
-    hard = cfg[key]
-    value = overrides.get(key, hard)
-    if not math.isfinite(value) or not 0 < value <= hard:
-        sys.exit('EGO %s 必须大于零并且不超过导航上限 %s' % (key, hard))
-    limits.append(value)
-print(*limits, cfg.get('max_vel_z', -1), cfg.get('max_acc_z', -1))
-LIMITS
+nt_ego_limits() { python3 -B "$NT_DIR/preflight_probe.py" ego-limits "$@"; }
+
+nt_write_nav_config() { python3 -B "$NT_DIR/preflight_probe.py" write-config "$@"; }
+
+# wait can be interrupted by a signal whose ground-cleanup guard declines to stop.
+nt_wait_job() {
+  local job=$1 rc
+  while :; do
+    wait "$job"; rc=$?
+    if (( rc <= 128 )) || ! kill -0 "$job" 2>/dev/null; then return "$rc"; fi
+  done
 }
 
-nt_write_nav_config() {
-  python3 - "$@" <<'PY'
-import os, sys, yaml
-with open(sys.argv[1]) as stream:
-    document = yaml.safe_load(stream)
-c = document['config']
-if os.path.expanduser(c.get('map_id', '')) != sys.argv[2]:
-    sys.exit('导航配置 map_id %s 和地图 %s 不一致' % (c.get('map_id'), sys.argv[2]))
-if sys.argv[3] == '0' and c.get('deployment_verified') is not True:
-    sys.exit('导航配置 deployment_verified 不是 true，真实输出会被网关拒绝（只预览加 --preview）')
-c['map_id'] = sys.argv[2]
-if sys.argv[5] == 'test_indoor6':
-    c['takeoff_height'] = 0.50
-elif sys.argv[5] == 'test_indoor_takeoff_land':
-    c.update(takeoff_height=float(sys.argv[6]), vertical_test_guard=True)
-with open(sys.argv[4], 'w') as stream:
-    yaml.safe_dump(document, stream, allow_unicode=True)
-print('导航配置：三维限速 %.2f m/s、%.2f m/s²，竖直 %s，转向 %s°/s，目标范围 %s ~ %s（drone_odom）' % (c['max_vel'], c['max_acc'], '%.2f m/s、%.2f m/s²' % (c['max_vel_z'], c.get('max_acc_z', -1)) if 'max_vel_z' in c else '同水平', c.get('yaw_rate_deg', 10), c['bounds_min'], c['bounds_max']))
-PY
+nt_gate_ev() {
+  [[ -n ${EV_JOB:-} ]] || return 0
+  local rc value
+  nt_wait_job "$EV_JOB"; rc=$?
+  EV_JOB=""
+  value=$(tail -n 1 "$NT_LOG_DIR/ev_ctrl.log")
+  case $rc in
+    0|2)
+      if ! [[ $value =~ ^-?[0-9]+$ ]]; then err "EKF2_EV_CTRL 探针返回无效结果"; return 1; fi
+      if (( rc == 2 )); then
+        err "飞控 EKF2_EV_CTRL=$value 没有速度位（bit2），odom 方式发的速度不会被融合；改成带 bit2（如 15）或用 --ev-mode pose"
+        return 1
+      fi
+      ok "飞控 EKF2_EV_CTRL=$value，融合外部速度" ;;
+    1|124)
+      if [[ $rc == 1 && $value != unavailable ]]; then err "EKF2_EV_CTRL 探针异常退出，看 $NT_LOG_DIR/ev_ctrl.log"; return 1; fi
+      if [[ -n ${WAREHOUSE_TASK_ID:-} ]]; then
+        err "读不到飞控 EKF2_EV_CTRL，无法确认外部速度融合，未启动导航"; return 1
+      fi
+      warn "读不到飞控 EKF2_EV_CTRL，没法确认飞控会融合外部速度" ;;
+    *) err "EKF2_EV_CTRL 探针异常退出（$rc），看 $NT_LOG_DIR/ev_ctrl.log"; return 1 ;;
+  esac
 }
 
 nt_check_chain() { # 每次发目标前确认链路还在
@@ -298,6 +302,8 @@ nav_test_main() {
   RUN_DIR="$(mktemp -d /tmp/nav_test.XXXXXX)"
   PF_FUSION="$RUN_DIR/fusion.pid"; PF_RELOC="$RUN_DIR/reloc.pid"; PF_CAR="$RUN_DIR/car.pid"; PF_NAV="$RUN_DIR/nav.pid"
   PF_DLL="$RUN_DIR/dll.pid"
+  PF_EV_CHECK="$RUN_DIR/ev.pid"; PF_WAIT_ODOM="$RUN_DIR/wait_odom.pid"
+  EV_JOB=""; ODOM_JOB=""
   trap 'finish 130' INT
   if [ -n "${WAREHOUSE_TASK_ID:-}" ]; then
     trap 'finish 130' TERM
@@ -348,72 +354,27 @@ nt_bringup() {
     [ -f "$_f" ] || { err "缺少 $_f"; finish 1 force; }
   done
   source "$ROS_SETUP" && source "$WS_SETUP" || { err "无法加载 $WS_SETUP"; finish 1 force; }
-  local _prior_file="" _prior_map_sha=""
-  if [ "$LIVE_GRID_ONLY" -eq 0 ]; then
-    _prior_file="$MAP/prior_grid.bin"
-    if ! _prior_map_sha="$(PYTHONDONTWRITEBYTECODE=1 rosrun drone_mapping build_prior_grid "$MAP" --verify 2>>"$LOG")"; then
-      err "先验栅格校验失败，确认 $_prior_file 对应当前地图。详情见 $LOG"
-      finish 1 force
-    fi
-    log "先验栅格 $_prior_file（地图 SHA-256 $_prior_map_sha）"
-  else
-    warn "本次仅使用实时栅格（--live-grid-only）"
-  fi
-  source "$DIR/ros_net.sh" || { err "ROS 核心地址不在（nmcli con up ros-core）"; finish 1 force; }
-  timeout 5 rosnode list >/dev/null 2>&1 || { err "常驻 roscore 不可达（systemctl status mid360s-roscore）"; finish 1 force; }
-  local _n _nodes; _nodes="$(timeout 5 rosnode list 2>/dev/null)"
-  for _n in /drone_reloc /car_bridge /waypoint_manager /offboard_gateway; do
-    printf '%s\n' "$_nodes" | grep -qx "$_n" && { err "已有 $_n 在跑（上一次没收尾？），先停掉"; finish 1 force; }
-  done
-  flock -n /tmp/mid360s_fusion.lock true || { err "fusion.sh / start_handheld_test.sh 已在运行，先停掉"; finish 1 force; }
-  timeout 5 rostopic echo -n1 /mavros/state 2>/dev/null | grep -q '^connected: True' \
-    || { err "常驻 MAVROS 没连上飞控（飞控没上电？）：导航要用飞控的位置"; finish 1 force; }
-  ok "ROS master、MAVROS 和飞控都在"
-  if [ "$EV_MODE" = odom ]; then
-    # 协议不对 fusion.sh 自己会拒绝启动；飞控不融合速度只会白发，这里先查出来
-    local _p; _p="$(timeout 5 rosparam get /mavros/fcu_protocol 2>/dev/null)"
-    [ "$_p" = "v2.0" ] || { err "odom 方式要 MAVROS 用 MAVLink2，常驻 MAVROS 是 fcu_protocol=${_p:-读不到}"; finish 1 force; }
-    # MAVROS 连上飞控后要等约 10 s 再拉参数表，拉完之前 mavparam get 读不到：刚上电就跑要多等一会
-    local _i
-    for _i in $(seq 7); do
-      _p="$(timeout 10 rosrun mavros mavparam get EKF2_EV_CTRL 2>/dev/null | tail -1)"
-      [ -n "$_p" ] && [ "$_p" -eq "$_p" ] 2>/dev/null && break
-      _p=""
-      [ "$_i" -eq 1 ] && log "MAVROS 还没拉完飞控参数表（刚上电要 20~30 s），等它再读 EKF2_EV_CTRL（最多 45 s）"
-      [ "$_i" -lt 7 ] && sleep 5
-    done
-    if [ -z "$_p" ]; then
-      if [ -n "${WAREHOUSE_TASK_ID:-}" ]; then
-        err "读不到飞控 EKF2_EV_CTRL，无法确认外部速度融合，未启动导航"
-        finish 1 force
-      fi
-      warn "读不到飞控 EKF2_EV_CTRL，没法确认飞控会融合外部速度"
-    elif [ $((_p & 4)) -eq 0 ]; then
-      err "飞控 EKF2_EV_CTRL=$_p 没有速度位（bit2），odom 方式发的速度不会被融合；改成带 bit2（如 15）或用 --ev-mode pose"
-      finish 1 force
-    else
-      ok "飞控 EKF2_EV_CTRL=$_p，融合外部速度"
-    fi
-  fi
-  local runtime_config="$OUT/navigation.resolved.yaml"
-  if ! nt_write_nav_config "$NAV_CONFIG" "$MAP" "$PREVIEW" "$runtime_config" "$TEST_NAME" "${HEIGHT:-}" 2>&1 | tee -a "$LOG"; then
-    finish 1 force
-  fi
-  # EGO 启动参数可按任务收紧；网关和执行器直接读取导航配置。
-  # 竖直上限 max_vel_z / max_acc_z 可选，没写传 -1（和水平单轴上限相同）
+  local _prior_file="" _prior_map_sha="" runtime_config="$OUT/navigation.resolved.yaml"
   local _max_vel _max_acc _max_vel_z _max_acc_z
-  read -r _max_vel _max_acc _max_vel_z _max_acc_z < <(nt_ego_limits "$NAV_CONFIG" "$TEST_NAME")
-  [ -n "$_max_acc_z" ] || { err "读不到导航配置的 max_vel / max_acc"; finish 1 force; }
-  log "EGO 三维规划上限：速度 ${_max_vel} m/s，加速度 ${_max_acc} m/s²"
-
-  hr; log "步骤 1/4：载入地图（缓存不对就重建，室外图约 70 s，只第一次）"
-  if ! python3 - "$MAP" "$RELOC_CONFIG" 2>&1 <<'PY' | tee -a "$LOG"; then err "地图载入失败"; finish 1 force; fi
-import sys
-from drone_relocalization.settings import load
-from drone_relocalization.matching import MapModel
-m = MapModel(sys.argv[1], load(sys.argv[2]))
-print('地图 %d 点，载入 %.1f s，%s' % (len(m.P), m.load_s, '缓存命中' if m.cache_hit else '已重建缓存'))
-PY
+  local probe="$NT_DIR/preflight_probe.py"
+  local _pf_args=(--map "$MAP" --config "$NAV_CONFIG" --reloc-config "$RELOC_CONFIG"
+                  --output "$runtime_config" --task "$TEST_NAME" --height "${HEIGHT:-}" --ev-mode "$EV_MODE")
+  if (( LIVE_GRID_ONLY )); then _pf_args+=(--live-grid-only); else _prior_file="$MAP/prior_grid.bin"; fi
+  if (( PREVIEW )); then _pf_args+=(--preview); fi
+  if declare -F test_preflight_args >/dev/null; then test_preflight_args; fi
+  source "$DIR/ros_net.sh" || { err "ROS 核心地址不在（nmcli con up ros-core）"; finish 1 force; }
+  flock -n /tmp/mid360s_fusion.lock true || { err "fusion.sh / start_handheld_test.sh 已在运行，先停掉"; finish 1 force; }
+  if ! python3 -B "$probe" preflight "${_pf_args[@]}" >"$RUN_DIR/preflight.json" 2> >(tee -a "$LOG" >&2); then
+    err "启动预检失败，详见 $LOG"; finish 1 force
+  fi
+  if ! read -r _prior_map_sha _max_vel _max_acc _max_vel_z _max_acc_z < <(
+    python3 -B -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["prior_map_sha"] or "-", *r["limits"])' "$RUN_DIR/preflight.json"
+  ) || [[ -z $_max_acc_z ]]; then err "启动探针结果无效"; finish 1 force; fi
+  if (( LIVE_GRID_ONLY )); then _prior_map_sha=""; fi
+  if [[ $EV_MODE == odom ]]; then
+    start_child "$PF_EV_CHECK" "$NT_LOG_DIR/ev_ctrl.log" timeout 45 python3 -B "$probe" check-ev-ctrl
+    EV_JOB=$NT_CHILD_JOB
+  fi
 
   if declare -F test_bringup >/dev/null && ! test_bringup; then
     err "测试设备未就绪"; finish 1 force
@@ -424,12 +385,16 @@ PY
   if (( NT_DLL )); then _record_env=("NAV_TEST_DLL_TASK=$TEST_NAME"); fi
   if (( NT_RAW_LIDAR )); then _record_env+=("RC_RECORD_RAW_CLOUD=true"); fi
   start_child "$PF_FUSION" "$NT_LOG_DIR/fusion.log" env "${_record_env[@]}" "$DIR/fusion.sh" --no-camera --no-winch --bag-dir "$OUT" --bag-prefix "$TEST_NAME" --ev-mode "$EV_MODE" "${FUSION_ARGS[@]}"
-  local _t=0
-  until timeout 3 rostopic echo -n1 /fastlio/odom_world >/dev/null 2>&1; do
-    child_pid "$PF_FUSION" >/dev/null || { err "fusion.sh 退出了，最后几行："; tail -n 8 "$NT_LOG_DIR/fusion.log" | tee -a "$LOG"; finish 1 force; }
-    _t=$((_t + 4)); [ "$_t" -ge 180 ] && { err "180 s 内没有 /fastlio/odom_world，看 $NT_LOG_DIR/fusion.log"; finish 1 force; }
-    sleep 1
-  done
+  local _odom_rc
+  start_child "$PF_WAIT_ODOM" "$NT_LOG_DIR/wait_odom.log" python3 -B "$probe" wait-odom "$PF_FUSION"
+  ODOM_JOB=$NT_CHILD_JOB
+  nt_wait_job "$ODOM_JOB"; _odom_rc=$?
+  ODOM_JOB=""
+  case $_odom_rc in
+    0) ;;
+    2) err "180 s 内没有 /fastlio/odom_world，看 $NT_LOG_DIR/fusion.log"; finish 1 force ;;
+    *) err "fusion.sh 或首帧探针已退出，最后几行："; tail -n 8 "$NT_LOG_DIR/fusion.log" | tee -a "$LOG"; finish 1 force ;;
+  esac
   ok "FAST-LIO 和重力桥已输出（/fastlio/odom_world）"
 
   if declare -F test_after_fusion >/dev/null && ! test_after_fusion; then
@@ -494,6 +459,7 @@ PY
   python3 "$RUN_DIR/wait_reloc.py" "$_rpid" "$LOG" || { err "重定位没成功，看 $NT_LOG_DIR/reloc.log"; finish 1 force; }
   ok "重定位完成；world map 由 car_bridge 发（看 $NT_LOG_DIR/car_bridge.log）"
 
+  nt_gate_ev || finish 1 force
   if [[ "${NT_MANUAL_FLIGHT:-0}" == 1 ]]; then return 0; fi
   hr; log "步骤 4/4：启动导航（EGO + 执行器 + 网关，$([ "$PREVIEW" -eq 1 ] && echo 只预览 || echo 真实输出)）"
   local _nav_args=(config:="$runtime_config" enable_output:=true max_vel:="$_max_vel" max_acc:="$_max_acc" max_vel_z:="$_max_vel_z" max_acc_z:="$_max_acc_z")

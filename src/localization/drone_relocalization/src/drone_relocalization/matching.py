@@ -96,6 +96,34 @@ class NNField:
         return r, n
 
 
+def cache_key(meta_bytes, pcd, cfg):
+    digest = hashlib.sha256()
+    digest.update(meta_bytes)
+    digest.update(CACHE_VERSION.encode())
+    digest.update(json.dumps(cfg, sort_keys=True).encode())
+    with open(pcd, 'rb') as stream:
+        for chunk in iter(lambda: stream.read(1048576), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def cache_valid(folder, cfg=None):
+    """Check the v2 fingerprint and directory. NNField.load validates the payload."""
+    folder = os.path.abspath(os.path.expanduser(folder))
+    try:
+        with open(os.path.join(folder, 'meta.json'), 'rb') as stream:
+            meta = stream.read()
+        floor = json.loads(meta).get('floor')
+        if not isinstance(floor, dict) or floor.get('trusted') is not True:
+            return False
+        with np.load(os.path.join(folder, 'reloc_cache_v2.npz'), allow_pickle=False) as cache:
+            required = {'key', 'lo', 'dims', 'grid', 'n', 'good', 'res'}
+            return (required.issubset(cache.files)
+                    and str(cache['key']) == cache_key(meta, os.path.join(folder, 'map_world.pcd'), cfg or load()))
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, EOFError, zipfile.BadZipFile):
+        return False
+
+
 class MapModel:
     def __init__(self,d,cfg=None):
         tic=time.monotonic();self.cfg=cfg or load();c=self.cfg
@@ -114,11 +142,7 @@ class MapModel:
         neighbors=sum(i*i+j*j+k*k<=(rad+.5)**2 for i in range(-rad,rad+1) for j in range(-rad,rad+1) for k in range(-rad,rad+1))
         if int(np.prod(dims))>c['max_grid_cells'] or len(P)*neighbors*32>c['max_expand_bytes']:
             raise ValueError('地图超出索引内存预算（%d 点、%.0fM 格），请裁图（crop_radius）或调预算；未分配大数组'%(len(P),np.prod(dims)/1e6))
-        digest=hashlib.sha256();digest.update(meta_bytes);digest.update(CACHE_VERSION.encode())
-        digest.update(json.dumps(c,sort_keys=True).encode())
-        with open(pcd,'rb') as f:
-            for chunk in iter(lambda:f.read(1048576),b''):digest.update(chunk)
-        self.key=digest.hexdigest();cache=os.path.join(d,'reloc_cache_v2.npz')
+        self.key=cache_key(meta_bytes, pcd, c);cache=os.path.join(d,'reloc_cache_v2.npz')
         self.nn=NNField.load(cache,P,self.key) if os.path.isfile(cache) else None
         self.cache_hit=self.nn is not None
         if self.nn is None:

@@ -17,7 +17,7 @@ MAVROS 收到第一个包才知道往哪回，而且最近 10 s 内收到过本�
 补一个 PING 保活。不能发心跳：PX4 会把 GCS 类型的心跳当成地面站连上，脚本走后又判地面站丢失，
 NAV_DLL_ACT>0 时拦解锁。MAVROS 停着时也可以 --dev /dev/ttyS3 直连串口。
 
-用法: fc_set_time.py [--dev udpout:127.0.0.1:14555 | /dev/ttyS3] [--baud 921600] [--tolerance 1.0] [--check]
+用法: fc_set_time.py [--dev udpout:127.0.0.1:14555 | /dev/ttyS3] [--baud 921600] [--tolerance 1.0] [--samples 1] [--check]
   --dev        默认 MAVROS 本地口；串口时 --baud 才有用
   --tolerance  偏差在这个范围内（秒）就不写；date -s 只有秒精度，默认 1.0
   --check      只读偏差，不写
@@ -85,7 +85,7 @@ def wait_autopilot_heartbeat(m, timeout):
     return None
 
 
-def clock_offset(m, sysid, n=3, timeout=5.0):
+def clock_offset(m, sysid, n=1, timeout=5.0):
     """收 n 个飞控 SYSTEM_TIME，返回 飞控 - 板端 偏差（秒）的中位数；收不到返回 None"""
     offs, t_end = [], time.time() + timeout
     while len(offs) < n and time.time() < t_end:
@@ -93,6 +93,24 @@ def clock_offset(m, sysid, n=3, timeout=5.0):
         if msg is not None and msg.get_srcSystem() == sysid:
             offs.append(msg.time_unix_usec / 1e6 - time.time())
     return sorted(offs)[len(offs) // 2] if offs else None
+
+
+def wait_aligned_offset(m, sysid, tolerance, timeout=5.0):
+    """Ignore queued pre-write telemetry and stop at the first aligned sample."""
+    deadline = time.monotonic() + timeout
+    drain_until = min(deadline, time.monotonic() + 0.1)
+    while time.monotonic() < drain_until and m.recv_match(blocking=False) is not None:
+        pass
+    last = None
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return last
+        msg = m.recv_match(type="SYSTEM_TIME", blocking=True, timeout=remaining)
+        if msg is not None and msg.get_srcSystem() == sysid:
+            last = msg.time_unix_usec / 1e6 - time.time()
+            if abs(last) <= tolerance:
+                return last
 
 
 def shell_send(m, line, flags=SHELL_FLAGS):
@@ -124,7 +142,10 @@ def main():
     p.add_argument("--baud", type=int, default=921600)
     p.add_argument("--tolerance", type=float, default=1.0)
     p.add_argument("--check", action="store_true")
+    p.add_argument("--samples", type=int, default=1, help="写入前的 SYSTEM_TIME 采样数")
     a = p.parse_args()
+    if a.samples < 1:
+        p.error("--samples 必须大于零")
 
     local_port = a.dev.startswith("udp")
     link = a.dev if local_port else "%s @ %d" % (a.dev, a.baud)
@@ -143,7 +164,7 @@ def main():
     if hb is None:
         fail("5 s 内没收到飞控心跳（%s%s）" % (link, "；常驻 MAVROS 没在跑？" if local_port else ""))
     sysid = hb.get_srcSystem()
-    before = clock_offset(m, sysid)
+    before = clock_offset(m, sysid, a.samples)
     if before is None:
         fail("5 s 内没收到飞控 SYSTEM_TIME")
     print("飞控 - 板端 = %s" % fmt_off(before))
@@ -174,7 +195,7 @@ def main():
     if "failed" in echo or "Invalid" in echo:
         fail("date 执行报错：%r" % echo)
 
-    after = clock_offset(m, sysid)
+    after = wait_aligned_offset(m, sysid, a.tolerance)
     m.close()
     if after is None:
         fail("写入后没收到 SYSTEM_TIME，无法核对")

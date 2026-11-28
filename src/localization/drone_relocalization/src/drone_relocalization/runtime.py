@@ -12,6 +12,18 @@ from .geometry import quat_R,R_quat,mapped_pose,unpack,yaw
 from .matching import relocalize
 
 
+def xyz32_cloud(header, points):
+    from sensor_msgs.msg import PointCloud2, PointField
+    xyz = np.ascontiguousarray(points, dtype='<f4')
+    if xyz.ndim != 2 or xyz.shape[1] != 3:
+        raise ValueError('expected N x 3 XYZ points')
+    fields = [PointField(name, offset, PointField.FLOAT32, 1)
+              for name, offset in (('x', 0), ('y', 4), ('z', 8))]
+    return PointCloud2(header=header, height=1, width=len(xyz), fields=fields,
+                       is_bigendian=False, is_dense=False, point_step=12,
+                       row_step=12 * len(xyz), data=xyz.tobytes())
+
+
 def cloud2_xyz(m):
     fields={f.name:f for f in m.fields}
     if not all(n in fields and fields[n].datatype==7 and fields[n].count==1 for n in ('x','y','z')):
@@ -34,7 +46,6 @@ class RosNode:
         from sensor_msgs.msg import PointCloud2
         from nav_msgs.msg import Odometry
         from tf2_msgs.msg import TFMessage
-        from sensor_msgs import point_cloud2
         from std_msgs.msg import Header
         self.rospy=rospy;self.String=String;self.Pose=PoseStamped;self.Transform=TransformStamped
         self.M,self.args=M,args;self.lock=threading.RLock();self.ctl=StartupController(M.cfg,getattr(args,'startup_started',time.monotonic()))
@@ -47,7 +58,7 @@ class RosNode:
         self.subs=[rospy.Subscriber('/tf_static',TFMessage,self.on_tf,queue_size=10),
                    rospy.Subscriber('/Odometry',Odometry,self.on_odom,queue_size=50),
                    rospy.Subscriber('/cloud_registered',PointCloud2,self.on_cloud,queue_size=30,buff_size=16777216)]
-        self.pub_map.publish(point_cloud2.create_cloud_xyz32(Header(stamp=rospy.Time.now(),frame_id='drone_map'),M.P.astype('f4').tolist()))
+        self.pub_map.publish(xyz32_cloud(Header(stamp=rospy.Time.now(),frame_id='drone_map'), M.P))
         # ROS Timer stops when /clock freezes; freshness must use wall-clock receipt time.
         self.watchdog_stop=threading.Event()
         rospy.on_shutdown(self.on_shutdown)

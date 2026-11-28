@@ -19,15 +19,22 @@ test_setup_runtime() {
   python3 -m drone_inspection.runtime setup "$RUN_DIR" || return 1
   [ -f "$MAP_FRAME" ] || MAP_FRAME=""
 }
-test_after_fusion() {
-  (( INSPECTION_CAMERA )) || return 0
-  local topics
-  topics="$(timeout 5 rostopic list)" || return 1
-  if grep -Eq '^(/ov13855(_full)?/image_raw|/ov13855_apriltag_vision/(corners|detections)|/front_marker/pose|/barcode_reader_camera/result|/drone_inspection/target_tag_pose)$' <<<"$topics"; then
-    err "相机或读码服务已有任务"; return 1
+test_preflight_args() {
+  _pf_args+=(--expected-sha "$INSPECTION_MAP_SHA")
+  if (( INSPECTION_CAMERA )); then
+    _pf_args+=(--forbid-topics-regex '(/ov13855(_full)?/image_raw|/ov13855_apriltag_vision/(corners|detections)|/front_marker/pose|/barcode_reader_camera/result|/drone_inspection/target_tag_pose)')
   fi
+}
+test_bringup() {
+  (( INSPECTION_CAMERA )) || return 0
+  log "启动巡检相机（日志 $NT_LOG_DIR/camera.log）"
   PF_SCAN_CAMERA="$RUN_DIR/inspection_camera.pid"
   start_child "$PF_SCAN_CAMERA" "$NT_LOG_DIR/camera.log" roslaunch drone_inspection shelf_camera.launch save_dir:="$OUT/barcode" save_frames:="$INSPECTION_FRAMES"
+  child_pid "$PF_SCAN_CAMERA" >/dev/null
+}
+test_after_fusion() {
+  (( INSPECTION_CAMERA )) || return 0
+  log "检查巡检相机双路图像与读码服务"
   python3 -m drone_inspection.runtime probe 2>&1 | tee -a "$LOG"
 }
 run_test() {

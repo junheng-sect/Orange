@@ -1,9 +1,10 @@
-import json,math,os,tempfile,unittest
+import hashlib,json,math,os,shutil,tempfile,unittest
+from pathlib import Path
 import numpy as np
 from drone_relocalization.geometry import exp,quat_R,R_quat,transform,mapped_pose
 from drone_relocalization.controller import StartupController
 from drone_relocalization.settings import load
-from drone_relocalization.matching import NNField,MapModel,relocalize,rank_hypotheses
+from drone_relocalization.matching import cache_key,cache_valid,NNField,MapModel,relocalize,rank_hypotheses
 
 
 def result(t=(0,0,0),rv=(0,0,0)):
@@ -75,6 +76,17 @@ class GeometryTests(unittest.TestCase):
         r=result((1,2,3),(0,0,math.pi/2));Rwc=exp([0,.2,0]);Rib=exp([0,-.2,0])
         p,R=mapped_pose(r,Rwc,np.zeros(3),Rib,np.zeros(3),np.array([0,0,0,0,0,0,0,1]))
         np.testing.assert_allclose(p,[1,2,3],atol=1e-9);np.testing.assert_allclose(R,exp([0,0,math.pi/2]),atol=1e-9)
+    def test_xyz32_cloud_matches_point_cloud2(self):
+        from sensor_msgs import point_cloud2
+        from std_msgs.msg import Header
+        from drone_relocalization.runtime import xyz32_cloud
+        header = Header(seq=42, frame_id='drone_map')
+        for pts in (np.arange(30, dtype='>f8').reshape(5, 6)[:, ::2], np.empty((0, 3))):
+            reference = point_cloud2.create_cloud_xyz32(header, pts.astype('f4').tolist())
+            cloud = xyz32_cloud(header, pts)
+            for key in cloud.__slots__:
+                self.assertEqual(getattr(cloud, key), getattr(reference, key), key)
+
     def test_config_does_not_relax_gates(self):
         c=load();self.assertEqual(c['fit_ok'],.8);self.assertEqual(c['degen_ok'],.12);self.assertEqual(c['rmse_ok'],.02)
         with self.assertRaises(ValueError):load(overrides={'confirmations':1})
@@ -142,6 +154,35 @@ class OutdoorTests(unittest.TestCase):
         cls.M=MapModel(d,cls.cfg)
     @classmethod
     def tearDownClass(cls):cls.tmp.cleanup()
+    def test_cache_valid_matches_and_detects_tamper(self):
+        src = Path(self.tmp.name)
+        meta = (src / 'meta.json').read_bytes()
+        # Fingerprint of the already deployed v2 format, independent of the helper.
+        old = hashlib.sha256(meta + b'indoor-se3-v2-1' + json.dumps(self.cfg, sort_keys=True).encode()
+                             + (src / 'map_world.pcd').read_bytes()).hexdigest()
+        self.assertEqual(old, self.M.key)
+        self.assertEqual(cache_key(meta, src / 'map_world.pcd', self.cfg), old)
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            cache = folder / 'reloc_cache_v2.npz'
+            cache.symlink_to(src / cache.name)
+            shutil.copy(src / 'meta.json', folder)
+            pcd = folder / 'map_world.pcd'
+            shutil.copy(src / pcd.name, pcd)
+            self.assertTrue(cache_valid(folder, self.cfg))
+            self.assertFalse(cache_valid(folder, dict(self.cfg, res=.1)))
+            with pcd.open('ab') as stream:
+                stream.write(b'changed')
+            self.assertFalse(cache_valid(folder, self.cfg))
+            shutil.copy(src / pcd.name, pcd)
+            cache.unlink()
+            np.savez(cache, key=old)
+            self.assertFalse(cache_valid(folder, self.cfg))
+            cache.write_bytes(b'PK truncated')
+            self.assertFalse(cache_valid(folder, self.cfg))
+            (folder / 'meta.json').write_text('{}')
+            self.assertFalse(cache_valid(folder, self.cfg))
+
     def test_crop_and_candidates_stay_near_origin(self):
         self.assertLessEqual(np.hypot(self.M.P[:,0],self.M.P[:,1]).max(),12+1e-6)
         self.assertFalse((abs(self.M.P[:,0]-18)<.2).any())
