@@ -110,7 +110,7 @@ def verified_prior(folder, expected, receipt):
 
 
 def preflight(a):
-    from drone_relocalization.matching import MapModel, cache_valid
+    from drone_relocalization.cache import cache_valid
     from drone_relocalization.settings import load
     sha = ''
     if a.live_grid_only:
@@ -119,11 +119,15 @@ def preflight(a):
         sha = verified_prior(a.map, a.expected_sha, os.getenv('INSPECTION_PRIOR_VERIFIED'))
         report('先验栅格 %s（地图 SHA-256 %s）' % (a.map / 'prior_grid.bin', sha))
     master, nodes, topics = system_state()
-    for node in ('/drone_reloc', '/car_bridge', '/waypoint_manager', '/offboard_gateway'):
+    conflicts = ['/drone_reloc', '/car_bridge', '/waypoint_manager', '/offboard_gateway']
+    if a.managed_fusion:
+        conflicts += ['/drone_0_ego_planner_node', '/trajectory_executor', '/nav_inputs']
+    for node in conflicts:
         if node in nodes:
             raise ValueError('已有 %s 在跑（上一次没收尾？），先停掉' % node)
     if a.forbid_topics_regex and any(re.fullmatch(a.forbid_topics_regex, t) for t in topics):
         raise ValueError('相机或读码服务已有任务')
+    identity = fcu_identity(master) if a.managed_fusion else None
     if not fcu_connected():
         raise ValueError('常驻 MAVROS 没连上飞控（飞控没上电？）：导航要用飞控的位置')
     report('[ OK ] ROS master、MAVROS 和飞控都在')
@@ -131,6 +135,9 @@ def preflight(a):
         protocol = param(master, '/mavros/fcu_protocol')
         if protocol != 'v2.0':
             raise ValueError('odom 方式要 MAVROS 用 MAVLink2，常驻 MAVROS 是 fcu_protocol=%s' % (protocol or '读不到'))
+    receipt = None
+    if identity and identity == fcu_identity(master):
+        receipt = dict(identity, seen=time.monotonic(), mode=a.ev_mode)
     document = yaml.safe_load(a.config.read_text())
     report(write_config(document, a.map, a.preview, a.output, a.task, a.height))
     limits = ego_limits(document['config'], a.task)
@@ -140,10 +147,33 @@ def preflight(a):
     if cache_valid(a.map, cfg):
         report('重定位缓存指纹命中')
     else:
+        from drone_relocalization.matching import MapModel
         model = MapModel(a.map, cfg)
         report('地图 %d 点，载入 %.1f s，%s' % (len(model.P), model.load_s,
                                            '缓存命中' if model.cache_hit else '已重建缓存'))
-    print(json.dumps(dict(prior_map_sha=sha, limits=limits)))
+    print(json.dumps(dict(prior_map_sha=sha, limits=limits, fcu=receipt)))
+
+
+def fcu_identity(master):
+    import rosgraph
+    try:
+        with bounded(1):
+            return dict(master=master.getPid(), mavros=master.lookupNode('/mavros'))
+    except (Deadline, rosgraph.MasterException, OSError):
+        return None
+
+
+def recent_fcu(path, master, mode):
+    if not path:
+        return False
+    try:
+        receipt = json.loads(path.read_text())['fcu']
+        if receipt['mode'] != mode or not 0 <= time.monotonic() - receipt['seen'] <= 3.:
+            return False
+        identity = fcu_identity(master)
+        return identity is not None and all(identity[k] == receipt[k] for k in identity)
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
 
 
 def fusion(a):
@@ -177,7 +207,7 @@ def fusion(a):
     if not a.mavros_pid:
         report('[WARN] 常驻 MAVROS 不在运行（systemctl status %s）：核心照常起，飞控收不到外部定位' % a.mavros_unit)
     else:
-        if fcu_connected():
+        if recent_fcu(a.receipt, master, a.ev_mode) or fcu_connected():
             report('[ OK ] 常驻 MAVROS 已连上飞控（mavros_node pid %s）' % a.mavros_pid)
         else:
             report('[WARN] 常驻 MAVROS 在跑但没连上飞控（飞控没上电？）：核心照常起，飞控收不到外部定位')
@@ -253,6 +283,7 @@ def main():
     pf.add_argument('--task', required=True)
     pf.add_argument('--height', default='')
     pf.add_argument('--ev-mode', choices=('pose','odom'), required=True)
+    pf.add_argument('--managed-fusion', action='store_true')
     pf.add_argument('--expected-sha')
     pf.add_argument('--forbid-topics-regex')
     pf.add_argument('--preview', action='store_true')
@@ -264,6 +295,7 @@ def main():
     f.add_argument('--mavros-unit', required=True)
     f.add_argument('--mavros-pid', required=True)
     f.add_argument('--roscore-active', action='store_true')
+    f.add_argument('--receipt', type=Path)
     f.add_argument('--winch', action='store_true')
     f.add_argument('nodes', nargs='+')
     f.set_defaults(run=fusion)

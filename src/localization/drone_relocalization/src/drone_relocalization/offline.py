@@ -1,13 +1,13 @@
 """Offline startup simulator: advance recorded inputs during the actual solver elapsed time."""
 import time
 import numpy as np
-from .controller import StartupController
+from .controller import BufferedStartupController, StartupController
 from .matching import relocalize
 
 
-def startup(M,S,at=0.,solver_rate=1.):
+def startup(M,S,at=0.,solver_rate=1., pipeline=False):
     """Run startup on recorded data. A solver_rate of zero models paused playback."""
-    cfg=M.cfg;ctl=StartupController(cfg,now=0.);lidar=S.lidar_stamps();events=[]
+    cfg=M.cfg;ctl=(BufferedStartupController if pipeline else StartupController)(cfg,now=0.);lidar=S.lidar_stamps();events=[]
     for i,row in enumerate(S.od):
         if row[0]>=S.t0+at:events.append((row[0]-S.t0-at,0,i))
     for i,stamp in enumerate(lidar):
@@ -26,11 +26,12 @@ def startup(M,S,at=0.,solver_rate=1.):
                     row[4:8]=R_quat(S.Rwc@quat_R(row[4:8]));ctl.observe_odom(row,tm)
                 else:ctl.observe_cloud(float(lidar[i]),tm)
             now=until;ctl.tick(now)
-    while now<min(cfg['timeout']+.1,S.dur-at+.6) and not ctl.terminal and not ctl.valid:
+    while now<min(cfg['timeout']+(180.1 if pipeline else .1),S.dur-at+.6) and not ctl.terminal and not ctl.valid:
         advance(now+.05);job=ctl.job(now)
         if job:
-            tic=time.monotonic();cloud=S.cloud(job['start']-S.t0,cfg['window'])
+            tic=time.monotonic();cloud=S.cloud(job['start']-S.t0,job['end']-job['start'])
             center,_=S.pose_at((job['start']+job['end'])/2)
+            if pipeline: center=job['center']
             result=relocalize(M,cloud,center,hint=job.get('hint'));elapsed=time.monotonic()-tic
             advance(now+elapsed*solver_rate);accepted=ctl.submit(result,job['token'],now)
             attempt_results.append(dict(start=job['start']-S.t0,end=job['end']-S.t0,elapsed_s=elapsed,accepted=accepted,result=result))

@@ -1,4 +1,5 @@
 <launch>
+  <arg name="start_gateway" default="true"/>
   <arg name="prior_grid_file" default=""/>
   <arg name="prior_map_sha256" default=""/>
   <arg name="allow_short_goals" default="false"/>
@@ -18,7 +19,7 @@
   <node pkg="drone_navigation" type="nav_inputs" name="nav_inputs" output="screen"/>
   <node pkg="drone_navigation" type="waypoint_manager" name="waypoint_manager" output="screen"/>
   <node pkg="drone_navigation" type="trajectory_executor" name="trajectory_executor" output="screen"/>
-  <node pkg="drone_navigation" type="offboard_gateway" name="offboard_gateway" output="screen">
-    <param name="enable_output" value="$(arg enable_output)"/>
-  </node>
+  <include if="$(arg start_gateway)" file="$(find drone_navigation)/launch/gateway.launch">
+    <arg name="enable_output" value="$(arg enable_output)"/>
+  </include>
 </launch>

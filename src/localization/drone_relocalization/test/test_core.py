@@ -2,7 +2,7 @@ import hashlib,json,math,os,shutil,tempfile,unittest
 from pathlib import Path
 import numpy as np
 from drone_relocalization.geometry import exp,quat_R,R_quat,transform,mapped_pose
-from drone_relocalization.controller import StartupController
+from drone_relocalization.controller import BufferedStartupController, StartupController
 from drone_relocalization.settings import load
 from drone_relocalization.matching import cache_key,cache_valid,NNField,MapModel,relocalize,rank_hypotheses
 
@@ -66,6 +66,45 @@ class ControllerTests(unittest.TestCase):
         j=self.job();self.c.submit(result(),j['token'],61);self.assertFalse(self.c.valid)
     def test_cloud_backwards_rejected(self):
         self.feed();self.c.observe_cloud(50,self.now);self.assertTrue(self.c.terminal)
+
+
+class BufferedTests(ControllerTests):
+    def setUp(self):
+        self.c = BufferedStartupController()
+        self.now = 0.
+
+    def test_60_second_deadline_without_data(self):
+        self.c.tick(60)
+        self.assertFalse(self.c.terminal)
+        self.c.tick(180)
+        self.assertTrue(self.c.terminal)
+
+    def test_late_first_odom_starts_matching_budget(self):
+        self.now = 100.
+        self.feed()
+        self.c.tick(160.)
+        self.assertFalse(self.c.terminal)
+        self.c.tick(161.)
+        self.assertTrue(self.c.terminal)
+
+    def test_interrupted_searches_use_attempt_budget(self):
+        for _ in range(3):
+            self.job()
+            self.feed(p=(.05,0,0))
+            self.feed()
+        self.assertTrue(self.c.terminal)
+        self.assertEqual(self.c.attempts, 3)
+
+    def test_solver_overlaps_next_complete_window(self):
+        first = self.job()
+        self.assertLess(self.now, 2.3)
+        for _ in range(40):
+            self.feed()
+        self.assertFalse(self.c.submit(result(), first['token'], self.now))
+        second = self.c.job(self.now)
+        self.assertGreater(second['start'], first['end'])
+        self.assertGreaterEqual(second['end'] - second['start'], 2. - 1e-6)
+        self.assertEqual(len({stamp for stamp, _ in second['scans']}), len(second['scans']))
 
 
 class GeometryTests(unittest.TestCase):

@@ -459,6 +459,7 @@ for c in roslaunch rosnode rostopic rosservice rospack flock; do
   command -v "$c" >/dev/null 2>&1 || { err "缺少工具 $c"; exit 1; }
 done
 probe_args=(--ev-mode "$EV_MODE" --roscore-unit "$RESIDENT_ROSCORE_UNIT" --mavros-unit "$RESIDENT_MAVROS_UNIT" --mavros-pid "$(mavros_pid)")
+if [[ -n ${NT_FUSION_RECEIPT:-} ]]; then probe_args+=(--receipt "$NT_FUSION_RECEIPT"); fi
 if unit_active "$RESIDENT_ROSCORE_UNIT"; then probe_args+=(--roscore-active); fi
 if (( DO_WINCH )); then probe_args+=(--winch); fi
 read -ra check_nodes <<< "$EXPECT_NODES /rc_bag_recorder"

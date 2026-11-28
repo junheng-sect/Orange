@@ -214,6 +214,18 @@ class FullTests(unittest.TestCase):
         self.assertEqual(h.state.issue, '')
         self.assertTrue(h.runner.run_once())
 
+    def test_warm_runner_waits_for_parent_and_continuously_healthy_inputs(self):
+        h = self.harness()
+        start = h.clock.t
+        def inject():
+            elapsed = h.clock.t - start
+            h.mode = 'ALTCTL' if 2.1 < elapsed < 2.6 else 'POSCTL'
+            h.publish()
+        h.inject = inject
+        nav.wait_ground_ready(h.runner, released=lambda: h.clock.t-start > 3.)
+        self.assertGreaterEqual(h.clock.t-start, 2.6 + nav.STARTUP_READY_STABLE)
+        self.assertFalse(h.mode_calls or h.prepare_takeoff_calls)
+
     def test_initial_altctl_timeout_does_not_send_flight_requests(self):
         h = self.harness()
         h.mode = 'ALTCTL'

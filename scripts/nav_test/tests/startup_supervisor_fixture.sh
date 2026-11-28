@@ -18,18 +18,27 @@ PF_FUSION="$RUN_DIR/fusion.pid" PF_RELOC="$RUN_DIR/reloc.pid" PF_NAV="$RUN_DIR/n
 PF_CAR="$RUN_DIR/car.pid"
 PF_CAMERA="$RUN_DIR/camera.pid"
 trap 'finish 143 force' TERM
+NT_PIPELINE=${FIXTURE_PIPELINE:-0}
+test_warm_runner() { :; }
 test_desc() { echo fixture; }
-test_bringup() { start_child "$PF_CAMERA" "$OUT/camera.log" camera; }
+test_bringup() {
+  start_child "$PF_CAMERA" "$OUT/camera.log" camera
+  if (( NT_PIPELINE )); then
+    PF_CAM_PROBE="$RUN_DIR/camera_probe.pid"
+    start_child "$PF_CAM_PROBE" "$OUT/camera_probe.log" bash -c 'sleep 1; echo fixture-camera; exit "${FIXTURE_CAMERA_EXIT:-0}"'
+    CAM_JOB=$NT_CHILD_JOB
+  fi
+}
 test_after_fusion() { child_pid "$PF_CAMERA" >/dev/null; }
-test_cleanup() { stop_child "$PF_CAMERA" "相机" TERM 5; }
+test_cleanup() { if [[ -n ${PF_CAM_PROBE:-} ]]; then stop_child "$PF_CAM_PROBE" probe TERM 5; fi; stop_child "$PF_CAMERA" "相机" TERM 5; }
 # Use the production pidfile launcher for every child. Substitute idle workers
 # for the hardware and gateway and record whether the gateway was ever started.
 eval "$(declare -f start_child | sed '1s/start_child/original_start_child/')"
 start_child() {
   case $1 in
-    "$PF_CAMERA"|"$PF_FUSION"|"$PF_RELOC"|"$PF_NAV")
+    "$PF_CAMERA"|"$PF_FUSION"|"$PF_RELOC"|"$PF_NAV"|"$RUN_DIR/gateway.pid")
       if [[ $1 == "$PF_FUSION" ]]; then child_pid "$PF_CAMERA" >/dev/null || exit 7; fi
-      [[ $1 != "$PF_NAV" ]] || touch "$OUT/gateway.started"
+      if [[ $1 == "$RUN_DIR/gateway.pid" || ( $NT_PIPELINE == 0 && $1 == "$PF_NAV" ) ]]; then touch "$OUT/gateway.started"; fi
       original_start_child "$1" "$2" python3 -c '
 import os, signal, sys
 def stop(*_): sys.exit(0)

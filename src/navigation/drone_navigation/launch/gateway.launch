@@ -1,0 +1,6 @@
+<launch>
+  <arg name="enable_output" default="false"/>
+  <node pkg="drone_navigation" type="offboard_gateway" name="offboard_gateway" output="screen">
+    <param name="enable_output" value="$(arg enable_output)"/>
+  </node>
+</launch>

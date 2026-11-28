@@ -799,7 +799,7 @@ class FullRunner(GlobalRunner):
             say('完整流程记录：' + self.flight_path)
 
 
-def wait_ground_ready(runner):
+def wait_ground_ready(runner, released=None):
     """Wait for the pilot's ground mode selection before enabling flight monitoring.
 
     An initial ALTCTL is a missing startup condition, not an in-flight takeover.
@@ -828,7 +828,7 @@ def wait_ground_ready(runner):
             why = '地面模式未就绪：当前 %s，请保持上锁，用遥控器切到 POSCTL（定点）' % f.mode
         if not why:
             healthy_at = time.monotonic() if healthy_at is None else healthy_at
-            if time.monotonic()-healthy_at >= STARTUP_READY_STABLE:
+            if time.monotonic()-healthy_at >= STARTUP_READY_STABLE and (released is None or released()):
                 say('地面启动条件就绪：POSCTL、上锁、着地及输入稳定，开始包络预检')
                 return
         else:
@@ -861,13 +861,15 @@ def main():
     return run_full(a, FullRunner, 'test10')
 
 
-def run_full(a, runner_cls, test_name, state_cls=None):
+def run_full(a, runner_cls, test_name, state_cls=None, wait_release=None, released=None):
     rospy.init_node(test_name, anonymous=True, disable_signals=True)
     s = (state_cls or FullState)()
     fc = Fc(s)
     s.fc = fc
     buf = tf2_ros.Buffer()
     listener = tf2_ros.TransformListener(buf)  # noqa: F841
+    if wait_release is not None:
+        wait_release(s)
     end = time.monotonic() + 15.
     while s.fcu is None or not rospy.has_param('/drone_nav/config'):
         if rospy.is_shutdown() or time.monotonic() >= end:
@@ -890,7 +892,7 @@ def run_full(a, runner_cls, test_name, state_cls=None):
                         rospy.ServiceProxy('/drone_nav/takeoff', Trigger),
                         rospy.ServiceProxy('/drone_nav/land', Trigger),
                         rospy.ServiceProxy('/mavros/set_mode', SetMode))
-    wait_ground_ready(runner)
+    wait_ground_ready(runner, released)
     return 0 if runner.run_once() else 1
 
 

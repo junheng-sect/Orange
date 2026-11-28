@@ -222,6 +222,17 @@ class RosTests(unittest.TestCase):
                     stat = Path('/proc', pid, 'stat')
                     if stat.exists():
                         self.assertNotEqual(stat.read_text().rsplit(')', 1)[1].split()[19], start)
+            for value, camera_rc in ((3, 0), (15, 1), (15, 0), (15, 0)):
+                (folder/'gateway.started').unlink(missing_ok=True)
+                type(self).value = value
+                env = dict(os.environ, FIXTURE_PIPELINE='1', FIXTURE_CAMERA_EXIT=str(camera_rc))
+                res = subprocess.run(command, env=env, capture_output=True, text=True, timeout=30)
+                success = value == 15 and camera_rc == 0
+                self.assertEqual(res.returncode, 0 if success else 1, res.stdout + res.stderr)
+                self.assertEqual((folder/'gateway.started').exists(), success)
+                if camera_rc:
+                    self.assertIn('fixture-camera', res.stdout + res.stderr)
+                self.assertFalse(any((folder/'identities').glob('*.alive')), res.stdout)
 
 
 if __name__ == '__main__':

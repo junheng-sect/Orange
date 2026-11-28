@@ -6,7 +6,7 @@ import os
 import threading
 import time
 import numpy as np
-from .controller import StartupController
+from .controller import BufferedStartupController, StartupController
 from .frames import ODOM,ODOM_EDGE,MOUNT_EDGE,init_edge
 from .geometry import quat_R,R_quat,mapped_pose,unpack,yaw
 from .matching import relocalize
@@ -48,7 +48,10 @@ class RosNode:
         from tf2_msgs.msg import TFMessage
         from std_msgs.msg import Header
         self.rospy=rospy;self.String=String;self.Pose=PoseStamped;self.Transform=TransformStamped
-        self.M,self.args=M,args;self.lock=threading.RLock();self.ctl=StartupController(M.cfg,getattr(args,'startup_started',time.monotonic()))
+        self.M,self.args=M,args;self.lock=threading.RLock()
+        self.pipeline = getattr(args, "pipeline", False)
+        controller = BufferedStartupController if self.pipeline else StartupController
+        self.ctl=controller(M.cfg,getattr(args,'startup_started',time.monotonic()))
         self.tf={};self.legacy_warned=False;self.clouds=[];self.worker=None;self.exit_code=0;self.last_status=None;self.status_time=0.;self.last_row=None
         self.pub_pose=rospy.Publisher('/drone_reloc/pose',PoseStamped,queue_size=10)
         self.pub_result=rospy.Publisher('/drone_reloc/result',String,queue_size=1,latch=True)
@@ -107,6 +110,9 @@ class RosNode:
     def on_cloud(self,m):
         with self.lock:
             if m.header.frame_id.strip('/')!='camera_init':self.ctl.invalidate('点云坐标系不符',True);return
+            if self.pipeline:
+                self.ctl.observe_cloud(m.header.stamp.to_sec(), time.monotonic(), m)
+                return
             self.ctl.observe_cloud(m.header.stamp.to_sec(),time.monotonic())
             if self.ctl.state=='COLLECTING' and m.header.stamp.to_sec()>=self.ctl.start_stamp:
                 try:self.clouds.append((m.header.stamp.to_sec(),cloud2_xyz(m)))
@@ -132,20 +138,41 @@ class RosNode:
             job=self.ctl.job(time.monotonic()) if self.worker is None or not self.worker.is_alive() else None
             if self.ctl.state=='COLLECTING' and previous!=(self.ctl.state,self.ctl.start_stamp):self.clouds=[]
             if job:
-                chunks=[p for ts,p in self.clouds if job['start']<=ts<=job['end']+1e-6]
-                self.clouds=[];cloud=np.concatenate(chunks) if chunks else np.zeros((0,3))
-                Rwc,twc=self.tf[ODOM_EDGE];cloud=cloud@Rwc.T+twc
-                self.worker=threading.Thread(target=self.solve,args=(job,cloud),daemon=True);self.worker.start()
+                if self.pipeline:
+                    chunks = job.pop('scans')
+                else:
+                    chunks = [(ts, p) for ts, p in self.clouds if job['start'] <= ts <= job['end']+1e-6]
+                    self.clouds = []
+                frame = self.tf[ODOM_EDGE]
+                self.worker = threading.Thread(target=self.solve, args=(job, chunks, frame), daemon=True)
+                self.worker.start()
             self.publish_status()
             if self.ctl.terminal and self.ctl.state=='FAILED':
                 self.exit_code=1;self.rospy.signal_shutdown(self.ctl.why)
 
-    def solve(self,job,cloud):
-        try:r=relocalize(self.M,cloud,job['center'],hint=job.get('hint'))
+    def solve(self,job,chunks,frame):
+        try:
+            arrays = [cloud2_xyz(p) if self.pipeline else p for _, p in chunks]
+        except ValueError as exc:
+            with self.lock:
+                if job['token'] == self.ctl.epoch:
+                    self.ctl.invalidate(str(exc), True)
+                    self.publish_status(force=True)
+            return
+        try:
+            cloud = np.concatenate(arrays) if arrays else np.zeros((0,3))
+            Rwc, twc = frame
+            cloud = cloud @ Rwc.T + twc
+            r=relocalize(self.M,cloud,job['center'],hint=job.get('hint'))
         except Exception as exc:r=dict(schema_version=2,ok=False,why='匹配异常：'+str(exc))
         with self.lock:
             if self.rospy.is_shutdown():return
+            if job["token"] != self.ctl.epoch:
+                return
             accepted=self.ctl.submit(r,job['token'],time.monotonic())
+            if job['token'] != self.ctl.epoch:
+                self.publish_status(force=True)
+                return
             geom_ok=r.get('ok',False)
             r.update(stamp=self.rospy.Time.now().to_sec(),map=self.args.map,confirmed=accepted,candidate_ok=geom_ok,ok=accepted)
             if geom_ok and not accepted:r['why']=self.ctl.why

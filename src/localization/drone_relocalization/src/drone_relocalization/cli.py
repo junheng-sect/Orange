@@ -33,6 +33,7 @@ def main(entry=None):
     p.add_argument('--eval',action='store_true');p.add_argument('--startup-eval',action='store_true')
     p.add_argument('--step',type=float,default=5.);p.add_argument('--yaw-perturb',action='store_true')
     p.add_argument('--window',type=float,default=None);p.add_argument('--tries',type=int,default=None)
+    p.add_argument('--pipeline', action='store_true', help='巡检并行启动与双静止窗口缓冲')
     p.add_argument('--still-timeout',type=float,default=None)
     p.add_argument('--out',default='');p.add_argument('--save',default=os.path.expanduser('~/test_data/reloc'))
     import rospy
@@ -50,7 +51,7 @@ def main(entry=None):
         S=BagSession(os.path.expanduser(args.bag))
         try:
             if args.startup_eval:
-                result=startup(M,S,args.at);print(json.dumps(result,ensure_ascii=False),flush=True);ok=result['ok']
+                result=startup(M,S,args.at,pipeline=args.pipeline);print(json.dumps(result,ensure_ascii=False),flush=True);ok=result['ok']
             else:
                 results=[];rng=np.random.RandomState(0)
                 times=np.arange(args.at,S.dur-cfg['window'],args.step) if args.eval else [args.at]

@@ -27,6 +27,7 @@
 # 每次的日志、RC 包（bag 和飞控 ulog 都由通道 6 触发）、目标记录在 ~/test_data/nav_test/<时间>_<测试名>/。
 # ==============================================================================
 set -o pipefail
+NT_PIPELINE=0
 
 NT_DIR="$(cd "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")" && pwd)"
 DIR="$(cd "$NT_DIR/.." && pwd)"
@@ -146,6 +147,8 @@ finish() { # finish <退出码> [force]：信号触发时飞机还解锁着就�
   if declare -F test_cleanup >/dev/null; then
     test_cleanup || _cleanup_ok=0
   fi
+  if [[ -n ${PF_GATEWAY:-} ]]; then stop_child "$PF_GATEWAY" "网关" INT 10 || _cleanup_ok=0; fi
+  if [[ -n ${PF_STAGE:-} ]]; then stop_child "$PF_STAGE" "启动探针" TERM 5 || _cleanup_ok=0; fi
   stop_child "$PF_NAV" "导航" INT 20 || _cleanup_ok=0
   stop_child "$PF_CAR" "car_bridge" INT 10 || _cleanup_ok=0
   if (( NT_DLL )); then stop_child "$PF_DLL" "DLL 旁路" INT 15 || _cleanup_ok=0; fi
@@ -222,6 +225,9 @@ nt_gate_ev() {
 nt_check_chain() { # 每次发目标前确认链路还在
   child_pid "$PF_FUSION" >/dev/null || { err "定位链路 fusion.sh 已退出，看 $NT_LOG_DIR/fusion.log"; return 1; }
   child_pid "$PF_RELOC" >/dev/null || { err "重定位节点已退出，看 $NT_LOG_DIR/reloc.log"; return 1; }
+  if [[ -n ${PF_GATEWAY:-} ]]; then
+    child_pid "$PF_GATEWAY" >/dev/null || { err "网关已退出，看 $NT_LOG_DIR/gateway.log"; return 1; }
+  fi
   child_pid "$PF_NAV" >/dev/null || { err "导航已退出，看 $NT_LOG_DIR/nav.log"; return 1; }
 }
 
@@ -319,7 +325,11 @@ nav_test_main() {
     start_child "$PF_DLL" "$NT_LOG_DIR/dll.log" nice -n 10 env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
       "$NT_DIR/start_dll_observer.sh" "$MAP" "$RELOC_CONFIG" "$OUT" || warn "DLL 旁路未启动"
   fi
-  if [ -n "${WAREHOUSE_TASK_ID:-}" ]; then
+  if [[ -n ${WARM_JOB:-} ]]; then
+    nt_check_chain || finish 1 force
+    touch "$RUN_DIR/release" || finish 1 force
+    nt_wait_job "$WARM_JOB"
+  elif [ -n "${WAREHOUSE_TASK_ID:-}" ]; then
     # The web supervisor signals only this shell. A separate job group lets
     # finish() check landed and disarmed before interrupting the flight runner.
     set -m
@@ -343,6 +353,54 @@ nav_test_main() {
 }
 
 # ---------------------------------------------------------------- 启动 ------
+nt_launch_reloc() {
+  hr; log "步骤 3/4：重定位 + world map（第一个窗口算 6～12 s，第二个窗口确认 1～3 s）。继续别动"
+  local opts=()
+  if (( ${NT_PIPELINE:-0} )); then opts+=(--pipeline); fi
+  start_child "$PF_RELOC" "$NT_LOG_DIR/reloc.log" rosrun drone_relocalization relocalize --map "$MAP" --config "$RELOC_CONFIG" --save "$OUT" "${opts[@]}"
+  if [ -n "$MAP_FRAME" ]; then start_child "$PF_CAR" "$NT_LOG_DIR/car_bridge.log" roslaunch car_bridge car_bridge.launch drone_map:="$MAP" frames:="$MAP_FRAME"; fi
+}
+
+# The resolved config, limits and prior-grid identity are local to nt_bringup.
+nt_launch_navigation() {
+  local _nav_args=(config:="$runtime_config" enable_output:=true max_vel:="$_max_vel" max_acc:="$_max_acc" max_vel_z:="$_max_vel_z" max_acc_z:="$_max_acc_z")
+  [ "$PREVIEW" -eq 1 ] && _nav_args=(config:="$runtime_config" enable_output:=false radius:="$PREVIEW_RADIUS" half_height:="$PREVIEW_HALF_HEIGHT" max_vel:="$_max_vel" max_acc:="$_max_acc" max_vel_z:="$_max_vel_z" max_acc_z:="$_max_acc_z")
+  _nav_args+=(prior_grid_file:="$_prior_file" prior_map_sha256:="$_prior_map_sha")
+  [[ "$TEST_NAME" != test_indoor[456] ]] || _nav_args+=(allow_short_goals:=true)
+  [ "$TEST_NAME" != test_indoor3_3 ] || _nav_args+=(allow_short_goals:=true)
+  if declare -F test_navigation_args >/dev/null; then test_navigation_args; fi
+  if (( ${NT_PIPELINE:-0} )); then _nav_args+=(start_gateway:=false); fi
+  start_child "$PF_NAV" "$NT_LOG_DIR/nav.log" roslaunch drone_navigation navigation.launch "${_nav_args[@]}"
+}
+
+# Monitor every running stage while a short-lived probe is waiting. Consume
+# each completed probe once so a later stage cannot hide its failure.
+nt_watch_startup() {
+  local entry reason
+  for entry in "$PF_FUSION" "$PF_RELOC" "${PF_SCAN_CAMERA:-}" "${PF_WARM:-}" "${PF_GATEWAY:-}"; do
+    [[ -z $entry ]] || child_pid "$entry" >/dev/null || { err "启动子进程已退出：${entry##*/}"; return 1; }
+  done
+  if [[ -n $MAP_FRAME ]]; then child_pid "$PF_CAR" >/dev/null || { err "car_bridge 已退出"; return 1; }; fi
+  if [[ -n ${WARM_JOB:-} ]]; then child_pid "$PF_NAV" >/dev/null || { err "导航预热已退出"; return 1; }; fi
+  if [[ -n ${CAM_JOB:-} ]] && ! kill -0 "$CAM_JOB" 2>/dev/null; then
+    if ! nt_wait_job "$CAM_JOB"; then
+      reason=$(tail -n 1 "$NT_LOG_DIR/camera_probe.log")
+      err "巡检相机预检失败：$reason"; return 1
+    fi
+    CAM_JOB=""
+  fi
+  if [[ -n ${EV_JOB:-} ]] && ! kill -0 "$EV_JOB" 2>/dev/null; then nt_gate_ev || return 1; fi
+}
+
+nt_watch_job() {
+  while kill -0 "$1" 2>/dev/null; do
+    nt_watch_startup || finish 1 force
+    sleep .1
+  done
+  nt_watch_startup || finish 1 force
+  nt_wait_job "$1"
+}
+
 nt_bringup() {
   hr; log "导航实飞 $TEST_NAME：$(test_desc)（记录：$OUT）"
   log "地图 $MAP"; log "重定位配置 $RELOC_CONFIG"; log "world map 标定 $MAP_FRAME"; log "导航配置 $NAV_CONFIG"
@@ -386,11 +444,17 @@ nt_bringup() {
   local _record_env=("NAV_TEST_DLL_TASK=")
   if (( NT_DLL )); then _record_env=("NAV_TEST_DLL_TASK=$TEST_NAME"); fi
   if (( NT_RAW_LIDAR )); then _record_env+=("RC_RECORD_RAW_CLOUD=true"); fi
+  if (( ${NT_PIPELINE:-0} )); then _record_env+=("NT_FUSION_RECEIPT=$RUN_DIR/preflight.json"); fi
   start_child "$PF_FUSION" "$NT_LOG_DIR/fusion.log" env "${_record_env[@]}" "$DIR/fusion.sh" --no-camera --no-winch --bag-dir "$OUT" --bag-prefix "$TEST_NAME" --ev-mode "$EV_MODE" "${FUSION_ARGS[@]}"
   local _odom_rc
   start_child "$PF_WAIT_ODOM" "$NT_LOG_DIR/wait_odom.log" python3 -B "$probe" wait-odom "$PF_FUSION"
   ODOM_JOB=$NT_CHILD_JOB
-  nt_wait_job "$ODOM_JOB"; _odom_rc=$?
+  if (( ${NT_PIPELINE:-0} )); then
+    nt_launch_reloc
+    nt_watch_job "$ODOM_JOB"; _odom_rc=$?
+  else
+    nt_wait_job "$ODOM_JOB"; _odom_rc=$?
+  fi
   ODOM_JOB=""
   case $_odom_rc in
     0) ;;
@@ -399,13 +463,14 @@ nt_bringup() {
   esac
   ok "FAST-LIO 和重力桥已输出（/fastlio/odom_world）"
 
-  if declare -F test_after_fusion >/dev/null && ! test_after_fusion; then
+  if (( ${NT_PIPELINE:-0} )); then
+    nt_launch_navigation
+    test_warm_runner
+  elif declare -F test_after_fusion >/dev/null && ! test_after_fusion; then
     err "定位启动后测试设备未就绪"; finish 1 force
   fi
 
-  hr; log "步骤 3/4：重定位 + world map（第一个窗口算 6～12 s，第二个窗口确认 1～3 s）。继续别动"
-  start_child "$PF_RELOC" "$NT_LOG_DIR/reloc.log" rosrun drone_relocalization relocalize --map "$MAP" --config "$RELOC_CONFIG" --save "$OUT"
-  if [ -n "$MAP_FRAME" ]; then start_child "$PF_CAR" "$NT_LOG_DIR/car_bridge.log" roslaunch car_bridge car_bridge.launch drone_map:="$MAP" frames:="$MAP_FRAME"; fi
+  if (( ! ${NT_PIPELINE:-0} )); then nt_launch_reloc; fi
   cat >"$RUN_DIR/wait_reloc.py" <<'PY'
 import json, math, os, sys, time
 import rospy
@@ -458,19 +523,28 @@ except KeyboardInterrupt:
     sys.exit(130)
 PY
   local _rpid; _rpid="$(child_pid "$PF_RELOC")" || { err "重定位节点没起来，看 $NT_LOG_DIR/reloc.log"; finish 1 force; }
-  python3 "$RUN_DIR/wait_reloc.py" "$_rpid" "$LOG" || { err "重定位没成功，看 $NT_LOG_DIR/reloc.log"; finish 1 force; }
+  if (( ${NT_PIPELINE:-0} )); then
+    PF_STAGE="$RUN_DIR/reloc_wait.pid"
+    start_child "$PF_STAGE" "$NT_LOG_DIR/wait_reloc.log" python3 "$RUN_DIR/wait_reloc.py" "$_rpid" "$LOG"
+    nt_watch_job "$NT_CHILD_JOB" || { err "重定位没成功，看 $NT_LOG_DIR/reloc.log"; finish 1 force; }
+    while [[ -n ${CAM_JOB:-} || -n ${EV_JOB:-} ]]; do nt_watch_startup || finish 1 force; sleep .1; done
+  else
+    python3 "$RUN_DIR/wait_reloc.py" "$_rpid" "$LOG" || { err "重定位没成功，看 $NT_LOG_DIR/reloc.log"; finish 1 force; }
+  fi
   ok "重定位完成；world map 由 car_bridge 发（看 $NT_LOG_DIR/car_bridge.log）"
 
   nt_gate_ev || finish 1 force
   if [[ "${NT_MANUAL_FLIGHT:-0}" == 1 ]]; then return 0; fi
   hr; log "步骤 4/4：启动导航（EGO + 执行器 + 网关，$([ "$PREVIEW" -eq 1 ] && echo 只预览 || echo 真实输出)）"
-  local _nav_args=(config:="$runtime_config" enable_output:=true max_vel:="$_max_vel" max_acc:="$_max_acc" max_vel_z:="$_max_vel_z" max_acc_z:="$_max_acc_z")
-  [ "$PREVIEW" -eq 1 ] && _nav_args=(config:="$runtime_config" enable_output:=false radius:="$PREVIEW_RADIUS" half_height:="$PREVIEW_HALF_HEIGHT" max_vel:="$_max_vel" max_acc:="$_max_acc" max_vel_z:="$_max_vel_z" max_acc_z:="$_max_acc_z")
-  _nav_args+=(prior_grid_file:="$_prior_file" prior_map_sha256:="$_prior_map_sha")
-  [[ "$TEST_NAME" != test_indoor[456] ]] || _nav_args+=(allow_short_goals:=true)
-  [ "$TEST_NAME" != test_indoor3_3 ] || _nav_args+=(allow_short_goals:=true)
-  if declare -F test_navigation_args >/dev/null; then test_navigation_args; fi
-  start_child "$PF_NAV" "$NT_LOG_DIR/nav.log" roslaunch drone_navigation navigation.launch "${_nav_args[@]}"
+  if (( ${NT_PIPELINE:-0} )); then
+    PF_GATEWAY="$RUN_DIR/gateway.pid"
+    local output=true
+    (( PREVIEW )) && output=false
+    start_child "$PF_GATEWAY" "$NT_LOG_DIR/gateway.log" roslaunch drone_navigation gateway.launch enable_output:="$output"
+    touch "$RUN_DIR/gateway_started" || finish 1 force
+  else
+    nt_launch_navigation
+  fi
   cat >"$RUN_DIR/wait_nav.py" <<'PY'
 import json, os, sys, time
 import rospy
@@ -511,7 +585,11 @@ except KeyboardInterrupt:
     sys.exit(130)
 PY
   local _npid; _npid="$(child_pid "$PF_NAV")" || { err "导航没起来，看 $NT_LOG_DIR/nav.log"; finish 1 force; }
-  if ! python3 "$RUN_DIR/wait_nav.py" "$_npid" "$PREVIEW" "$((1 - LIVE_GRID_ONLY))" 2>&1 | tee -a "$LOG"; then
+  if (( ${NT_PIPELINE:-0} )); then
+    PF_STAGE="$RUN_DIR/nav_wait.pid"
+    start_child "$PF_STAGE" "$NT_LOG_DIR/wait_nav.log" python3 "$RUN_DIR/wait_nav.py" "$_npid" "$PREVIEW" "$((1 - LIVE_GRID_ONLY))"
+    nt_watch_job "$NT_CHILD_JOB" || { err "导航没就绪：$(tail -n 1 "$NT_LOG_DIR/wait_nav.log")"; finish 1 force; }
+  elif ! python3 "$RUN_DIR/wait_nav.py" "$_npid" "$PREVIEW" "$((1 - LIVE_GRID_ONLY))" 2>&1 | tee -a "$LOG"; then
     err "导航没就绪，最后几行："; tail -n 8 "$NT_LOG_DIR/nav.log" | tee -a "$LOG"; finish 1 force
   fi
   ok "导航就绪（输入 READY，网关 $([ "$PREVIEW" -eq 1 ] && echo 只预览 || echo 真实输出)）"

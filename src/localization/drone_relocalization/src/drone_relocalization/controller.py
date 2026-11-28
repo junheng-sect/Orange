@@ -108,3 +108,108 @@ class StartupController:
     def status(self,stamp):
         return dict(schema_version=2,stamp=float(stamp),state=self.state,valid=self.valid,why=self.why,
                     attempts=self.attempts,confirmations=self.confirmed,tracking=False)
+
+
+class BufferedStartupController(StartupController):
+    """Keep only scans spanned by one uninterrupted, stationary odometry epoch."""
+    def __init__(self, cfg=None, now=0.):
+        super().__init__(cfg, now)
+        self.wait_started = now
+        self.first_odom_at = None
+        self.scans = deque(maxlen=512)
+        self.last_window_end = -math.inf
+
+    def invalidate(self, why, terminal=False):
+        self.scans.clear()
+        super().invalidate(why, terminal)
+
+    def observe_odom(self, row, now):
+        if self.terminal:
+            return
+        if self.recv_odom is not None and (now - self.recv_odom > self.cfg['freshness'] or
+                (np.shape(row) == (8,) and row[0] - self.last_odom[0] > self.cfg['freshness'])):
+            self.invalidate('里程计断流，清除静止窗口')
+            if self.terminal:
+                return
+        super().observe_odom(row, now)
+        if self.terminal or self.valid:
+            return
+        if self.first_odom_at is None:
+            if now - self.wait_started >= 180.:
+                self.invalidate('180 s 内没有有效 /Odometry', True)
+                return
+            self.first_odom_at = now
+        if self.anchor is None:
+            self.anchor = self.last_odom.copy()
+
+    def observe_cloud(self, stamp, now, payload=None):
+        if self.terminal:
+            return
+        if self.recv_cloud is not None and max(now - self.recv_cloud, stamp - self.last_cloud) > self.cfg['freshness']:
+            self.invalidate('点云断流，清除静止窗口')
+            if self.terminal:
+                return
+        super().observe_cloud(stamp, now)
+        if (self.terminal or self.valid or self.anchor is None or
+                stamp < self.anchor[0] or stamp <= self.last_window_end):
+            return
+        self.scans.append((stamp, payload))
+        # Retain a boundary scan plus one freshness interval for delayed odometry.
+        oldest = stamp - self.cfg['window'] - self.cfg['freshness']
+        while self.scans and self.scans[0][0] < oldest:
+            self.scans.popleft()
+
+    def tick(self, now):
+        if self.terminal:
+            return
+        if self.valid:
+            if not self.fresh(now):
+                self.invalidate('里程计或点云断流，旧定位失效，需重启', True)
+            return
+        if self.first_odom_at is None:
+            if now - self.wait_started >= 180.:
+                self.invalidate('180 s 内没有有效 /Odometry', True)
+            return
+        if now - self.first_odom_at >= self.cfg['timeout']:
+            self.invalidate('启动定位超过总等待上限', True)
+            return
+        if not self.fresh(now):
+            if self.scans or self.pending or self.state != 'WAITING':
+                self.invalidate('输入断流，清除未确认候选')
+            return
+        if self.state == 'WAITING' and self.attempts >= self.cfg['tries']:
+            self.invalidate('已达到最大搜索次数', True)
+            return
+        if self.state == 'WAITING' and self.anchor is not None and len(self.history) >= 10:
+            if self.last_odom[0] - self.anchor[0] >= .9:
+                self.start_stamp = self.anchor[0]
+                self.set_state('COLLECTING', '采集独立静止窗口')
+
+    def job(self, now):
+        self.tick(now)
+        if self.state != 'COLLECTING' or not self.scans:
+            return None
+        eligible = [scan for scan in self.scans if scan[0] <= self.last_odom[0]]
+        if len(eligible) < 10:
+            return None
+        end = eligible[-1][0]
+        before = [i for i, (stamp, _) in enumerate(eligible)
+                  if end - stamp >= self.cfg['window'] - 1e-6]
+        if not before:
+            return None
+        window = eligible[before[-1]:]
+        if len(window) < 10:
+            return None
+        self.attempts += 1
+        self.last_window_end = end
+        while self.scans and self.scans[0][0] <= end:
+            self.scans.popleft()
+        self.set_state('SEARCHING', '匹配静止窗口')
+        return dict(token=self.epoch, start=window[0][0], end=end, scans=window,
+                    center=self.last_odom[1:4].copy(), hint=self.pending)
+
+    def submit(self, result, token, now):
+        accepted = super().submit(result, token, now)
+        if accepted:
+            self.scans.clear()
+        return accepted

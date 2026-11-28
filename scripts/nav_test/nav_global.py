@@ -215,13 +215,19 @@ def parse_args(ap):
     return args
 
 
-def serve(node, args, runner_cls, state_cls=SquareState):
+def serve(node, args, runner_cls, state_cls=SquareState, wait_release=None):
     """起节点、等输入就绪；--preview 跑一轮预览，否则进入"等 OFFBOARD 上升沿"的自动循环。"""
     rospy.init_node(node, anonymous=True, disable_signals=True)
+    state = None
+    if wait_release is not None:
+        state = state_cls()
+        wait_release(state)
     while not rospy.has_param('/drone_nav/config') and not rospy.is_shutdown():
         say('等 navigation.launch 加载 /drone_nav/config ...')
         time.sleep(1)
-    cfg, state = rospy.get_param('/drone_nav/config'), state_cls()
+    cfg = rospy.get_param('/drone_nav/config')
+    if state is None:
+        state = state_cls()
     buf = tf2_ros.Buffer()
     listener = tf2_ros.TransformListener(buf)  # noqa: F841  整个运行期间收 TF
     rospy.wait_for_service('/drone_nav/prepare')
