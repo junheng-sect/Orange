@@ -148,7 +148,7 @@ button[aria-pressed=true] { color: #bdedf2; border-color: #438490; background: #
 .task-facts { display: grid; gap: 6px; }
 .task-facts dt { color: var(--muted); font-size: 12.5px; }
 .task-facts dd { margin-top: 1px; line-height: 1.38; }
-#task-damper { width: 100%; min-width: 0; padding: 5px 8px; border: 1px solid #3b4c5b; border-radius: 5px; color: inherit; background: #111b25; font: inherit; }
+#task-damper, #task-vertical input { width: 100%; min-width: 0; padding: 5px 8px; border: 1px solid #3b4c5b; border-radius: 5px; color: inherit; background: #111b25; font: inherit; }
 #task-diagram { width: 100%; height: 112px; border: 1px solid #2e4355; border-radius: 8px; }
 #task-stops { display: flex; flex-wrap: wrap; gap: 5px; list-style: none; padding: 0; margin: 0; }
 #task-stops li { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--inset); font-size: 12.5px; color: #d3e0ea; }

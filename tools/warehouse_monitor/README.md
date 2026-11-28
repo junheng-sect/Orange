@@ -121,3 +121,9 @@ python3 "$ORANGE_ROOT"/tools/warehouse_monitor/export_dll_drift.py "$bag" "${bag
 室内 test3_1 和后续使用 `nav_test_main` 的新带图任务同样显示 DLL 对照差。通用任务在 `/nav_test/observer` 宣告本次会话，导航主位姿和轨迹按原有逻辑显示。室内默认用重定位原图与室内参数；在各任务目录用相同导出命令即可读取通道 6 的原名 bag。轻量包不含原始雷达时仍输出完整逐帧差值和覆盖率。`--record-raw-lidar` 供需要重跑、对静止段求 ICP 的采集使用。
 
 - 室内 **test3_5 · 四点减振对照**在任务面板填写本趟硬度（可留空）。先开通道 6，再人工起飞并切 OFFBOARD；右下保持后接管降落，上锁后关通道 6。视频、四点各三张原图、里程计及事件按 bag 归档。预览和评分命令见仓库的 `scripts/nav_test/README.md`。
+
+### 室内原地起降测试
+
+在「室内图」选择「室内原地起降测试」。起飞高度相对本趟起飞位置，默认 0.50 m。连续停稳 2 s 后额外悬停，默认 3 s，再原地慢降。确认框显示本趟三个参数。预检通过后拨通道 6 录包，在 POSCTL 地面人工解锁。确认着地上锁后，切回定点、关通道 6 并在网页收尾。
+
+板端也可运行 `scripts/nav_test_indoor_takeoff_land.sh --height 0.50 --hover 3 --delay 3`。加 `--dry-run` 可离线查看参数。本趟配置、bag、`flight_*.json` 和 `goal_*.json` 位于相同的任务目录。记录中的 `MPC_TKO_RAMP_T` 来自地面只读采样，`null` 表示未读到。

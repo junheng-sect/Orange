@@ -2,7 +2,7 @@ import copy,math,threading,time
 import numpy as np
 import rospy,message_filters,rosgraph
 from nav_msgs.msg import Odometry,Path
-from std_msgs.msg import String,Empty
+from std_msgs.msg import Bool,String,Empty
 from std_srvs.srv import Trigger,TriggerResponse
 from mavros_msgs.msg import PositionTarget,State,EstimatorStatus,ExtendedState
 from mavros_msgs.srv import CommandBool
@@ -66,6 +66,11 @@ class Gateway:
         rospy.Subscriber('/drone_nav/cancel',Empty,self.on_cancel,queue_size=1)
         rospy.Subscriber('/drone_nav/arrived',Empty,self.on_arrived,queue_size=1)
         rospy.Subscriber('/mavros/extended_state',ExtendedState,self.on_ext,queue_size=1)
+        self.vertical_test = self.c.get('vertical_test_guard') is True
+        self.vertical_guard_at = -math.inf
+        self.vertical_aborted = False
+        if self.vertical_test:
+            rospy.Subscriber('/drone_nav/vertical_test_permit', Bool, self.vertical_permit, queue_size=1)
         rospy.Service('/drone_nav/prepare',Trigger,self.prepare)
         rospy.Service('/drone_nav/prepare_takeoff',Trigger,self.prepare_takeoff)
         rospy.Service('/drone_nav/takeoff',Trigger,self.takeoff)
@@ -162,8 +167,23 @@ class Gateway:
             self.climb=None;self.land=None;self.land_velocity_only=False
             if self.takeoff_state:self.takeoff_state='STOPPED'
             if self.land_state:self.land_state='STOPPED'
+    def abort_vertical(self):
+        # Latch for this launch: a queued service call or late heartbeat cannot restart motion.
+        self.vertical_aborted = True
+        self.ready = False
+        self.fail('vertical test aborted or supervisor heartbeat lost')
+
+    def vertical_permit(self, message):
+        with self.lock:
+            if message.data:
+                self.vertical_guard_at = time.monotonic()
+            else:
+                self.abort_vertical()
+
     def prepare(self,_):
         with self.lock:
+            if self.vertical_aborted:
+                return TriggerResponse(False,'vertical test already aborted')
             if self.alignment.r is None or not fresh(self.px,self.px_at,self.odom_age) or not self.input_ok or not self.owners_ok or time.monotonic()-self.owners_at>1.5:
                 return TriggerResponse(False,'alignment, inputs or exclusive ownership not ready')
             self.fault='';self.prepared=True;self.ready=False;self.running=False;self.cmd=None;self.goal_stamp=None;self.expected_gen=None;self.prepared_at=time.monotonic();self.terminal=None;self.capture_hold()
@@ -174,6 +194,8 @@ class Gateway:
             return TriggerResponse(True,'prepared: hold stream; manually select OFFBOARD, then start route')
     def prepare_takeoff(self,_):
         with self.lock:
+            if self.vertical_test and time.monotonic() - self.vertical_guard_at > .5:
+                return TriggerResponse(False,'vertical test supervisor not ready')
             if not self.on_ground():return TriggerResponse(False,'PX4 does not report landed')
             if self.real and (self.state is None or time.monotonic()-self.state_at>2. or not self.state.armed or self.was_offboard):
                 return TriggerResponse(False,'arm on the ground outside OFFBOARD first')
@@ -285,6 +307,9 @@ class Gateway:
             if self.last_clock is not None and now<self.last_clock:self.fail('ROS clock rollback');self.prepared=False
             self.last_clock=now
             pxok=fresh(self.px,self.px_at,self.odom_age) and (not self.real or self.estimator_ok())
+            if (self.vertical_test and self.prepared and self.ground_z is not None and
+                    self.land_state != 'DONE' and not self.vertical_aborted and wall - self.vertical_guard_at > .5):
+                self.abort_vertical()
             if self.prepared:
                 if not self.owners_ok or wall-self.owners_at>1.5:self.fail('another setpoint publisher or ownership check lost');self.prepared=False
                 if not self.input_ok or wall-self.input_at>self.odom_age or wall-self.clock_at>.3:self.fail('navigation inputs/clock stale')
@@ -302,6 +327,7 @@ class Gateway:
             if self.climb is not None and not ready:self.climb=None;self.takeoff_state='STOPPED' # never resume a climb clock that kept running
             if self.land is not None and not ready:self.land=None;self.land_state='STOPPED' # never resume a descent clock that kept running
             status(self.stat,'READY' if ready else ('FAULT' if self.fault else 'PREPARED' if self.prepared else 'ALIGNING'),reason=self.fault,real_output=self.real,takeoff=self.takeoff_state,land=self.land_state,
+                   vertical_test_height=self.takeoff_h if self.vertical_test else None,
                    land_target_z=self.land_target_z,land_ground_z=self.ground_z,land_limit_z=self.land_limit_z,land_limit_reached=self.land_limit_reached,
                    land_z_velocity_only=self.land_velocity_only,land_command_vz=float(self.hold_v[2]),land_disarm_requests=self.land_disarm_count,land_disarm_result=self.land_disarm_result)
             if not self.prepared or not pxok or self.hold_p is None:return

@@ -7,6 +7,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 import rospy
 from nav_msgs.msg import Odometry
+from std_msgs.msg import Bool
 from mavros_msgs.msg import State, EstimatorStatus, ExtendedState, PositionTarget
 from drone_navigation.core import climb_profile
 from drone_navigation.gateway import Gateway, GROUND_DROP
@@ -183,6 +184,43 @@ class GatewayTakeoffTests(unittest.TestCase):
         self.assertIsNone(g.climb); self.assertEqual(g.takeoff_state, 'STOPPED')
         g.on_state(State(connected=True, armed=True, mode='OFFBOARD')); g.tick()
         self.assertLess(abs(self.sent(g).position.z - z), .02)  # brakes from the last climb point, no jump ahead
+
+    def test_vertical_permit_stops_climb_and_landing(self):
+        for landing in (False, True):
+            with self.subTest(landing=landing):
+                g = self.gateway(dict(CONFIG, vertical_test_guard=True))
+                self.assertFalse(g.prepare_takeoff(None).success)
+                g.vertical_permit(Bool(True))
+                self.assertTrue(g.prepare_takeoff(None).success)
+                g.tick()
+                self.now += 1.
+                self.refresh(g, at_rest=True)
+                self.landed(g)
+                g.vertical_permit(Bool(True))
+                g.on_state(State(connected=True, armed=True, mode='OFFBOARD'))
+                g.tick()
+                self.assertTrue(g.takeoff(None).success)
+                self.landed(g, ExtendedState.LANDED_STATE_IN_AIR)
+                self.refresh(g, p=(1., 2., .5))
+                if landing:
+                    g.climb = None
+                    g.capture_hold()
+                    self.assertTrue(g.land_start(None).success)
+                    g.vertical_permit(Bool(False))
+                else:
+                    self.now += .51
+                    self.refresh(g, p=(1., 2., .5))
+                g.tick()
+                self.assertTrue(g.vertical_aborted)
+                self.assertIsNone(g.climb)
+                self.assertIsNone(g.land)
+                self.assertFalse(g.land_velocity_only)
+                self.assertFalse(g.ready)
+                self.assertAlmostEqual(self.sent(g).velocity.z, 0.)
+                g.vertical_permit(Bool(True))
+                self.assertFalse(g.prepare(None).success)
+                self.assertFalse(g.takeoff(None).success)
+                self.assertFalse(g.land_start(None).success)
 
     def test_invalid_takeoff_config_rejected_at_start(self):
         for bad in ({'takeoff_height': .1}, {'takeoff_height': 3.}, {'max_vel_z': 0.}, {'max_acc_z': 2.}):

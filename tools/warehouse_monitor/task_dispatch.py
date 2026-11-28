@@ -3,12 +3,17 @@ from contextlib import contextmanager
 import json
 import math
 import re
+from pathlib import Path
+import sys
 import shlex
 import subprocess
 from threading import Event, Lock, Thread
 import time
 
 from board_connection import DEFAULT_ROOT, in_checkout
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts/nav_test'))
+import vertical_profile
 
 REQUEST_ID = re.compile(r"[0-9a-f]{32}")
 TTL = 15 * 60
@@ -37,7 +42,12 @@ class TaskConflict(ValueError):
 
 def catalog(root, cache=None, board=False):
     from mission_presets import extend
-    return extend(json.loads((root / "tasks.json").read_text()), root, cache, board)
+    data = extend(json.loads((root / "tasks.json").read_text()), root, cache, board)
+    data['tasks'].append(dict(id=vertical_profile.TASK, label='起降测试', title='室内原地起降测试',
+                              mapId=vertical_profile.MAP, automatic=True, fixed=False, points=[], stops=[],
+                              verticalParameters=vertical_profile.PARAMETERS, route='从本次起飞点垂直爬升，停稳后悬停',
+                              finish='原地慢降至着地上锁'))
+    return data
 
 
 def task_for(data, task_id, map_key):
@@ -54,6 +64,13 @@ def check_damper(body):
         value = body['damperDeg']
         if body.get('taskId') != 'test_indoor3_5' or type(value) is not int or not 0 <= value <= 100:
             raise ValueError('减振球硬度应为 0 至 100 的整数，可留空')
+
+
+def check_vertical(body):
+    if body.get('taskId') == vertical_profile.TASK:
+        vertical_profile.validate(body.get('vertical'))
+    elif 'vertical' in body:
+        raise ValueError('当前任务不接受原地起降参数')
 
 
 class Dispatch:
@@ -149,16 +166,17 @@ class Dispatch:
             logs = [dict(time=item["time"], text=item["text"], level=item["level"])
                     for item in self.history.get(current_id, [])]
             return dict(request={key: val for key, val in self.request.items()
-                                 if key in {"id", "taskId", "mapKey", "state", "message", "expiresAt"}}
+                                 if key in {"id", "taskId", "mapKey", "state", "message", "expiresAt", "vertical"}}
                                 if self.request else None,
                         board=self.board, online=self.online, enabled=True, logs=logs)
 
     def submit(self, body):
-        if not isinstance(body, dict) or set(body) - {"damperDeg"} != {"id", "taskId", "mapKey", "confirmAuto"}:
+        if not isinstance(body, dict) or set(body) - {"damperDeg", "vertical"} != {"id", "taskId", "mapKey", "confirmAuto"}:
             raise ValueError("任务请求字段无效")
         if not isinstance(body["id"], str) or not REQUEST_ID.fullmatch(body["id"]):
             raise ValueError("请求 ID 无效")
         check_damper(body)
+        check_vertical(body)
         task = task_for(self.data, body["taskId"], body["mapKey"])
         if type(body["confirmAuto"]) is not bool or (task["automatic"] and not body["confirmAuto"]):
             raise ValueError("请确认地面解锁后自动起飞")
@@ -256,8 +274,9 @@ class Dispatch:
                 verb = "submit"
                 request.update(sent=True, boot=response["boot"])
                 payload = {key: request[key] for key in ("id", "taskId", "mapKey", "confirmAuto", "boot")}
-                if "damperDeg" in request:
-                    payload["damperDeg"] = request["damperDeg"]
+                for field in ("damperDeg", "vertical"):
+                    if field in request:
+                        payload[field] = request[field]
                 payload["remaining"] = math.ceil(request["deadline"] - time.monotonic())
             else:
                 return

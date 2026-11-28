@@ -5,6 +5,7 @@ source /opt/ros/noetic/setup.bash
 workspace="$(cd -- "$(dirname -- "$(realpath -e -- "${BASH_SOURCE[0]}")")/../../.." && pwd -P)"
 source "$workspace/devel/setup.bash"
 port=11443
+if [[ ${1:-} == --vertical ]]; then port=11452; shift; fi
 if [[ ${1:-} == --indoor6 ]]; then port=11448; shift; fi
 if [[ ${1:-} == --inspection ]]; then port=11450; shift; fi
 if [[ ${1:-} == --inspection-modes ]]; then port=11451; shift; fi
@@ -45,6 +46,16 @@ for _ in $(seq 50); do
   sleep .2
 done
 [ "$ready" -eq 1 ] || { echo '隔离Master未就绪' >&2; exit 1; }
+if [[ $port == 11452 ]]; then
+  rosparam load "$DIR/../indoor_fly_nav.yaml" /drone_nav
+  shift || true
+  cases=(normal zero early_arm map_unknown map_occupied height_limit drift takeover stale_landing landing_drift)
+  if (( $# )); then cases=("$@"); fi
+  for scenario in "${cases[@]}"; do
+    python3 -B -u "$DIR/integration_vertical.py" "$OUT/$scenario" "$scenario" 2>&1 | tee -a "$OUT/integration.log"
+  done
+  exit 0
+fi
 if [[ $port == 11451 ]]; then
   rosparam load "$DIR/../indoor_fly_nav.yaml" /drone_nav
   shift || true

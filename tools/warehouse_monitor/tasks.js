@@ -260,6 +260,27 @@ export function createTasks({ rig, focusRoute, redraw }) {
     const stops = task ? stopLabels(task, closes) : new Map();
     byId("task-details").hidden = !task;
     byId("task-damper-row").hidden = task?.id !== "test_indoor3_5";
+    const fields = byId("task-vertical");
+    fields.hidden = !task?.verticalParameters;
+    if (fields.hidden) fields.replaceChildren();
+    else if (!fields.childElementCount) {
+      for (const [name, spec] of Object.entries(task.verticalParameters)) {
+        const row = document.createElement("div");
+        const term = document.createElement("dt");
+        const description = document.createElement("dd");
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.id = "vertical-" + name;
+        Object.assign(input, {type: "number", min: spec.min, max: spec.max,
+          step: "any", required: true, value: spec.default});
+        label.htmlFor = input.id;
+        label.textContent = spec.label + "（" + spec.unit + "）";
+        term.append(label);
+        description.append(input);
+        row.append(term, description);
+        fields.append(row);
+      }
+    }
     if (task) {
       byId("task-trigger").textContent = task.manual ? "全程遥控手飞"
         : task.automatic
@@ -464,6 +485,14 @@ export function createTasks({ rig, focusRoute, redraw }) {
     const body = { id: nextId, taskId: task.id, mapKey: map.key, confirmAuto };
     const input = byId("task-damper");
     if (task.id === "test_indoor3_5" && input.value !== "") body.damperDeg = input.valueAsNumber;
+    if (task.verticalParameters) {
+      body.vertical = {};
+      for (const name of Object.keys(task.verticalParameters)) {
+        const field = byId("vertical-" + name);
+        if (!field.reportValidity()) return null;
+        body.vertical[name] = field.valueAsNumber;
+      }
+    }
     return body;
   }
 
@@ -483,6 +512,7 @@ export function createTasks({ rig, focusRoute, redraw }) {
     bottomBtn.hidden = true;
   });
 
+  byId("task-vertical").addEventListener("input", () => { nextId = null; });
   byId("task-damper").addEventListener("input", () => { nextId = null; });
   selector.addEventListener("change", () => {
     byId("task-damper").value = "";
@@ -495,9 +525,15 @@ export function createTasks({ rig, focusRoute, redraw }) {
     if (!task) return;
     if (task.id === "test_indoor3_5" && !byId("task-damper").reportValidity()) return;
     const body = payload(task, task.automatic);
+    if (!body) return;
     if (task.automatic) {
       confirmation = body;
-      byId("task-delay").textContent = String(task.delay ?? 3);
+      byId("task-delay").textContent = String(body.vertical?.delay ?? task.delay ?? 3);
+      const summary = byId("task-vertical-confirm");
+      summary.hidden = !body.vertical;
+      if (body.vertical) {
+        summary.textContent = `起飞高度 ${body.vertical.height} m，停稳后悬停 ${body.vertical.hover} s，随后原地慢降。`;
+      }
       dialog.returnValue = "cancel";
       dialog.showModal();
     } else {

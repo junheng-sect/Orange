@@ -138,7 +138,7 @@ class FullState(SquareState):
                     self.stop('降落后重新解锁，本轮不重跑')
                 return
             allowed = ('POSCTL', 'OFFBOARD') if self.phase == 'OFFBOARD_ENTRY' else (
-                ('OFFBOARD',) if self.phase in ('TAKEOFF', 'ROUTE') else ('POSCTL',))
+                ('OFFBOARD',) if self.phase in ('TAKEOFF', 'ROUTE', 'HOVER') else ('POSCTL',))
             if m.mode not in allowed:
                 self.stop('飞手接管/模式改变：' + m.mode)
             if self.phase == 'OFFBOARD_ENTRY':
@@ -150,7 +150,7 @@ class FullState(SquareState):
                 self.stop('预检未结束就解锁，不触发起飞')
             if self.phase == 'WAIT_ARM' and old is not None and not old.armed and m.armed:
                 self.arm_at = time.monotonic()
-            if self.phase in ('COUNTDOWN', 'OFFBOARD_ENTRY', 'TAKEOFF', 'ROUTE') and not m.armed:
+            if self.phase in ('COUNTDOWN', 'OFFBOARD_ENTRY', 'TAKEOFF', 'ROUTE', 'HOVER') and not m.armed:
                 self.stop('飞控上锁，本轮终止')
             if self.phase == 'WAIT_ARM' and self.arm_at is not None and not m.armed:
                 self.stop('解锁后又上锁，本轮终止')
@@ -212,6 +212,7 @@ class FullRunner(GlobalRunner):
     test_name = 'test10'
     route_name = '完整室外综合测试'
     record_prefix = 'test10'
+    arm_prompt = '起飞预检通过：通道6开录包，然后 POSCTL 地面人工解锁；起飞后逐段检查目标，只触发这一轮'
     takeoff_min_odom_z = -math.inf
     route = ROUTE
     holds = HOLDS
@@ -363,16 +364,16 @@ class FullRunner(GlobalRunner):
             phase = self.s.phase
             allowed = {'PREFLIGHT': ('POSCTL',), 'WAIT_ARM': ('POSCTL',),
                        'COUNTDOWN': ('POSCTL',), 'OFFBOARD_ENTRY': ('POSCTL', 'OFFBOARD'),
-                       'TAKEOFF': ('OFFBOARD',), 'ROUTE': ('OFFBOARD',),
+                       'TAKEOFF': ('OFFBOARD',), 'ROUTE': ('OFFBOARD',), 'HOVER': ('OFFBOARD',),
                        'LAND_REQUEST': ('OFFBOARD',),
                        'LANDING': ('OFFBOARD', 'POSCTL') if not f.armed else ('OFFBOARD',)}[phase]
             if f.mode not in allowed:
                 raise Stopped('飞手接管/模式改变：' + f.mode)
             if phase == 'OFFBOARD_ENTRY' and f.mode != 'OFFBOARD' and self.s.offboard_entered_at is not None:
                 raise Stopped('切入 OFFBOARD 后又切出，本轮终止')
-            if phase == 'ROUTE' and self.fc.landed != ExtendedState.LANDED_STATE_IN_AIR:
+            if phase in ('ROUTE', 'HOVER') and self.fc.landed != ExtendedState.LANDED_STATE_IN_AIR:
                 raise Stopped('航线期间飞控不再报在空中')
-            if phase in ('COUNTDOWN', 'OFFBOARD_ENTRY', 'TAKEOFF', 'ROUTE') and not f.armed:
+            if phase in ('COUNTDOWN', 'OFFBOARD_ENTRY', 'TAKEOFF', 'ROUTE', 'HOVER') and not f.armed:
                 raise Stopped('飞控上锁')
             if phase == 'PREFLIGHT' and f.armed:
                 raise Stopped('预检期间已解锁')
@@ -381,7 +382,7 @@ class FullRunner(GlobalRunner):
             if phase in ('LAND_REQUEST', 'LANDING') and self.s.disarmed_at is not None and not self.fc.on_ground():
                 if time.monotonic() - self.s.disarmed_at > 2.:
                     raise Stopped('已上锁但没有新鲜着地确认，不算成功')
-        if self.s.phase == 'ROUTE' or not self.real:
+        if self.s.phase in ('ROUTE', 'HOVER') or not self.real:
             super().guard(stopped=stopped, preparing=preparing)
             self.trace_leg()
         elif self.s.phase == 'TAKEOFF' and self.s.get('gateway_status') != 'READY':
@@ -482,7 +483,7 @@ class FullRunner(GlobalRunner):
             raise Stopped('必须从地面上锁状态启动，不自动上锁/解锁')
         self.reference = self.transform()  # Only capture ONCE, before any arming.
         p = self.ground_geometry()
-        self.goals_map = np.array([p[:3] for p in self.route])
+        self.goals_map = np.array([p[:3] for p in self.route]).reshape(-1, 3)
         r, t = self.reference
         yaw = self.s.pose()[1]
         if np.linalg.norm((r @ np.array([math.cos(yaw), math.sin(yaw), 0.]))[:2]) < .9:
@@ -603,7 +604,7 @@ class FullRunner(GlobalRunner):
 
     def wait_arm(self):
         self.phase('WAIT_ARM')
-        say('起飞预检通过：通道6开录包，然后 POSCTL 地面人工解锁；起飞后逐段检查目标，只触发这一轮')
+        say(self.arm_prompt)
         while self.s.arm_at is None:
             self.guard()
             self.ground_geometry()
@@ -694,6 +695,9 @@ class FullRunner(GlobalRunner):
         return len(self.record['legs']) == len(self.route) and all(
             leg['end'] == 'SUCCEEDED' for leg in self.record['legs'])
 
+    def prepare_for_landing(self):
+        self.reprepare()
+
     def land_once(self):
         self.guard(stopped=True)
         self.check_return()
@@ -711,7 +715,7 @@ class FullRunner(GlobalRunner):
         # nothing. Prepare it again (1 s to READY) and let /drone_nav/land descend inside OFFBOARD at ~0.1 m/s
         # to the takeoff reference, then bounded near-ground velocity press. Fresh PX4 touchdown
         # permits ordinary disarm requests from the gateway (never force-disarm or automatic arm).
-        self.reprepare()
+        self.prepare_for_landing()
         self.guard()
         reply = self.land_start()
         if not reply.success:
@@ -875,9 +879,11 @@ def run_full(a, runner_cls, test_name, state_cls=None):
     for name in ('/drone_nav/prepare', '/drone_nav/check_trajectory',
                  '/drone_nav/prepare_takeoff', '/drone_nav/takeoff', '/drone_nav/land', '/mavros/set_mode'):
         rospy.wait_for_service(name, timeout=10)
-    client = actionlib.SimpleActionClient('/drone_nav/execute_route', ExecuteRouteAction)
-    if not client.wait_for_server(rospy.Duration(10)):
-        raise Stopped('10 s没等到 execute_route')
+    client = None
+    if runner_cls.route:
+        client = actionlib.SimpleActionClient('/drone_nav/execute_route', ExecuteRouteAction)
+        if not client.wait_for_server(rospy.Duration(10)):
+            raise Stopped('10 s没等到 execute_route')
     runner = runner_cls(a, cfg, s, buf, rospy.ServiceProxy('/drone_nav/prepare', Trigger),
                         rospy.ServiceProxy('/drone_nav/check_trajectory', CheckTrajectory), client, fc,
                         rospy.ServiceProxy('/drone_nav/prepare_takeoff', Trigger),

@@ -248,7 +248,8 @@ class Fixture:
             self.publishers['/mavros/state'].publish(f)
         ext = ExtendedState(landed_state=self.landed)
         ext.header.stamp = stamp
-        self.publishers['/mavros/extended_state'].publish(ext)
+        if self.scenario != 'stale_landing' or self.land_timer is None:
+            self.publishers['/mavros/extended_state'].publish(ext)
         e = EstimatorStatus()
         e.header.stamp = stamp
         for k in ('attitude_status_flag', 'velocity_horiz_status_flag', 'velocity_vert_status_flag',
@@ -262,7 +263,8 @@ class Fixture:
             ('/drone_nav/input_status', dict(state=self.input_state, reason='mock fault')),
             ('/drone_nav/executor_status', dict(state=self.exec_state, reason=getattr(self, 'exec_reason', ''))),
             ('/drone_nav/gateway_status', dict(state=self.gw, reason=self.reason, real_output=self.real_output,
-                                              takeoff=self.takeoff_state, land=self.land_state)),
+                                              takeoff=self.takeoff_state, land=self.land_state,
+                                              vertical_test_height=getattr(self, 'vertical_height', None))),
             ('/drone_reloc/status', dict(state='LOCALIZED', valid=True)),
             ('/drone_reloc/result', dict(confirmed=True, map=self.map_id))):
             self.publishers[topic].publish(String(json.dumps(d)))

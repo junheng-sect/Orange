@@ -14,7 +14,7 @@ from threading import Lock, Thread
 import time
 
 from board_connection import fingerprint
-from task_dispatch import REQUEST_ID, TERMINAL, TTL, catalog, check_damper, task_for
+from task_dispatch import REQUEST_ID, TERMINAL, TTL, catalog, check_damper, check_vertical, task_for, vertical_profile
 
 ROOT = Path(__file__).resolve().parent
 HOME = Path.home()
@@ -134,7 +134,8 @@ def snapshot(request_id, error=None):
 def submit(body):
     expected = {"id", "taskId", "mapKey", "confirmAuto", "remaining", "boot"}
     check_damper(body)
-    if set(body) - {"damperDeg"} != expected or type(body["remaining"]) is not int or not 0 < body["remaining"] <= TTL:
+    check_vertical(body)
+    if set(body) - {"damperDeg", "vertical"} != expected or type(body["remaining"]) is not int or not 0 < body["remaining"] <= TTL:
         raise ValueError("下发请求无效或已过期")
     request_id = body["id"]
     task = task_for(catalog(ROOT, board=True), body["taskId"], body["mapKey"])
@@ -142,7 +143,7 @@ def submit(body):
         raise ValueError("请确认自动起飞任务")
     previous = get_record(request_id)
     if previous:
-        if "taskId" in previous and any(previous.get(key) != body.get(key) for key in ("taskId", "mapKey", "confirmAuto", "damperDeg")):
+        if "taskId" in previous and any(previous.get(key) != body.get(key) for key in ("taskId", "mapKey", "confirmAuto", "damperDeg", "vertical")):
             raise ValueError("请求 ID 已用于另一任务")
         return
     if active_record():
@@ -154,8 +155,9 @@ def submit(body):
                  message="板端已收到任务，等待飞控连接", deadline=time.monotonic() + body["remaining"],
                  safeGround=False, logs=[])
     append_log(value["logs"], value["message"], "info")
-    if "damperDeg" in body:
-        value["damperDeg"] = body["damperDeg"]
+    for field in ("damperDeg", "vertical"):
+        if field in body:
+            value[field] = body[field]
     save(value)
     write(STATE / "current.json", dict(id=request_id, boot=BOOT))
     command = ENV + " && exec " + shlex.join(["python3", "-B", str(Path(__file__).resolve()), "run", request_id])
@@ -216,12 +218,17 @@ def rpc(verb, body):
         return snapshot(request_id)
 
 
-def script_command(task, damper_deg=None):
+def script_command(task, damper_deg=None, vertical=None):
     if task.get("mission"):
         return ["rosrun", "drone_inspection", "run_mission", "--mission", "missions/" + task["mission"]]
     if task["id"] == "test12_ywl":
         return [str(SCRIPTS / "nav_test12.sh"), "--ywl"]
     command = [str(SCRIPTS / ("nav_" + task["id"] + ".sh"))]
+    if task["id"] == vertical_profile.TASK:
+        vertical_profile.validate(vertical)
+        for key in vertical_profile.PARAMETERS:
+            command += ["--" + key, str(vertical[key])]
+        return command
     if task["id"].startswith("test_indoor"):
         command += ["--map", str(MAPS / task["mapId"]),
                     "--nav-config", str(SCRIPTS / "nav_test/indoor_fly_nav.yaml"),
@@ -367,6 +374,7 @@ class Progress:
         self.finished = None
         self.stop_refused = False
         self.clean_exit = False
+        self.vertical_error = None
         self.manual_ready = False
         self.video_state = ""
         self.recording = ""
@@ -409,6 +417,8 @@ class Progress:
                         continue
                     except (ValueError, KeyError, TypeError):
                         pass
+                if "原地起降中止：" in line and not self.vertical_error:
+                    self.vertical_error = line.split("原地起降中止：", 1)[1]
                 append_log(self.logs, line)
                 if "AprilTag 观察 " in line:
                     self.tag_coverage = line[line.index("AprilTag 观察 "):][:250]
@@ -448,7 +458,7 @@ class Progress:
                 if "已解锁、网关在地面预发送" in line or line.endswith("阶段：COUNTDOWN"):
                     self.finished = None
 
-    def stage(self, task, health, has_flown):
+    def stage(self, task, health, has_flown, vertical=None):
         with self.lock:
             phase, note, finished = self.phase, self.note, self.finished
             if task.get("mission") and self.mission_state:
@@ -496,6 +506,17 @@ class Progress:
                     return "preparing", health["observer_note"]
                 return "preparing", note or "等待录包器、FAST-LIO2 和室外重定位"
             if task["automatic"]:
+                if task["id"] == vertical_profile.TASK:
+                    if self.vertical_error:
+                        return "action_done", self.vertical_error
+                    if phase == "DONE":
+                        return "action_done", "已确认着地上锁，等待收尾"
+                    labels = {"COUNTDOWN": "人工解锁后倒计时", "OFFBOARD_ENTRY": "切入 OFFBOARD",
+                              "TAKEOFF": f"原地起飞 {vertical['height']:g} m",
+                              "HOVER": f"原地悬停 {vertical['hover']:g} s",
+                              "LAND_REQUEST": "准备原地慢降", "LANDING": "原地慢降，等待着地上锁"}
+                    if phase in labels:
+                        return "running", labels[phase]
                 if phase == "DONE" or finished:
                     return "action_done", finished or note
                 if task["id"] == "test_indoor6":
@@ -514,7 +535,8 @@ class Progress:
                     return "action_done", note
                 if preflight_passed and health["ready"] and health["ground"]:
                     if health["mode"] == "POSCTL":
-                        return "wait_arm", "预检通过。按通道 6 录包，地面遥控解锁后约 3 s 自动起飞"
+                        delay = vertical["delay"] if vertical else 3
+                        return "wait_arm", f"预检通过。按通道 6 录包，地面遥控解锁后约 {delay:g} s 自动起飞"
                     return "preparing", "保持地面上锁，用遥控器切到定点模式（POSCTL）"
             elif finished or (has_flown and health["ground"]):
                 return "action_done", finished or note
@@ -594,7 +616,7 @@ def supervise(request_id):
         if task.get("mission"):
             env["WAREHOUSE_MISSION_SHA256"] = task["missionSha256"]
         env.pop("NAV_TEST_IN_TMUX", None)
-        child = subprocess.Popen(script_command(task, value.get("damperDeg")), cwd=SCRIPTS, env=env, stdin=subprocess.DEVNULL,
+        child = subprocess.Popen(script_command(task, value.get("damperDeg"), value.get("vertical")), cwd=SCRIPTS, env=env, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, errors="replace", start_new_session=True)
     progress = Progress()
@@ -606,7 +628,7 @@ def supervise(request_id):
     while child.poll() is None:
         health = flight.snapshot(task)
         has_flown = has_flown or bool(health["armed"] and health["landed"] == 2)
-        state, message = progress.stage(task, health, has_flown)
+        state, message = progress.stage(task, health, has_flown, value.get("vertical"))
         if not health["connected"]:
             message = "飞控状态中断，等待新的飞控数据"
         with progress.lock:
@@ -662,6 +684,9 @@ def supervise(request_id):
         result = progress.mission_state if task.get("mission") else None
         if result and result["end"] in {"ABORTED", "INTERRUPTED"}:
             final_message = (result.get("reason") or result["end"]) + (" · 已收尾" if cleaned else " · 收尾异常")
+            cleaned = False
+        if task["id"] == vertical_profile.TASK and (progress.vertical_error or progress.phase != "DONE"):
+            final_message = progress.vertical_error or "原地起降未完成"
             cleaned = False
         append_log(combined, final_message, "ok" if cleaned else "error")
         value.update(state="done" if cleaned else "failed", safeGround=False,

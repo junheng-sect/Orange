@@ -139,6 +139,7 @@
           <div id="task-damper-row" hidden><dt><label for="task-damper">减振球硬度</label></dt><dd><input id="task-damper" type="number" min="0" max="100" step="1" placeholder="未标注"></dd></div>
           <div><dt>结束动作</dt><dd id="task-finish"></dd></div>
         </dl>
+        <dl id="task-vertical" class="task-facts" hidden></dl>
         <canvas id="task-diagram" role="img" aria-label="相对任务的飞行示意"></canvas>
         <ol id="task-stops" aria-label="路线停留点" hidden></ol>
         <div class="group">
@@ -166,6 +167,7 @@
         <form method="dialog">
           <h2>确认自动起飞任务</h2>
           <p>保持飞机着地上锁，等页面提示预检通过。之后在定点模式用遥控器解锁，脚本将在<span id="task-delay">3</span> 秒后自动切 OFFBOARD 并起飞。</p>
+          <p id="task-vertical-confirm" hidden></p>
           <div class="group">
             <button value="cancel" autofocus>返回</button>
             <button value="confirm" class="primary">确认自动起飞流程</button>
