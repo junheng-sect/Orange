@@ -1,6 +1,7 @@
 """Exercise the vertical runner over loopback ROS with a mock FCU and no hardware."""
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -8,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import rospy
+import yaml
 from mavros_msgs.msg import ParamValue
 from mavros_msgs.srv import ParamGet, ParamGetResponse
 from std_msgs.msg import Bool
@@ -18,7 +20,7 @@ from vertical_profile import MAP, TASK
 
 
 class VerticalFixture(Fixture):
-    climb_height = vertical_height = .65
+    climb_height = .65
 
     def publish(self):
         phase = self.runner.s.phase if self.runner else None
@@ -39,16 +41,38 @@ class VerticalFixture(Fixture):
         return super().check(req)
 
 
+def verify_launch_reload(directory):
+    # Apply the parameters roslaunch will upload, with both launches sharing one master.
+    profile = yaml.safe_load((Path(__file__).resolve().parents[1] / 'indoor_fly_nav.yaml').read_text())
+    for name, values, expected in (
+            ('vertical', {'takeoff_height': .73, 'vertical_test_guard': True}, (.73, True)),
+            ('indoor6', {'takeoff_height': .50}, (.50, False)),
+            ('legacy', {}, (1., False))):
+        path = directory / (name + '.yaml')
+        path.write_text(yaml.safe_dump({'config': dict(profile['config'], **values)}))
+        params = yaml.safe_load(subprocess.check_output([
+            'roslaunch', '--dump-params', 'drone_navigation', 'navigation.launch', 'config:=' + str(path)], text=True))
+        for key in ('takeoff_height', 'vertical_test_guard'):
+            full = '/drone_nav/config/' + key
+            if full in params:
+                rospy.set_param(full, params[full])
+        assert tuple(rospy.get_param('/drone_nav/config/' + key) for key in
+                     ('takeoff_height', 'vertical_test_guard')) == expected, name
+
+
 def main(out, scenario):
     assert os.environ['ROS_MASTER_URI'] == 'http://127.0.0.1:11452'
     rospy.init_node('vertical_fixture')
+    if scenario == 'normal':
+        out.mkdir(parents=True, exist_ok=True)
+        verify_launch_reload(out)
     fixture = VerticalFixture()
     fixture.reset(scenario)
     fixture.map_id = MAP
     fixture.position[:2] = [.38, -.12]
     fixture.yaw = .35
     height = 1.8 if scenario == 'height_limit' else fixture.climb_height
-    fixture.vertical_height = height
+    fixture.vertical_status = dict(vertical_test_height=height, vertical_test_land_vel=.1)
     cfg = rospy.get_param('/drone_nav/config')
     cfg.update(map_id=MAP, takeoff_height=height, vertical_test_guard=True)
     rospy.set_param('/drone_nav/config', cfg)

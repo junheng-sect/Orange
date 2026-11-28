@@ -67,6 +67,8 @@ class Gateway:
         rospy.Subscriber('/drone_nav/arrived',Empty,self.on_arrived,queue_size=1)
         rospy.Subscriber('/mavros/extended_state',ExtendedState,self.on_ext,queue_size=1)
         self.vertical_test = self.c.get('vertical_test_guard') is True
+        self.vertical_status = (dict(vertical_test_height=self.takeoff_h, vertical_test_land_vel=self.land_v)
+                                if self.vertical_test else {})
         self.vertical_guard_at = -math.inf
         self.vertical_aborted = False
         if self.vertical_test:
@@ -327,9 +329,8 @@ class Gateway:
             if self.climb is not None and not ready:self.climb=None;self.takeoff_state='STOPPED' # never resume a climb clock that kept running
             if self.land is not None and not ready:self.land=None;self.land_state='STOPPED' # never resume a descent clock that kept running
             status(self.stat,'READY' if ready else ('FAULT' if self.fault else 'PREPARED' if self.prepared else 'ALIGNING'),reason=self.fault,real_output=self.real,takeoff=self.takeoff_state,land=self.land_state,
-                   vertical_test_height=self.takeoff_h if self.vertical_test else None,
                    land_target_z=self.land_target_z,land_ground_z=self.ground_z,land_limit_z=self.land_limit_z,land_limit_reached=self.land_limit_reached,
-                   land_z_velocity_only=self.land_velocity_only,land_command_vz=float(self.hold_v[2]),land_disarm_requests=self.land_disarm_count,land_disarm_result=self.land_disarm_result)
+                   land_z_velocity_only=self.land_velocity_only,land_command_vz=float(self.hold_v[2]),land_disarm_requests=self.land_disarm_count,land_disarm_result=self.land_disarm_result, **self.vertical_status)
             if not self.prepared or not pxok or self.hold_p is None:return
             if self.real and (self.state is None or wall-self.state_at>2. or not self.state.connected):return
             acc=None

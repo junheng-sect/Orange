@@ -8,6 +8,9 @@
   <arg name="max_vel" default="0.5"/><arg name="max_acc" default="0.5"/><arg name="max_vel_z" default="-1"/><arg name="max_acc_z" default="-1"/><arg name="replan_ts_scale" default="1.0"/>
   <!-- Age limit (s) for LIO odometry/cloud in the Python nodes and EGO alike; this arg is the one source, it overrides the yaml -->
   <arg name="odom_timeout" default="0.5"/>
+  <!-- Reset run-specific keys on the resident master before applying this launch's YAML. -->
+  <param name="drone_nav/config/vertical_test_guard" value="false" type="bool"/>
+  <param name="drone_nav/config/takeoff_height" value="1.0" type="double"/>
   <rosparam ns="drone_nav" command="load" file="$(arg config)"/>
   <param name="drone_nav/config/allow_short_goals" value="$(arg allow_short_goals)" type="bool"/>
   <param name="drone_nav/config/odom_timeout" value="$(arg odom_timeout)" type="double"/>

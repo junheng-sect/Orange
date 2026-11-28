@@ -264,7 +264,7 @@ class Fixture:
             ('/drone_nav/executor_status', dict(state=self.exec_state, reason=getattr(self, 'exec_reason', ''))),
             ('/drone_nav/gateway_status', dict(state=self.gw, reason=self.reason, real_output=self.real_output,
                                               takeoff=self.takeoff_state, land=self.land_state,
-                                              vertical_test_height=getattr(self, 'vertical_height', None))),
+                                              **getattr(self, 'vertical_status', {}))),
             ('/drone_reloc/status', dict(state='LOCALIZED', valid=True)),
             ('/drone_reloc/result', dict(confirmed=True, map=self.map_id))):
             self.publishers[topic].publish(String(json.dumps(d)))

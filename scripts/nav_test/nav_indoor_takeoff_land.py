@@ -11,7 +11,7 @@ import rospy
 from mavros_msgs.srv import ParamGet
 from std_msgs.msg import Bool
 
-from drone_navigation.core import wrap
+from drone_navigation.core import check_goal_bounds, wrap
 from nav_outdoor_full import FullRunner, Stopped, run_full, say
 from vertical_profile import MAP, MAX_MAP_Z, PARAMETERS, TASK, arguments, validate
 
@@ -39,6 +39,7 @@ class VerticalFlight(FullRunner):
         if (Path(self.cfg['map_id']).name != MAP or self.cfg.get('vertical_test_guard') is not True
                 or self.cfg.get('takeoff_height') != self.a.height
                 or self.s.get('gateway_status', 'vertical_test_height') != self.a.height
+                or self.s.get('gateway_status', 'vertical_test_land_vel') != .1
                 or self.cfg.get('max_vel_z') != .3 or self.cfg.get('max_acc_z') != .3
                 or self.cfg.get('allow_unknown_above') is not False):
             raise Stopped('室内地图、网关起飞高度或竖直限制与本趟配置不一致')
@@ -59,25 +60,41 @@ class VerticalFlight(FullRunner):
         self.flight['MPC_TKO_RAMP_T'] = values[0] if values else None
         self.save()
 
+    def remember_home(self, position, yaw):
+        self.home, self.home_yaw = position.copy(), yaw
+        self.flight.update(home_odom=position.tolist(),
+                           home_map=(self.reference[0] @ position + self.reference[1]).tolist(),
+                           home_yaw_rad=yaw)
+
     def ground_geometry(self):
         p, yaw, speed = self.s.pose()
         if speed > .1:
             raise Stopped('地面未静止')
         if self.home is None:
-            self.home, self.home_yaw = p.copy(), yaw
-            self.flight.update(home_odom=p.tolist(), home_map=(self.reference[0] @ p + self.reference[1]).tolist(),
-                               home_yaw_rad=yaw)
+            self.remember_home(p, yaw)
         elif np.linalg.norm(p - self.home) > .05:
             raise Stopped('地面预检后起飞位置移动超过 5 cm')
         return p
 
+    def wait_arm(self):
+        super().wait_arm()
+        # Preflight allows up to 5 cm of ground motion. Measure drift from the armed start.
+        p, yaw, _ = self.s.pose()
+        self.remember_home(p, yaw)
+        check_goal_bounds([p + [0., 0., self.a.height]], self.cfg, ['解锁时预计起飞终点'])
+        self.check_map_ceiling()
+        self.save()
+
     def expected_takeoff_map_z(self):
         return self.flight['home_map'][2] + self.reference[0][2, 2] * self.a.height
 
-    def preflight_targets(self):
+    def check_map_ceiling(self):
         if self.expected_takeoff_map_z() > MAX_MAP_Z:
             raise Stopped('预计起飞终点超过室内地图限高 1.70 m')
-        return self.goals, self.names  # FullRunner adds the mandatory takeoff endpoint.
+
+    def preflight_targets(self):
+        self.check_map_ceiling()
+        return super().preflight_targets()  # FullRunner adds the takeoff endpoint to the empty route.
 
     def guard(self, **kwargs):
         super().guard(**kwargs)
