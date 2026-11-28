@@ -35,7 +35,8 @@ test_bringup() {
 test_after_fusion() {
   (( INSPECTION_CAMERA )) || return 0
   log "检查巡检相机双路图像与读码服务"
-  python3 -m drone_inspection.runtime probe 2>&1 | tee -a "$LOG"
+  local TIMEFORMAT='相机 probe 进程总耗时 %3R s'
+  { time python3 -m drone_inspection.runtime probe; } 2>&1 | tee -a "$LOG"
 }
 run_test() {
   nt_check_chain || return 1

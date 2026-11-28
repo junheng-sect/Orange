@@ -179,8 +179,8 @@ def main():
 
     # 唤醒 shell，确认有回显再写。PX4 只在收到不带 RESPOND 的 SERIAL_CONTROL 时才关 shell，
     # 所以中途失败或被 SIGTERM/Ctrl+C 打断也要发这一条，不然飞控上的 nsh 会一直开着
-    shell_send(m, "\n")
     try:
+        shell_send(m, "\n")
         if "nsh>" not in shell_read(m, 1.0):
             fail("MAVLink shell 没有回显（没等到 nsh> 提示符）")
         # 卡在整秒边界发出：nsh 收到换行即执行，date -s 只有秒精度

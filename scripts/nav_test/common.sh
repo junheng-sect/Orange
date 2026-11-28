@@ -358,14 +358,16 @@ nt_bringup() {
   local _max_vel _max_acc _max_vel_z _max_acc_z
   local probe="$NT_DIR/preflight_probe.py"
   local _pf_args=(--map "$MAP" --config "$NAV_CONFIG" --reloc-config "$RELOC_CONFIG"
-                  --output "$runtime_config" --task "$TEST_NAME" --height "${HEIGHT:-}" --ev-mode "$EV_MODE")
+                  --output "$runtime_config" --error-file "$RUN_DIR/preflight.error" --task "$TEST_NAME" --height "${HEIGHT:-}" --ev-mode "$EV_MODE")
   if (( LIVE_GRID_ONLY )); then _pf_args+=(--live-grid-only); else _prior_file="$MAP/prior_grid.bin"; fi
   if (( PREVIEW )); then _pf_args+=(--preview); fi
   if declare -F test_preflight_args >/dev/null; then test_preflight_args; fi
   source "$DIR/ros_net.sh" || { err "ROS 核心地址不在（nmcli con up ros-core）"; finish 1 force; }
   flock -n /tmp/mid360s_fusion.lock true || { err "fusion.sh / start_handheld_test.sh 已在运行，先停掉"; finish 1 force; }
   if ! python3 -B "$probe" preflight "${_pf_args[@]}" >"$RUN_DIR/preflight.json" 2> >(tee -a "$LOG" >&2); then
-    err "启动预检失败，详见 $LOG"; finish 1 force
+    local reason="启动预检失败，详见 $LOG"
+    if [[ -s "$RUN_DIR/preflight.error" ]]; then reason=$(<"$RUN_DIR/preflight.error"); fi
+    err "$reason"; finish 1 force
   fi
   if ! read -r _prior_map_sha _max_vel _max_acc _max_vel_z _max_acc_z < <(
     python3 -B -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["prior_map_sha"] or "-", *r["limits"])' "$RUN_DIR/preflight.json"

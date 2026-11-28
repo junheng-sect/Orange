@@ -227,13 +227,14 @@ def wait_odom(a):
             rospy.init_node('nav_test_wait_odom', anonymous=True, disable_signals=True, disable_rostime=True)
             rospy.Subscriber('/fastlio/odom_world', Odometry, lambda _: received.set(), queue_size=1)
             while not rospy.is_shutdown():
+                arrived = received.wait(.2)
                 try:
                     fields = stat.read_text().rsplit(')', 1)[1].split()
                     if fields[0] == 'Z' or fields[19] != start:
                         return 1
                 except FileNotFoundError:
                     return 1
-                if received.wait(.2):
+                if arrived:
                     return 0
     except Deadline:
         return 2
@@ -248,6 +249,7 @@ def main():
     pf.add_argument('--config', required=True, type=Path)
     pf.add_argument('--reloc-config', required=True)
     pf.add_argument('--output', required=True)
+    pf.add_argument('--error-file', type=Path)
     pf.add_argument('--task', required=True)
     pf.add_argument('--height', default='')
     pf.add_argument('--ev-mode', choices=('pose','odom'), required=True)
@@ -285,7 +287,10 @@ def main():
     try:
         return a.run(a)
     except (ValueError, TypeError, KeyError, OSError, yaml.YAMLError) as exc:
-        report('[FAIL] ' + str(exc))
+        if a.command == 'preflight' and a.error_file:
+            a.error_file.write_text(str(exc))
+        else:
+            report('[FAIL] ' + str(exc))
         return 3 if a.command == 'check-ev-ctrl' else 1
 
 

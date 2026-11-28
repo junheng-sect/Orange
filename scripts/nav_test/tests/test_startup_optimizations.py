@@ -88,7 +88,7 @@ class UnitTests(unittest.TestCase):
 class RosTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        import rosgraph
+        import xmlrpc.client
         import rospy
         from mavros_msgs.msg import State
         from mavros_msgs.srv import ParamGet, ParamGetResponse
@@ -113,7 +113,8 @@ class RosTests(unittest.TestCase):
         cls.addClassCleanup(cleanup)
         for _ in range(100):
             try:
-                rosgraph.Master('/startup_fixture').getPid()
+                with xmlrpc.client.ServerProxy(os.environ['ROS_MASTER_URI']) as master:
+                    master.getPid('/startup_fixture')
                 break
             except OSError:
                 time.sleep(.05)
@@ -191,10 +192,26 @@ class RosTests(unittest.TestCase):
             (folder/'config.yaml').write_text(yaml.safe_dump(doc))
             (folder/'ros_net.sh').touch()
             (folder/'fusion.sh').touch()
+            command = ['bash', str(NAV/'tests/startup_supervisor_fixture.sh'), str(NAV), tmp]
+            # Signal during the odom helper cold start, while the EV service is still pending.
+            type(self).delay = 5
+            try:
+                child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for _ in range(200):
+                    if (folder/'run/wait.pid').is_file() or child.poll() is not None:
+                        break
+                    time.sleep(.025)
+                child.send_signal(signal.SIGTERM)
+                output, _ = child.communicate(timeout=15)
+                self.assertEqual(child.returncode, 143, output)
+                self.assertTrue((folder/'identities/ev.pid').is_file(), output)
+                self.assertFalse(any((folder/'identities').glob('*.alive')), output)
+                self.assertFalse((folder/'gateway.started').exists(), output)
+            finally:
+                type(self).delay = 0
             for value, expected in ((3, 1), (15, 0)):
                 type(self).value = value
-                result = subprocess.run(['bash', str(NAV/'tests/startup_supervisor_fixture.sh'), str(NAV), tmp],
-                                        capture_output=True, text=True, timeout=30)
+                result = subprocess.run(command, capture_output=True, text=True, timeout=30)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
                 self.assertIn('重定位完成', result.stdout, result.stderr)
                 self.assertEqual('步骤 4/4' in result.stdout, value == 15)

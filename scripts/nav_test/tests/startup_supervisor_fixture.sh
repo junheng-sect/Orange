@@ -16,15 +16,19 @@ RELOC_CONFIG="$MAP/reloc.yaml" NAV_CONFIG="$MAP/config.yaml"
 PF_EV_CHECK="$RUN_DIR/ev.pid" PF_WAIT_ODOM="$RUN_DIR/wait.pid"
 PF_FUSION="$RUN_DIR/fusion.pid" PF_RELOC="$RUN_DIR/reloc.pid" PF_NAV="$RUN_DIR/nav.pid"
 PF_CAR="$RUN_DIR/car.pid"
+PF_CAMERA="$RUN_DIR/camera.pid"
+trap 'finish 143 force' TERM
 test_desc() { echo fixture; }
-test_bringup() { touch "$OUT/camera.started"; }
-test_after_fusion() { [[ -e "$OUT/camera.started" ]]; }
+test_bringup() { start_child "$PF_CAMERA" "$OUT/camera.log" camera; }
+test_after_fusion() { child_pid "$PF_CAMERA" >/dev/null; }
+test_cleanup() { stop_child "$PF_CAMERA" "相机" TERM 5; }
 # Use the production pidfile launcher for every child. Substitute idle workers
 # for the hardware and gateway and record whether the gateway was ever started.
 eval "$(declare -f start_child | sed '1s/start_child/original_start_child/')"
 start_child() {
   case $1 in
-    "$PF_FUSION"|"$PF_RELOC"|"$PF_NAV")
+    "$PF_CAMERA"|"$PF_FUSION"|"$PF_RELOC"|"$PF_NAV")
+      if [[ $1 == "$PF_FUSION" ]]; then child_pid "$PF_CAMERA" >/dev/null || exit 7; fi
       [[ $1 != "$PF_NAV" ]] || touch "$OUT/gateway.started"
       original_start_child "$1" "$2" python3 -c '
 import os, signal, sys
