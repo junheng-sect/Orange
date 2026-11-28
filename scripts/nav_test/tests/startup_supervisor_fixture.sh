@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Real common.sh supervisor, private master and synthetic latched telemetry.
+# shellcheck disable=SC2034,SC1091
 source "$1/common.sh"
 DIR=$2
 MAP=$2
@@ -8,7 +9,7 @@ NT_LOG_DIR=$2
 RUN_DIR=$2/run
 mkdir -p "$RUN_DIR"
 LOG="$OUT/nav_test.log"
-ROS_SETUP=/dev/null WS_SETUP=/dev/null
+ROS_SETUP="$DIR/ros_net.sh" WS_SETUP="$DIR/ros_net.sh"
 EV_MODE=odom LIVE_GRID_ONLY=1 NT_DLL=0 NT_RAW_LIDAR=0 PREVIEW=1
 PREVIEW_RADIUS=.4 PREVIEW_HALF_HEIGHT=.3 MAP_FRAME='' TEST_NAME=fixture
 RELOC_CONFIG="$MAP/reloc.yaml" NAV_CONFIG="$MAP/config.yaml"

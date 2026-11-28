@@ -196,7 +196,7 @@ class RosTests(unittest.TestCase):
                 result = subprocess.run(['bash', str(NAV/'tests/startup_supervisor_fixture.sh'), str(NAV), tmp],
                                         capture_output=True, text=True, timeout=30)
                 self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
-                self.assertIn('重定位完成', result.stdout)
+                self.assertIn('重定位完成', result.stdout, result.stderr)
                 self.assertEqual('步骤 4/4' in result.stdout, value == 15)
                 self.assertEqual((folder/'gateway.started').exists(), value == 15)
                 self.assertFalse(any((folder/'identities').glob('*.alive')))
