@@ -1,4 +1,5 @@
 """全局2D候选 + 六自由度点到面匹配。保留独立空间峰，失败不输出有效变换。"""
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 import os
@@ -10,6 +11,7 @@ import numpy as np
 from drone_mapping import mapio as bm
 from .geometry import exp, rotz, yaw, wrap, transform, angle
 from .settings import load
+from .search import coarse_to_fine, spatial_peaks
 
 NN_REACH=.15
 from .cache import cache_key, cache_valid
@@ -135,6 +137,19 @@ class MapModel:
         if not self.cand.any():raise ValueError('地图没有可搜索的地面候选'+('（起飞区内）' if c['zone_radius']>0 else ''))
         self.load_s=time.monotonic()-tic
 
+    def configure_search(self, workers):
+        if workers not in (1, 2, 4):
+            raise ValueError('匹配线程数应为 1、2 或 4')
+        self.search_workers = workers
+        cv2.setNumThreads(1)
+
+    def ordered_map(self, function, items):
+        workers = getattr(self, 'search_workers', 1)
+        if workers == 1 or len(items) <= 1:
+            return list(map(function, items))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(function, items))
+
     def _crop(self,P):
         """室外大图：只留地图原点（起飞区）水平 crop_radius 内、地面 −crop_below～+crop_above 的点；
         地面在这一块里重新拟合（局部地面），地面点和其余点分别按 ground_voxel / map_voxel 降采样（0 不降）"""
@@ -168,28 +183,37 @@ class MapModel:
             if sc[i]>best[0]:best=(float(sc[i]),(gx.ravel()[i],gy.ravel()[i],a))
         return best
 
-    def global2d(self,px,py):
+    def global2d(self,px,py,dense=False):
         c=self.cfg;k=1
         while np.count_nonzero(self.cand[::k,::k])>c['max_cands']:k+=1
         ii,jj=np.nonzero(self.cand[::k,::k]);step=k*c['res']
         cx,cy=self.ox+(jj*k+.5)*c['res'],self.oy+(ii*k+.5)*c['res']
         lik=self.lik if step<=.1+1e-9 else np.exp(-self.dist**2/(2*(step/2)**2)).astype('f4')
-        sl=slice(None,None,max(1,len(px)//300));peaks=[]
-        for th in np.radians(np.arange(-180,180,c['yaw_step_deg'])):
-            sc=self.score(cx,cy,th,px[sl],py[sl],lik).copy()
-            # Keep multiple spatial maxima for the SAME yaw, then cluster across yaw.
-            for _ in range(3):
-                q=int(np.argmax(sc))
-                if sc[q]<0:break
-                peaks.append((float(sc[q]),cx[q],cy[q],th))
-                sc[(cx-cx[q])**2+(cy-cy[q])**2<.5**2]=-1
+        sl=slice(None,None,max(1,len(px)//300))
+        angles = np.radians(np.arange(-180, 180, c['yaw_step_deg']))
+        fast = hasattr(self, 'search_workers') and not dense
+        peaks = None
+        if fast:
+            peaks = coarse_to_fine(self, cx, cy, ii*k, jj*k, k, lik,
+                                   px[sl], py[sl], angles, self.ordered_map)
+            if not peaks:
+                return self.global2d(px, py, dense=True)
+        else:
+            def dense_peaks(th):
+                scores = self.score(cx, cy, th, px[sl], py[sl], lik)
+                return spatial_peaks(scores, cx, cy, th)
+            peaks = [p for group in self.ordered_map(dense_peaks, angles) for p in group]
         peaks.sort(reverse=True);distinct=[]
         for p in peaks:
             if all(math.hypot(p[1]-q[1],p[2]-q[2])>.5 or abs(wrap(p[3]-q[3]))>math.radians(15) for q in distinct):distinct.append(p)
         sl=slice(None,None,max(1,len(px)//1000))
+        if fast and (len(distinct) < 2 or distinct[1][0] >= .98*distinct[0][0]):
+            return self.global2d(px, py, dense=True)
         top=[p for p in distinct[:c['n_candidates']] if p[0]>=c['candidate_ratio']*distinct[0][0]]
+        if fast and len(top) < 2:
+            return self.global2d(px, py, dense=True)
         refined=[self.refine2d(p[1:],px[sl],py[sl],max(.1,step)) for p in top]
-        return dict(cands=len(cx),step=step,peaks=refined,ratio=distinct[1][0]/max(distinct[0][0],1e-12) if len(distinct)>1 else 0.)
+        return dict(cands=len(cx),step=step,peaks=refined,fallback=dense,ratio=distinct[1][0]/max(distinct[0][0],1e-12) if len(distinct)>1 else 0.)
 
     def zsearch(self,Q,x,y,th,zc,span):
         base=Q@rotz(th).T+[x,y,0]
@@ -286,25 +310,49 @@ def relocalize(M,cloud,c,hint=None):
             if d>cfg['zone_radius']:b.append('在起飞区外：离原点水平 %.2f m > %.1f m'%(d,cfg['zone_radius']))
             if abs(ic['t'][2])>cfg['zone_height']:b.append('在起飞区外：高度 %+.2f m 超过 ±%.1f m'%(ic['t'][2],cfg['zone_height']))
         return b
-    trials=[]
-    starts=[]
+    ki='inlier_v' if cfg['split_ground'] else 'inlier'
+    def fit_seed(job):
+        p0, th, R0, delta = job
+        offset = math.radians(delta)
+        initial = rotz(offset) @ R0 if R0 is not None else None
+        return M.icp(Q, [*p0, th + offset], R0=initial)
+
+    def best_trial(seeds, s2):
+        ic = max(seeds, key=lambda a: (a[ki], -a['rmse']))
+        # Outdoor ranking uses the score at the refined pose.
+        if cfg['split_ground']:
+            s2 = float(M.score(np.array([ic['t'][0]]), np.array([ic['t'][1]]),
+                               yaw(ic['R']), px, py)[0])
+        return ic, s2
+
+    def fit_peak(peak):
+        s2, (x, y, th) = peak
+        p0 = [x, y, M.zsearch(Q, x, y, th, zc, span)]
+        return best_trial([fit_seed((p0, th, None, a)) for a in (0, -1, 1)], s2)
+
     if use_hint:
         from .geometry import unpack
+        jobs, scores = [], []
         for candidate in hint['candidates'][:cfg['n_candidates']]:
-            R0,tr0=unpack(candidate);p0=R0@c+tr0;th=yaw(R0)
-            s2=float(M.score(np.array([p0[0]]),np.array([p0[1]]),th,px,py)[0])
-            starts.append((s2,p0,th,R0))
+            R0, tr0 = unpack(candidate)
+            p0, th = R0 @ c + tr0, yaw(R0)
+            scores.append(float(M.score(p0[:1], p0[1:2], th, px, py)[0]))
+            jobs.extend((p0, th, R0, delta) for delta in (0, -1, 1))
+        fits = M.ordered_map(fit_seed, jobs)
+        trials = [best_trial(fits[3*i:3*i+3], s2) for i, s2 in enumerate(scores)]
     else:
-        for s2,(x,y,th) in g['peaks']:
-            starts.append((s2,np.array([x,y,M.zsearch(Q,x,y,th,zc,span)]),th,None))
-    ki='inlier_v' if cfg['split_ground'] else 'inlier'
-    for s2,p0,th,R0 in starts:
-        seeds=[M.icp(Q,[*p0,th+math.radians(a)],R0=rotz(math.radians(a))@R0 if R0 is not None else None) for a in (0,-1,1)]
-        ic=max(seeds,key=lambda a:(a[ki],-a['rmse']))
-        # 室外墙层多是树丛，粗搜格点差几厘米、一两度分数就掉（实测同一静止位置 0.32～0.71）；在精配后的位置上重算（真解 0.62～0.73）
-        if cfg['split_ground']:s2=float(M.score(np.array([ic['t'][0]]),np.array([ic['t'][1]]),yaw(ic['R']),px,py)[0])
-        trials.append((ic,s2))
-    uniq,ambiguity=rank_hypotheses(trials,vertical=bool(cfg['split_ground']))
+        trials = M.ordered_map(fit_peak, g['peaks'])
+    vertical = bool(cfg['split_ground'])
+    uniq, ambiguity = rank_hypotheses(trials, vertical=vertical)
+    if (not use_hint and hasattr(M, 'search_workers') and not g['fallback'] and
+            (ambiguity > cfg['amb_max'] or bad(*uniq[0]))):
+        # Retain exact ICP fits when the dense fallback returns the same seed.
+        fitted = dict(zip(g['peaks'], trials))
+        g = M.global2d(px, py, dense=True)
+        new = [p for p in g['peaks'] if p not in fitted]
+        fitted.update(zip(new, M.ordered_map(fit_peak, new)))
+        trials = [fitted[p] for p in g['peaks']]
+        uniq, ambiguity = rank_hypotheses(trials, vertical=vertical)
     ic,s2=uniq[0]
     reasons=bad(ic,s2)
     if ambiguity>cfg['amb_max']:reasons.append('竞争解歧义 %.3f > %.3f'%(ambiguity,cfg['amb_max']))
@@ -316,6 +364,7 @@ def relocalize(M,cloud,c,hint=None):
                 n_cand=len(trials),cands=g['cands'],step=g['step'],n_icp=len(Q),n_wall=len(wall),
                 candidates=[dict(transform=transform(a['R'],a['t']-a['R']@c),inlier=a['inlier'],support=a['support'],inlier_v=a['inlier_v'],fitness=a['fitness'],fitness_v=a['fitness_v'],
                                  degen=a['degen'],rmse=a['rmse'],tilt_deg=a['tilt_deg'],why=bad(a,s)) for a,s in uniq],
-                search_mode='confirm_candidates' if use_hint else 'global',secs=time.monotonic()-tic,**metrics)
+                search_mode=('confirm_candidates' if use_hint else 'coarse_to_fine' if hasattr(M,'search_workers') and not g.get('fallback') else 'global'),
+                dense_fallback=g.get('fallback',False),secs=time.monotonic()-tic,**metrics)
 
 

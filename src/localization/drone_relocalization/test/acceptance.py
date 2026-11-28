@@ -10,8 +10,21 @@ from drone_relocalization.offline import startup
 
 
 def main():
-    a=argparse.ArgumentParser();a.add_argument('--out',required=True);args=a.parse_args();base=os.path.expanduser('~/test_data/mapping')
-    M=MapModel(base+'/20261018_194304_voxelslam');S=BagSession(base+'/flight_raw_000001.bag')
+    a = argparse.ArgumentParser()
+    a.add_argument('--out', required=True)
+    a.add_argument('--data', default='~/test_data/mapping')
+    a.add_argument('--pipeline', action='store_true')
+    a.add_argument('--search-workers', type=int, choices=(1, 2, 4))
+    args = a.parse_args()
+    base = os.path.expanduser(args.data)
+
+    def model(folder):
+        m = MapModel(folder)
+        if args.search_workers:
+            m.configure_search(args.search_workers)
+        return m
+
+    M=model(base+'/20261018_194304_voxelslam');S=BagSession(base+'/flight_raw_000001.bag')
     points=S.cloud(1,2);center,_=S.pose_at(S.t0+2);ref=relocalize(M,points,center)
     if not ref['ok']:raise RuntimeError('reference not trusted: '+ref['why'])
     R,t=unpack(ref);pmap=points@R.T+t;cmap=R@center+t;cases=[]
@@ -41,7 +54,7 @@ def main():
         room=np.concatenate(parts).astype('f4');cloud=room.copy();both=np.r_[room,room+[8,0,0]].astype('f4')
         mapio.write_pcd(d+'/map_world.pcd',both,np.zeros(len(both),'f4'))
         with open(d+'/meta.json','w') as f:json.dump(dict(floor=dict(height_m=.15,trusted=True)),f)
-        mm=MapModel(d);sym=relocalize(mm,cloud,np.array([.3,.2,1.]));symmetric=dict(passed=not sym['ok'],ok=sym['ok'],why=sym['why'],amb3d=sym.get('amb3d'),n_cand=sym.get('n_cand'))
+        mm=model(d);sym=relocalize(mm,cloud,np.array([.3,.2,1.]));symmetric=dict(passed=not sym['ok'],ok=sym['ok'],why=sym['why'],amb3d=sym.get('amb3d'),n_cand=sym.get('n_cand'))
         print('SYMMETRIC',symmetric,flush=True)
     # Historical failure windows must be rejected; no falling back from a stronger degenerate hypothesis.
     known_wrong=[]
@@ -54,7 +67,7 @@ def main():
         wrong.close()
     starts={}
     for name in ['20261018_192355/raw.bag','20261018_194304/raw.bag','flight_raw_000001.bag']:
-        ss=BagSession(base+'/'+name);starts[name]=startup(M,ss,1.);ss.close()
+        ss=BagSession(base+'/'+name);starts[name]=startup(M,ss,1.,**({'pipeline':True} if args.pipeline else {}));ss.close()
         print('STARTUP',name,starts[name]['ok'],starts[name]['elapsed_data_s'],starts[name]['why'],flush=True)
     output=dict(perturbations=cases,overtilt=overtilt,symmetric=symmetric,known_wrong=known_wrong,startup=starts,
                 max_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)

@@ -2,13 +2,23 @@
 """Actual ROS messages against an isolated master and a synthetic stationary sensor stream.
 No driver, FCU, rosbag play of vehicle topics, or hardware service is started.
 """
-import json,os,signal,subprocess,threading,time,xmlrpc.client
+import argparse,json,os,signal,subprocess,threading,time,xmlrpc.client
 from pathlib import Path
 import numpy as np
 
 
 def main():
-    out=Path.home()/'test_data/reloc_acceptance/20261020';out.mkdir(parents=True,exist_ok=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--out', type=Path, default=Path.home()/'test_data/reloc_acceptance/20261020')
+    parser.add_argument('--data', type=Path, default=Path.home()/'test_data/mapping')
+    parser.add_argument('--pipeline', action='store_true')
+    parser.add_argument('--search-workers', choices=('1', '2', '4'))
+    args = parser.parse_args()
+    opts = ['--pipeline'] if args.pipeline else []
+    if args.search_workers:
+        opts.extend(['--search-workers', args.search_workers])
+    out = args.out
+    out.mkdir(parents=True, exist_ok=True)
     os.environ['ROS_MASTER_URI']='http://127.0.0.1:11531';os.environ['ROS_IP']='127.0.0.1';os.environ.pop('ROS_HOSTNAME',None)
     # Refuse to reuse ANY existing master on this port.
     import socket
@@ -40,7 +50,7 @@ def main():
         from drone_relocalization.session import BagSession
         from drone_relocalization.geometry import quat_R,R_quat,unpack
         rospy.init_node('indoor_relocation_offline_test',disable_signals=True)
-        S=BagSession(str(Path.home()/'test_data/mapping/flight_raw_000001.bag'))
+        S=BagSession(str(args.data/'flight_raw_000001.bag'))
         cloud=(S.cloud(1,2)-S.twc)@S.Rwc;row=S.pose(S.t0+2)
         frames=[point_cloud2.create_cloud_xyz32(Header(frame_id='camera_init'),p.astype('f4').tolist()) for p in np.array_split(cloud,20)]
         pub_od=rospy.Publisher('/Odometry',Odometry,queue_size=10);pub_cl=rospy.Publisher('/cloud_registered',PointCloud2,queue_size=10)
@@ -87,7 +97,7 @@ def main():
             if fault=='legacy_names':tf2_ros.StaticTransformBroadcaster().sendTransform(legacy_tf)
             else:broadcaster.sendTransform(tf)
             node_log=open(str(out/('ros_'+fault+'.log')),'w')
-            node=subprocess.Popen(['rosrun','drone_relocalization','relocalize','--map',str(Path.home()/'test_data/mapping/20261018_194304_voxelslam'),'--save',''],stdout=node_log,stderr=subprocess.STDOUT,start_new_session=True)
+            node=subprocess.Popen(['rosrun','drone_relocalization','relocalize','--map',str(args.data/'20261018_194304_voxelslam'),'--save','',*opts],stdout=node_log,stderr=subprocess.STDOUT,start_new_session=True)
             deadline=time.monotonic()+65
             while time.monotonic()<deadline and not (state['status'] and state['status']['valid'] and state['poses'] and state['result']):
                 if node.poll() is not None:raise AssertionError('node exited: '+str(out/('ros_'+fault+'.log')))

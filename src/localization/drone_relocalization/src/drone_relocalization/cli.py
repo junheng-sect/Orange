@@ -33,6 +33,7 @@ def main(entry=None):
     p.add_argument('--eval',action='store_true');p.add_argument('--startup-eval',action='store_true')
     p.add_argument('--step',type=float,default=5.);p.add_argument('--yaw-perturb',action='store_true')
     p.add_argument('--window',type=float,default=None);p.add_argument('--tries',type=int,default=None)
+    p.add_argument('--search-workers', type=int, choices=(1, 2, 4), help='启用粗细搜索及候选并行')
     p.add_argument('--pipeline', action='store_true', help='巡检并行启动与双静止窗口缓冲')
     p.add_argument('--still-timeout',type=float,default=None)
     p.add_argument('--out',default='');p.add_argument('--save',default=os.path.expanduser('~/test_data/reloc'))
@@ -44,6 +45,8 @@ def main(entry=None):
     try:
         cfg=load(args.config or None,dict(window=args.window,tries=args.tries,timeout=args.still_timeout))
         M=MapModel(args.map,cfg)
+        if args.search_workers:
+            M.configure_search(args.search_workers)
         print('地图 %d 点%s，载入 %.2fs，cache=%s'%(len(M.P),'（起飞区 %g m 内裁图，起飞圆柱 r=%g m）'%(cfg['crop_radius'],cfg['zone_radius']) if cfg['crop_radius'] else '',M.load_s,M.cache_hit),flush=True)
         if not args.bag:
             from .runtime import online

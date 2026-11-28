@@ -355,9 +355,12 @@ nav_test_main() {
 # ---------------------------------------------------------------- 启动 ------
 nt_launch_reloc() {
   hr; log "步骤 3/4：重定位 + world map（第一个窗口算 6～12 s，第二个窗口确认 1～3 s）。继续别动"
-  local opts=()
-  if (( ${NT_PIPELINE:-0} )); then opts+=(--pipeline); fi
-  start_child "$PF_RELOC" "$NT_LOG_DIR/reloc.log" rosrun drone_relocalization relocalize --map "$MAP" --config "$RELOC_CONFIG" --save "$OUT" "${opts[@]}"
+  local opts=() launch=(rosrun)
+  if (( ${NT_PIPELINE:-0} )); then
+    opts+=(--pipeline --search-workers 4)
+    launch=(env OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 rosrun)
+  fi
+  start_child "$PF_RELOC" "$NT_LOG_DIR/reloc.log" "${launch[@]}" drone_relocalization relocalize --map "$MAP" --config "$RELOC_CONFIG" --save "$OUT" "${opts[@]}"
   if [ -n "$MAP_FRAME" ]; then start_child "$PF_CAR" "$NT_LOG_DIR/car_bridge.log" roslaunch car_bridge car_bridge.launch drone_map:="$MAP" frames:="$MAP_FRAME"; fi
 }
 
